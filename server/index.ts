@@ -1,5 +1,8 @@
 import cors from "cors";
 import express from "express";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { port } from "./config";
 import {
   addAdUserToGroup,
@@ -55,18 +58,24 @@ import {
 } from "./ipInventoryClient";
 
 const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const distDir = path.resolve(__dirname, "../dist");
 
-function isAllowedDevOrigin(origin?: string) {
+function isAllowedOrigin(origin?: string) {
   if (!origin) return true;
 
   try {
     const url = new URL(origin);
     const hostname = url.hostname;
-    const isDevPort = url.port === "5173";
     const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
     const isPrivateIp = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(hostname);
+    const configuredOrigins = (process.env.CORS_ORIGINS || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
 
-    return isDevPort && (isLocalhost || isPrivateIp);
+    return configuredOrigins.includes(origin) || isLocalhost || isPrivateIp;
   } catch {
     return false;
   }
@@ -74,7 +83,7 @@ function isAllowedDevOrigin(origin?: string) {
 
 app.use(cors({
   origin(origin, callback) {
-    callback(null, isAllowedDevOrigin(origin));
+    callback(null, isAllowedOrigin(origin));
   },
 }));
 app.use(express.json());
@@ -227,6 +236,13 @@ app.patch("/api/ips/categories", asyncRoute((req) => renameIpCategory(req.body |
 app.patch("/api/ips/:id", asyncRoute((req) => updateIp(String(req.params.id), req.body || {})));
 app.delete("/api/ips/:id", asyncRoute((req) => deleteIp(String(req.params.id))));
 
+if (existsSync(distDir)) {
+  app.use(express.static(distDir));
+  app.get(/^\/(?!api(?:\/|$)).*/, (_req, res) => {
+    res.sendFile(path.join(distDir, "index.html"));
+  });
+}
+
 app.listen(port, () => {
-  console.log(`Rede Clube API em http://127.0.0.1:${port}`);
+  console.log(`Rede Clube portal em http://0.0.0.0:${port}`);
 });

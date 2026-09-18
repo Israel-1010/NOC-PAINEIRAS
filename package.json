@@ -8,6 +8,7 @@
     "dev:web": "vite --host 0.0.0.0 --port 5173",
     "dev": "concurrently \"npm run api\" \"npm run dev:web\"",
     "build": "tsc && vite build",
+    "start": "tsx server/index.ts",
     "preview": "vite preview --host 0.0.0.1"
   },
   "keywords": [],

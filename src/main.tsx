@@ -504,8 +504,7 @@ type AuthSession = {
 };
 
 function getApiBase() {
-  const { protocol, hostname } = window.location;
-  return `${protocol}//${hostname}:3333`;
+  return (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 }
 
 const API_BASE = getApiBase();
