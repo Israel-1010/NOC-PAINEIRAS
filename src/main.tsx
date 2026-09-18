@@ -14,6 +14,8 @@ import {
   LogOut,
   Monitor,
   Network,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RefreshCw,
   RadioTower,
@@ -511,6 +513,7 @@ const API_BASE = getApiBase();
 const AUTH_STORAGE_KEY = "rede-clube-session";
 const AUTH_EXPIRED_EVENT = "rede-clube-auth-expired";
 const ACTIVE_VIEW_STORAGE_KEY = "rede-clube-active-view";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "rede-clube-sidebar-collapsed";
 const AD_UPN_SUFFIX = "clubepaineiras.com.br";
 
 function getStoredView(): View {
@@ -529,6 +532,14 @@ function getStoredSession() {
     return raw ? (JSON.parse(raw) as AuthSession) : null;
   } catch {
     return null;
+  }
+}
+
+function getStoredSidebarCollapsed() {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
   }
 }
 
@@ -918,6 +929,7 @@ async function parseApiPayload<T>(response: Response, fallback: T) {
 
 function App() {
   const [activeView, setActiveView] = useState<View>(() => getStoredView());
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => getStoredSidebarCollapsed());
   const [session, setSession] = useState<AuthSession | null>(() => getStoredSession());
   const [adSummaryState, setAdSummaryState] = useState<AdSummary>(fallbackAdSummary);
   const [adDetails, setAdDetails] = useState<AdDetails>(fallbackAdDetails);
@@ -1210,21 +1222,36 @@ function App() {
     window.localStorage.setItem(ACTIVE_VIEW_STORAGE_KEY, activeView);
   }, [activeView]);
 
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
   if (!session) {
     return <LoginPage onLogin={handleLogin} />;
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar" aria-label="Navegacao principal">
-        <div className="brand">
-          <div className="brand-mark">
-            <Network size={24} strokeWidth={2.2} />
+        <div className="sidebar-head">
+          <div className="brand">
+            <div className="brand-mark">
+              <Network size={24} strokeWidth={2.2} />
+            </div>
+            <div>
+              <strong>Rede Clube</strong>
+              <span>NOC interno</span>
+            </div>
           </div>
-          <div>
-            <strong>Rede Clube</strong>
-            <span>NOC interno</span>
-          </div>
+          <button
+            className="sidebar-toggle"
+            type="button"
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            title={sidebarCollapsed ? "Expandir menu" : "Recolher menu"}
+            aria-label={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
         </div>
 
         <nav className="nav-list">
