@@ -391,8 +391,9 @@ async function findUserIdentityEntry(client: Client, identity: string, attribute
     return findUserByDn(client, trimmed, attributes);
   }
 
-  const safeIdentity = ldapFilterEscape(trimmed);
-  const filter = `(&(objectCategory=person)(objectClass=user)(|(sAMAccountName=${safeIdentity})(employeeID=${safeIdentity})(employeeNumber=${safeIdentity})))`;
+  const lookupIdentity = trimmed.includes("@") ? trimmed : trimmed.includes("\\") ? trimmed.split("\\").pop() || trimmed : trimmed;
+  const safeIdentity = ldapFilterEscape(lookupIdentity);
+  const filter = `(&(objectCategory=person)(objectClass=user)(|(sAMAccountName=${safeIdentity})(userPrincipalName=${safeIdentity})(mail=${safeIdentity})(employeeID=${safeIdentity})(employeeNumber=${safeIdentity})))`;
   const entries = await search(client, adConfig.usersBaseDn || adConfig.baseDn!, filter, attributes, 2);
 
   if (!entries.length) {
@@ -404,6 +405,15 @@ async function findUserIdentityEntry(client: Client, identity: string, attribute
   }
 
   return entries[0];
+}
+
+async function bindAsUser(bindIdentity: string, password: string) {
+  const client = createClient();
+  try {
+    await client.bind(bindIdentity, password);
+  } finally {
+    await client.unbind().catch(() => undefined);
+  }
 }
 
 async function ensureUserDoesNotExist(client: Client, samAccountName: string) {
@@ -540,27 +550,69 @@ export async function authenticateAdUser(login: string, password: string, domain
 
   const candidates = getLoginBindCandidates(login, domain);
   let authenticatedBind = "";
+  let resolvedEntry: Entry | null = null;
+  let fallbackLookupReached = false;
   let lastError: unknown;
 
   for (const candidate of candidates) {
-    const client = createClient();
     try {
-      await client.bind(candidate, password);
+      await bindAsUser(candidate, password);
       authenticatedBind = candidate;
-      await client.unbind().catch(() => undefined);
       break;
     } catch (error) {
       lastError = error;
-      await client.unbind().catch(() => undefined);
     }
   }
 
   if (!authenticatedBind) {
-    throw lastError instanceof Error ? lastError : new Error("Falha ao autenticar no AD.");
+    try {
+      resolvedEntry = await withClient((client) => {
+        fallbackLookupReached = true;
+        return findUserIdentityEntry(client, login, [
+          "cn",
+          "displayName",
+          "sAMAccountName",
+          "department",
+          "distinguishedName",
+        ]);
+      });
+
+      const userDn = String(firstAttr(resolvedEntry, "distinguishedName") || "");
+      if (!userDn) {
+        throw new Error(`Usuario ${login} encontrado sem Distinguished Name.`);
+      }
+
+      await bindAsUser(userDn, password);
+      authenticatedBind = userDn;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!authenticatedBind) {
+    const message = lastError instanceof Error ? lastError.message : "";
+    if (!fallbackLookupReached && lastError instanceof Error) {
+      throw lastError;
+    }
+
+    if (message.includes("nao encontrado no AD")) {
+      throw lastError instanceof Error ? lastError : new Error("Usuario nao encontrado no AD.");
+    }
+
+    throw new Error("Registro ou senha invalidos. Se digitou o registro, confirme se ele esta preenchido em employeeID ou employeeNumber no AD.");
   }
 
   const lookupLogin = login.includes("@") ? login.split("@")[0] : login.includes("\\") ? login.split("\\").pop() || login : login;
   const authenticatedDomain = authenticatedBind.includes("@") ? authenticatedBind.split("@").pop() || "" : domain || "";
+
+  if (resolvedEntry) {
+    return {
+      login: String(firstAttr(resolvedEntry, "sAMAccountName") || lookupLogin),
+      name: String(firstAttr(resolvedEntry, "displayName") || firstAttr(resolvedEntry, "cn") || lookupLogin),
+      domain: authenticatedDomain || domainFromBaseDn() || "",
+      department: String(firstAttr(resolvedEntry, "department") || ""),
+    };
+  }
 
   let details: Awaited<ReturnType<typeof resolveAdUserIdentity>> | null = null;
   try {
