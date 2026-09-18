@@ -8,6 +8,7 @@ import {
   addAdUserToGroup,
   authenticateAdUser,
   createAdUser,
+  deleteAdComputer,
   getAdStatus,
   getAdComputerDetails,
   getAdSummary,
@@ -244,6 +245,7 @@ app.patch(
   "/api/ad/computers/:identity/ou",
   asyncRoute((req) => moveAdComputerToOu(String(req.params.identity), String(req.body?.targetOu || ""))),
 );
+app.delete("/api/ad/computers/:identity", asyncRoute((req) => deleteAdComputer(String(req.params.identity))));
 app.get("/api/ad/groups", asyncRoute((req) => listAdGroups(String(req.query.search || ""), String(req.query.limit || ""))));
 app.get("/api/ad/ous", asyncRoute((req) => listAdOrganizationalUnits(String(req.query.search || ""), String(req.query.limit || 500))));
 app.get("/api/ad/lockouts", asyncRoute((req) => listLockedUsers(String(req.query.limit || ""))));

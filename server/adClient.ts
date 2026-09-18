@@ -1293,6 +1293,32 @@ export async function moveAdComputerToOu(identity: string, targetOu: string) {
   });
 }
 
+export async function deleteAdComputer(identity: string) {
+  if (adConfig.useMock || !isAdConfigured()) {
+    clearAdCache();
+    return {
+      ok: true,
+      source: "mock",
+      message: `Maquina ${identity} removida no modo mock.`,
+    };
+  }
+
+  return withClient(async (client) => {
+    const computer = await findComputerEntry(client, identity, ["cn", "distinguishedName"]);
+    const computerName = String(firstAttr(computer, "cn") || identity);
+    const computerDn = String(firstAttr(computer, "distinguishedName"));
+
+    await client.del(computerDn);
+    clearAdCache();
+
+    return {
+      ok: true,
+      source: "ldap",
+      message: `Maquina ${computerName} removida do Active Directory.`,
+    };
+  });
+}
+
 export async function listAdGroups(query = "", limit?: string | number) {
   if (adConfig.useMock || !isAdConfigured()) {
     return { source: "mock", items: mockGroups };

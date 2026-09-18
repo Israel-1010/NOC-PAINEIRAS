@@ -5091,6 +5091,28 @@ function ComputerDetailsModal({
     });
   }
 
+  async function removeComputer() {
+    if (!currentDetails) return;
+
+    const computerName = currentDetails.profile.cn || computer.cn;
+    const typedName = window.prompt(`Digite ${computerName} para remover esta maquina do Active Directory.`);
+
+    if (typedName === null) return;
+
+    if (typedName.trim().toLowerCase() !== computerName.toLowerCase()) {
+      setActionError("Remocao cancelada: o nome digitado nao confere com a maquina.");
+      return;
+    }
+
+    await runComputerAction("delete-computer", async () => {
+      await adRequest<{ ok: boolean; message: string }>(`/api/ad/computers/${encodeURIComponent(computerName)}`, {
+        method: "DELETE",
+      });
+      await onRefreshAd();
+      onClose();
+    });
+  }
+
   async function runComputerAction(action: string, callback: () => Promise<void>) {
     setActionLoading(action);
     setActionError("");
@@ -5213,6 +5235,17 @@ function ComputerDetailsModal({
               ) : (
                 <EmptyState title="Sem SPNs" detail="Nenhum Service Principal Name retornado." />
               )}
+            </section>
+
+            <section className="modal-section modal-section-wide">
+              <h3>Acoes de risco</h3>
+              <p className="dn-text">Remove o objeto da maquina do Active Directory. Use somente quando o equipamento saiu do dominio ou sera recriado.</p>
+              <div className="modal-footer-actions">
+                <button className="danger-action" type="button" onClick={removeComputer} disabled={Boolean(actionLoading)}>
+                  <Trash2 size={16} />
+                  {actionLoading === "delete-computer" ? "Removendo" : "Remover do AD"}
+                </button>
+              </div>
             </section>
           </div>
         ) : null}
