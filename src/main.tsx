@@ -1226,6 +1226,12 @@ function App() {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
+  useEffect(() => {
+    if (activeView === "milvusPortal") {
+      setSidebarCollapsed(true);
+    }
+  }, [activeView]);
+
   if (!session) {
     return <LoginPage onLogin={handleLogin} />;
   }
