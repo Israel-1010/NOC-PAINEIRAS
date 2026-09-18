@@ -1629,6 +1629,10 @@ function AdDashboard({
   }
 
   function closeCreateUserModal() {
+    if (isCreateUserFormDirty(createUserForm) && !window.confirm("Fechar a criacao de usuario? Os dados preenchidos ainda nao foram salvos.")) {
+      return;
+    }
+
     setCreateUserOpen(false);
   }
 
@@ -3007,8 +3011,8 @@ function CreateUserModal({
   ] as const;
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Criar usuario do AD" onClick={onClose}>
-      <div className="user-modal create-user-modal" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Criar usuario do AD">
+      <div className="user-modal create-user-modal">
         <header className="modal-header">
           <div>
             <p className="eyebrow">Provisionamento AD</p>
@@ -3284,8 +3288,8 @@ function AddUserToGroupModal({
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Adicionar usuario em grupo" onClick={onClose}>
-      <div className="user-modal groups-modal" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Adicionar usuario em grupo">
+      <div className="user-modal groups-modal">
         <header className="modal-header">
           <div>
             <p className="eyebrow">Provisionamento AD</p>
@@ -3380,8 +3384,8 @@ function GroupsDirectoryModal({ groups, onClose }: { groups: ApiAdGroup[]; onClo
   }, [onClose]);
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Listar grupos do AD" onClick={onClose}>
-      <div className="user-modal groups-modal" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Listar grupos do AD">
+      <div className="user-modal groups-modal">
         <header className="modal-header">
           <div>
             <p className="eyebrow">Grupos do AD</p>
@@ -4826,8 +4830,8 @@ function UserDetailsModal({
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Detalhes do usuario" onClick={onClose}>
-      <div className="user-modal" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Detalhes do usuario">
+      <div className="user-modal">
         <header className="modal-header">
           <div>
             <p className="eyebrow">Ficha do usuario</p>
@@ -5102,8 +5106,8 @@ function ComputerDetailsModal({
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Detalhes da maquina" onClick={onClose}>
-      <div className="user-modal" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Detalhes da maquina">
+      <div className="user-modal">
         <header className="modal-header">
           <div>
             <p className="eyebrow">Ficha da maquina</p>
@@ -5270,6 +5274,13 @@ function emptyCreateUserForm(): CreateUserForm {
     homeDirectory: "",
     homeDrive: "",
   };
+}
+
+function isCreateUserFormDirty(form: CreateUserForm) {
+  return Object.entries(form).some(([key, value]) => {
+    if (key === "enableOnCreate") return false;
+    return String(value || "").trim() !== "";
+  });
 }
 
 function emptyCreateTicketForm(user: AuthUser): CreateTicketForm {
