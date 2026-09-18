@@ -8,6 +8,7 @@ export type AdConfig = {
   baseDn?: string;
   bindDn?: string;
   bindPassword?: string;
+  netbiosDomain?: string;
   usersBaseDn?: string;
   computersBaseDn?: string;
   groupsBaseDn?: string;
@@ -44,6 +45,7 @@ export const adConfig: AdConfig = {
   baseDn: process.env.AD_BASE_DN,
   bindDn: process.env.AD_BIND_DN,
   bindPassword: process.env.AD_BIND_PASSWORD,
+  netbiosDomain: process.env.AD_NETBIOS_DOMAIN,
   usersBaseDn: process.env.AD_USERS_BASE_DN,
   computersBaseDn: process.env.AD_COMPUTERS_BASE_DN,
   groupsBaseDn: process.env.AD_GROUPS_BASE_DN,

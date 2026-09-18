@@ -197,6 +197,18 @@ function getConfiguredDomains() {
   });
 }
 
+function netbiosDomainFromConfig() {
+  const configured = adConfig.netbiosDomain?.trim();
+  if (configured) return configured;
+
+  const bindDn = adConfig.bindDn || "";
+  if (bindDn.includes("\\")) {
+    return bindDn.split("\\")[0];
+  }
+
+  return "";
+}
+
 function getSearchLimit(limit?: string | number) {
   const parsed = Number(limit || 25);
   if (!Number.isFinite(parsed)) return 25;
@@ -289,7 +301,11 @@ function getLoginBindCandidates(login: string, domain?: string) {
 
   const domains = getConfiguredDomains().map((item) => item.name);
   const preferred = domain ? [domain] : [];
-  return Array.from(new Set([...preferred, ...domains])).map((item) => `${trimmed}@${item}`);
+  const upnCandidates = Array.from(new Set([...preferred, ...domains])).map((item) => `${trimmed}@${item}`);
+  const netbiosDomain = netbiosDomainFromConfig();
+  const legacyCandidate = netbiosDomain ? [`${netbiosDomain}\\${trimmed}`] : [];
+
+  return Array.from(new Set([...legacyCandidate, ...upnCandidates]));
 }
 
 async function withClient<T>(callback: (client: Client) => Promise<T>) {
@@ -582,8 +598,23 @@ export async function authenticateAdUser(login: string, password: string, domain
         throw new Error(`Usuario ${login} encontrado sem Distinguished Name.`);
       }
 
-      await bindAsUser(userDn, password);
-      authenticatedBind = userDn;
+      const resolvedSam = String(firstAttr(resolvedEntry, "sAMAccountName") || "");
+      const resolvedCandidates = resolvedSam ? [...getLoginBindCandidates(resolvedSam, domain), userDn] : [userDn];
+      let resolvedLastError: unknown;
+
+      for (const candidate of Array.from(new Set(resolvedCandidates))) {
+        try {
+          await bindAsUser(candidate, password);
+          authenticatedBind = candidate;
+          break;
+        } catch (error) {
+          resolvedLastError = error;
+        }
+      }
+
+      if (!authenticatedBind && resolvedLastError) {
+        throw resolvedLastError;
+      }
     } catch (error) {
       lastError = error;
     }
