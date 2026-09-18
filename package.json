@@ -9,6 +9,7 @@
     "dev": "concurrently \"npm run api\" \"npm run dev:web\"",
     "build": "tsc && vite build",
     "start": "tsx server/index.ts",
+    "container": "npm run build && npm start",
     "preview": "vite preview --host 0.0.0.1"
   },
   "keywords": [],
