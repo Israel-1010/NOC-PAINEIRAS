@@ -1,0 +1,40 @@
+{
+  "name": "rede-clube",
+  "version": "1.0.0",
+  "description": "Painel NOC Rede Clube com dados mockados para evoluir integracoes UniFi e Fortinet.",
+  "main": "index.js",
+  "scripts": {
+    "api": "tsx watch server/index.ts",
+    "dev:web": "vite --host 0.0.0.0 --port 5173",
+    "dev": "concurrently \"npm run api\" \"npm run dev:web\"",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "ldapts": "^9.0.0",
+    "lucide-react": "^1.46.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "recharts": "^3.10.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}
