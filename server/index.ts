@@ -3,7 +3,7 @@ import express from "express";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { port } from "./config";
+import { adConfig, isAdConfigured, port } from "./config";
 import {
   addAdUserToGroup,
   authenticateAdUser,
@@ -127,6 +127,59 @@ function formatApiError(error: unknown) {
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "rede-clube-api" });
+});
+
+app.get("/api/diagnostics/ad", async (_req, res) => {
+  let urlInfo = { protocol: "", host: "", port: "" };
+
+  try {
+    const parsedUrl = adConfig.url ? new URL(adConfig.url) : null;
+    if (parsedUrl) {
+      urlInfo = {
+        protocol: parsedUrl.protocol.replace(":", ""),
+        host: parsedUrl.hostname,
+        port: parsedUrl.port || (parsedUrl.protocol === "ldaps:" ? "636" : "389"),
+      };
+    }
+  } catch {
+    urlInfo = { protocol: "invalido", host: "", port: "" };
+  }
+
+  const diagnostics = {
+    ok: false,
+    configured: isAdConfigured(),
+    useMock: adConfig.useMock,
+    url: urlInfo,
+    hasBaseDn: Boolean(adConfig.baseDn),
+    hasBindDn: Boolean(adConfig.bindDn),
+    hasBindPassword: Boolean(adConfig.bindPassword),
+    netbiosDomain: adConfig.netbiosDomain || "",
+    extraDomains: adConfig.extraDomains,
+    tlsRejectUnauthorized: adConfig.tlsRejectUnauthorized,
+    message: "",
+  };
+
+  if (adConfig.useMock || !isAdConfigured()) {
+    res.status(200).json({
+      ...diagnostics,
+      message: "AD incompleto ou em modo mock no ambiente atual do servidor.",
+    });
+    return;
+  }
+
+  try {
+    const status = await getAdStatus();
+    res.json({
+      ...diagnostics,
+      ok: status.ok,
+      message: status.message,
+    });
+  } catch (error) {
+    res.status(500).json({
+      ...diagnostics,
+      message: formatApiError(error),
+    });
+  }
 });
 
 app.post("/api/auth/login", async (req, res) => {
