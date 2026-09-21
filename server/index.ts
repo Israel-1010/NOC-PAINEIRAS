@@ -1,7 +1,9 @@
 import cors from "cors";
 import express from "express";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { adConfig, isAdConfigured, port } from "./config";
 import {
@@ -62,6 +64,7 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distDir = path.resolve(__dirname, "../dist");
+const execFileAsync = promisify(execFile);
 
 function isAllowedOrigin(origin?: string) {
   if (!origin) return true;
@@ -124,6 +127,42 @@ function formatApiError(error: unknown) {
   }
 
   return message.replace(/\u0000/g, "");
+}
+
+function parsePingLatency(output: string) {
+  const match = /time[=<]\s*(\d+(?:[.,]\d+)?)\s*ms/i.exec(output) || /tempo[=<]\s*(\d+(?:[.,]\d+)?)\s*ms/i.exec(output);
+  return match ? Number(match[1].replace(",", ".")) : null;
+}
+
+async function pingHost(ip: string) {
+  const host = ip.trim();
+  if (!/^[a-zA-Z0-9.-]+$/.test(host)) {
+    return { ip: host, ok: false, latencyMs: null, checkedAt: new Date().toISOString(), message: "IP ou host invalido." };
+  }
+
+  const args = process.platform === "win32"
+    ? ["-n", "1", "-w", "1000", host]
+    : ["-c", "1", "-W", "1", host];
+
+  try {
+    const { stdout } = await execFileAsync("ping", args, { timeout: 2500 });
+    return {
+      ip: host,
+      ok: true,
+      latencyMs: parsePingLatency(stdout),
+      checkedAt: new Date().toISOString(),
+      message: "Online",
+    };
+  } catch (error) {
+    const output = error && typeof error === "object" && "stdout" in error ? String((error as { stdout?: unknown }).stdout || "") : "";
+    return {
+      ip: host,
+      ok: false,
+      latencyMs: parsePingLatency(output),
+      checkedAt: new Date().toISOString(),
+      message: "Sem resposta ao ping",
+    };
+  }
 }
 
 app.get("/api/health", (_req, res) => {
@@ -290,6 +329,14 @@ app.post("/api/ips/reimport", asyncRoute(() => reimportIps()));
 app.patch("/api/ips/categories", asyncRoute((req) => renameIpCategory(req.body || {})));
 app.patch("/api/ips/:id", asyncRoute((req) => updateIp(String(req.params.id), req.body || {})));
 app.delete("/api/ips/:id", asyncRoute((req) => deleteIp(String(req.params.id))));
+
+app.use("/api/topology", requireAuth);
+app.post("/api/topology/ping", asyncRoute(async (req) => {
+  const ips: unknown[] = Array.isArray(req.body?.ips) ? req.body.ips : [];
+  const uniqueIps = (Array.from(new Set(ips.map((ip: unknown) => String(ip || "").trim()).filter(Boolean))) as string[]).slice(0, 100);
+  const items = await Promise.all(uniqueIps.map((ip) => pingHost(ip)));
+  return { ok: true, items };
+}));
 
 if (existsSync(distDir)) {
   app.use(express.static(distDir));

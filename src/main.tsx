@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
   Activity,
@@ -379,6 +379,14 @@ type TopologyState = {
   networks: TopologyNetwork[];
   nodes: TopologyNode[];
   links: TopologyLink[];
+};
+
+type TopologyPingResult = {
+  ip: string;
+  ok: boolean;
+  latencyMs: number | null;
+  checkedAt: string;
+  message: string;
 };
 
 type AdUserDetails = {
@@ -1626,13 +1634,48 @@ function TopologyDashboard({
   ipDetails: IpDetails;
   onRefreshIps: () => Promise<void>;
 }) {
+  const mapRef = useRef<HTMLDivElement | null>(null);
   const [networkForm, setNetworkForm] = useState<TopologyNetwork>(emptyTopologyNetwork());
   const [nodeForm, setNodeForm] = useState<TopologyNode>(emptyTopologyNode());
-  const [linkForm, setLinkForm] = useState<TopologyLink>(emptyTopologyLink(topology.nodes));
+  const [activePanel, setActivePanel] = useState<"network" | "node" | "inventory" | "monitor" | null>(null);
+  const [linkMode, setLinkMode] = useState(false);
+  const [linkMedium, setLinkMedium] = useState<TopologyLink["medium"]>("fibra");
+  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [draggingNodeId, setDraggingNodeId] = useState("");
+  const [pingResults, setPingResults] = useState<Record<string, TopologyPingResult>>({});
+  const [pingLoading, setPingLoading] = useState(false);
+  const [pingError, setPingError] = useState("");
   const ipByAddress = new Map(ipDetails.items.map((item) => [item.ip, item]));
   const monitoredNodes = topology.nodes.filter((node) => node.ip);
-  const onlineNodes = monitoredNodes.filter((node) => topologyNodeStatus(node, ipByAddress).tone === "online").length;
-  const unifiNodes = topology.nodes.filter((node) => node.vendor.toLowerCase().includes("unifi")).length;
+  const onlineNodes = monitoredNodes.filter((node) => topologyNodeStatus(node, ipByAddress, pingResults).tone === "online").length;
+  const ipSignature = monitoredNodes.map((node) => node.ip).sort().join("|");
+
+  async function refreshTopologyPing() {
+    const ips = monitoredNodes.map((node) => node.ip).filter(Boolean);
+    if (!ips.length) return;
+
+    setPingLoading(true);
+    setPingError("");
+
+    try {
+      const payload = await adRequest<{ items: TopologyPingResult[] }>("/api/topology/ping", {
+        method: "POST",
+        body: { ips },
+      });
+      setPingResults(Object.fromEntries((payload.items || []).map((item) => [item.ip, item])));
+      await onRefreshIps();
+    } catch (error) {
+      setPingError(error instanceof Error ? error.message : "Nao foi possivel executar ping.");
+    } finally {
+      setPingLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshTopologyPing();
+    const interval = window.setInterval(refreshTopologyPing, 10000);
+    return () => window.clearInterval(interval);
+  }, [ipSignature]);
 
   function addNetwork(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1643,6 +1686,7 @@ function TopologyDashboard({
       networks: [...current.networks, { ...networkForm, id: makeTopologyId("net") }],
     }));
     setNetworkForm(emptyTopologyNetwork());
+    setActivePanel(null);
   }
 
   function addNode(event: React.FormEvent<HTMLFormElement>) {
@@ -1654,17 +1698,7 @@ function TopologyDashboard({
       nodes: [...current.nodes, { ...nodeForm, id: makeTopologyId("node") }],
     }));
     setNodeForm(emptyTopologyNode());
-  }
-
-  function addLink(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!linkForm.from || !linkForm.to || linkForm.from === linkForm.to) return;
-
-    onChange((current) => ({
-      ...current,
-      links: [...current.links, { ...linkForm, id: makeTopologyId("link") }],
-    }));
-    setLinkForm(emptyTopologyLink(topology.nodes));
+    setActivePanel(null);
   }
 
   function removeNetwork(id: string) {
@@ -1689,158 +1723,238 @@ function TopologyDashboard({
     }));
   }
 
+  function updateNodePosition(nodeId: string, clientX: number, clientY: number) {
+    const rect = mapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const x = Math.max(4, Math.min(96, ((clientX - rect.left) / rect.width) * 100));
+    const y = Math.max(5, Math.min(95, ((clientY - rect.top) / rect.height) * 100));
+
+    onChange((current) => ({
+      ...current,
+      nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 } : node),
+    }));
+  }
+
+  function handleNodeClick(node: TopologyNode) {
+    if (!linkMode) return;
+
+    if (!selectedNodeId) {
+      setSelectedNodeId(node.id);
+      return;
+    }
+
+    if (selectedNodeId === node.id) {
+      setSelectedNodeId("");
+      return;
+    }
+
+    const fromNode = topology.nodes.find((item) => item.id === selectedNodeId);
+    const label = linkMedium === "fibra" ? "Fibra" : linkMedium === "wan" ? "WAN" : linkMedium === "utp" ? "Cabo de rede" : "Trunk";
+
+    onChange((current) => ({
+      ...current,
+      links: [
+        ...current.links,
+        {
+          id: makeTopologyId("link"),
+          from: selectedNodeId,
+          to: node.id,
+          label: fromNode ? `${label}: ${fromNode.name} / ${node.name}` : label,
+          medium: linkMedium,
+        },
+      ],
+    }));
+    setSelectedNodeId("");
+  }
+
+  function handleNodePointerDown(event: React.PointerEvent<HTMLButtonElement>, node: TopologyNode) {
+    if (linkMode) return;
+    setDraggingNodeId(node.id);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleNodePointerMove(event: React.PointerEvent<HTMLButtonElement>, node: TopologyNode) {
+    if (draggingNodeId !== node.id || linkMode) return;
+    updateNodePosition(node.id, event.clientX, event.clientY);
+  }
+
+  function handleNodePointerUp(event: React.PointerEvent<HTMLButtonElement>) {
+    if (draggingNodeId) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDraggingNodeId("");
+  }
+
   return (
-    <section className="topology-page">
-      <div className="topology-kpis">
-        <MetricCard icon={Network} label="Redes" value={String(topology.networks.length)} detail="sub-redes no desenho" tone="good" />
-        <MetricCard icon={Router} label="Equipamentos" value={String(topology.nodes.length)} detail={`${unifiNodes} UniFi`} tone="calm" />
-        <MetricCard icon={Activity} label="IPs monitorados" value={`${onlineNodes}/${monitoredNodes.length}`} detail="baseado no inventario" tone={onlineNodes === monitoredNodes.length ? "good" : "warn"} />
-        <MetricCard icon={Zap} label="Ligacoes" value={String(topology.links.length)} detail="fibra, trunk, WAN e UTP" tone="calm" />
+    <section className="topology-page topology-canvas-page">
+      <div className="topology-toolbar">
+        <div className="topology-toolbar-group">
+          <button className="primary-action" type="button" onClick={() => setActivePanel("node")}>
+            <Plus size={16} />
+            Equipamento
+          </button>
+          <button className="secondary-action" type="button" onClick={() => setActivePanel("network")}>
+            <Network size={16} />
+            Rede
+          </button>
+          <button className={linkMode ? "primary-action" : "secondary-action"} type="button" onClick={() => {
+            setLinkMode((value) => !value);
+            setSelectedNodeId("");
+          }}>
+            <Zap size={16} />
+            Ligar
+          </button>
+          <select className="topology-medium-select" value={linkMedium} onChange={(event) => setLinkMedium(event.target.value as TopologyLink["medium"])} disabled={!linkMode}>
+            <option value="fibra">Fibra</option>
+            <option value="utp">Cabo de rede</option>
+            <option value="trunk">Trunk</option>
+            <option value="wan">WAN</option>
+          </select>
+        </div>
+        <div className="topology-toolbar-group">
+          <span className="topology-live-pill">{onlineNodes}/{monitoredNodes.length} online</span>
+          {pingError ? <span className="topology-error-pill">{pingError}</span> : null}
+          <button className="secondary-action" type="button" onClick={refreshTopologyPing} disabled={pingLoading}>
+            <RefreshCw size={16} />
+            {pingLoading ? "Pingando" : "Ping agora"}
+          </button>
+          <button className="secondary-action" type="button" onClick={() => setActivePanel("monitor")}>
+            <Activity size={16} />
+            Monitor
+          </button>
+          <button className="secondary-action" type="button" onClick={() => setActivePanel("inventory")}>
+            <Server size={16} />
+            Inventario
+          </button>
+        </div>
       </div>
 
-      <div className="topology-layout">
-        <article className="panel topology-map-panel">
-          <PanelHeader icon={Network} title="Mapa de topologia" meta="UniFi API pronta para conectar" />
-          <div className="topology-map" aria-label="Mapa visual da topologia">
-            <svg className="topology-links" viewBox="0 0 100 100" preserveAspectRatio="none">
-              {topology.links.map((link) => {
-                const from = topology.nodes.find((node) => node.id === link.from);
-                const to = topology.nodes.find((node) => node.id === link.to);
-                if (!from || !to) return null;
+      <div className={`topology-map topology-map-full ${linkMode ? "link-mode" : ""}`} ref={mapRef} aria-label="Mapa visual da topologia">
+        <svg className="topology-links" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {topology.links.map((link) => {
+            const from = topology.nodes.find((node) => node.id === link.from);
+            const to = topology.nodes.find((node) => node.id === link.to);
+            if (!from || !to) return null;
+            return <line key={link.id} className={`topology-line ${link.medium}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+          })}
+        </svg>
+
+        {topology.links.map((link) => {
+          const from = topology.nodes.find((node) => node.id === link.from);
+          const to = topology.nodes.find((node) => node.id === link.to);
+          if (!from || !to) return null;
+          return (
+            <span className={`topology-link-label ${link.medium}`} key={`${link.id}-label`} style={{ left: `${(from.x + to.x) / 2}%`, top: `${(from.y + to.y) / 2}%` }}>
+              {link.medium === "utp" ? "Cabo" : link.medium}
+            </span>
+          );
+        })}
+
+        {topology.nodes.map((node) => {
+          const status = topologyNodeStatus(node, ipByAddress, pingResults);
+          const Icon = topologyNodeIcon(node.type);
+          const isSelected = selectedNodeId === node.id;
+          return (
+            <button
+              className={`topology-node ${status.tone} ${isSelected ? "selected" : ""}`}
+              key={node.id}
+              style={{ left: `${node.x}%`, top: `${node.y}%` }}
+              type="button"
+              title={`${node.name} - ${status.label}`}
+              onClick={() => handleNodeClick(node)}
+              onPointerDown={(event) => handleNodePointerDown(event, node)}
+              onPointerMove={(event) => handleNodePointerMove(event, node)}
+              onPointerUp={handleNodePointerUp}
+            >
+              <Icon size={20} />
+              <strong>{node.name}</strong>
+              <span>{node.ip || node.vendor}</span>
+              <small>{status.label}</small>
+            </button>
+          );
+        })}
+
+        <div className="topology-canvas-hint">
+          {linkMode ? (selectedNodeId ? "Clique no destino para concluir a ligacao." : "Clique no equipamento de origem.") : "Arraste os equipamentos para organizar o mapa."}
+        </div>
+      </div>
+
+      {activePanel ? (
+        <div className="topology-drawer">
+          <header className="modal-header">
+            <div>
+              <p className="eyebrow">Topologia</p>
+              <h2>{activePanel === "node" ? "Adicionar equipamento" : activePanel === "network" ? "Adicionar rede" : activePanel === "monitor" ? "Monitoramento de IP" : "Inventario"}</h2>
+            </div>
+            <button className="icon-button" type="button" onClick={() => setActivePanel(null)} aria-label="Fechar painel">
+              <X size={18} />
+            </button>
+          </header>
+
+          {activePanel === "network" ? (
+            <form className="topology-form" onSubmit={addNetwork}>
+              <input value={networkForm.name} onChange={(event) => setNetworkForm({ ...networkForm, name: event.target.value })} placeholder="Nome da rede" />
+              <input value={networkForm.cidr} onChange={(event) => setNetworkForm({ ...networkForm, cidr: event.target.value })} placeholder="CIDR. Ex: 192.168.9.0/24" />
+              <input value={networkForm.vlan} onChange={(event) => setNetworkForm({ ...networkForm, vlan: event.target.value })} placeholder="VLAN" />
+              <input value={networkForm.gateway} onChange={(event) => setNetworkForm({ ...networkForm, gateway: event.target.value })} placeholder="Gateway" />
+              <textarea value={networkForm.notes} onChange={(event) => setNetworkForm({ ...networkForm, notes: event.target.value })} placeholder="Observacoes" />
+              <button className="primary-action" type="submit">
+                <Plus size={16} />
+                Adicionar rede
+              </button>
+            </form>
+          ) : null}
+
+          {activePanel === "node" ? (
+            <form className="topology-form" onSubmit={addNode}>
+              <input value={nodeForm.name} onChange={(event) => setNodeForm({ ...nodeForm, name: event.target.value })} placeholder="Nome do equipamento" />
+              <select value={nodeForm.type} onChange={(event) => setNodeForm({ ...nodeForm, type: event.target.value as TopologyNodeType })}>
+                <option value="switch">Switch</option>
+                <option value="core">Core</option>
+                <option value="firewall">Firewall</option>
+                <option value="fiber">Fibra</option>
+                <option value="server">Servidor</option>
+                <option value="internet">Internet</option>
+              </select>
+              <input value={nodeForm.ip} onChange={(event) => setNodeForm({ ...nodeForm, ip: event.target.value })} placeholder="IP de gerenciamento" />
+              <input value={nodeForm.vendor} onChange={(event) => setNodeForm({ ...nodeForm, vendor: event.target.value })} placeholder="Fabricante. Ex: UniFi" />
+              <select value={nodeForm.network} onChange={(event) => setNodeForm({ ...nodeForm, network: event.target.value })}>
+                <option value="">Rede</option>
+                {topology.networks.map((network) => (
+                  <option key={network.id} value={network.name}>{network.name}</option>
+                ))}
+              </select>
+              <button className="primary-action" type="submit">
+                <Plus size={16} />
+                Adicionar equipamento
+              </button>
+            </form>
+          ) : null}
+
+          {activePanel === "monitor" ? (
+            <div className="topology-monitor-list">
+              {topology.nodes.filter((node) => node.ip).map((node) => {
+                const status = topologyNodeStatus(node, ipByAddress, pingResults);
+                const ping = pingResults[node.ip];
                 return (
-                  <line
-                    key={link.id}
-                    className={`topology-line ${link.medium}`}
-                    x1={from.x}
-                    y1={from.y}
-                    x2={to.x}
-                    y2={to.y}
-                  />
+                  <div className={`topology-monitor-row ${status.tone}`} key={node.id}>
+                    <div>
+                      <strong>{node.name}</strong>
+                      <span>{node.ip} - {node.vendor}</span>
+                    </div>
+                    <small>{ping?.latencyMs !== null && ping?.latencyMs !== undefined ? `${ping.latencyMs} ms` : status.label}</small>
+                  </div>
                 );
               })}
-            </svg>
-            {topology.nodes.map((node) => {
-              const status = topologyNodeStatus(node, ipByAddress);
-              const Icon = topologyNodeIcon(node.type);
-              return (
-                <button
-                  className={`topology-node ${status.tone}`}
-                  key={node.id}
-                  style={{ left: `${node.x}%`, top: `${node.y}%` }}
-                  type="button"
-                  title={`${node.name} - ${status.label}`}
-                >
-                  <Icon size={20} />
-                  <strong>{node.name}</strong>
-                  <span>{node.ip || node.vendor}</span>
-                </button>
-              );
-            })}
-          </div>
-        </article>
-
-        <article className="panel topology-monitor-panel">
-          <PanelHeader icon={Activity} title="Monitoramento de IP" meta="tempo real" />
-          <button className="secondary-action topology-refresh" type="button" onClick={onRefreshIps}>
-            <RefreshCw size={16} />
-            Atualizar IPs
-          </button>
-          <div className="topology-monitor-list">
-            {topology.nodes.filter((node) => node.ip).map((node) => {
-              const status = topologyNodeStatus(node, ipByAddress);
-              return (
-                <div className={`topology-monitor-row ${status.tone}`} key={node.id}>
-                  <div>
-                    <strong>{node.name}</strong>
-                    <span>{node.ip} - {node.vendor}</span>
-                  </div>
-                  <small>{status.label}</small>
-                </div>
-              );
-            })}
-          </div>
-        </article>
-
-        <article className="panel topology-form-panel">
-          <PanelHeader icon={Plus} title="Adicionar rede" meta="VLAN e gateway" />
-          <form className="topology-form" onSubmit={addNetwork}>
-            <input value={networkForm.name} onChange={(event) => setNetworkForm({ ...networkForm, name: event.target.value })} placeholder="Nome da rede" />
-            <input value={networkForm.cidr} onChange={(event) => setNetworkForm({ ...networkForm, cidr: event.target.value })} placeholder="CIDR. Ex: 192.168.9.0/24" />
-            <input value={networkForm.vlan} onChange={(event) => setNetworkForm({ ...networkForm, vlan: event.target.value })} placeholder="VLAN" />
-            <input value={networkForm.gateway} onChange={(event) => setNetworkForm({ ...networkForm, gateway: event.target.value })} placeholder="Gateway" />
-            <textarea value={networkForm.notes} onChange={(event) => setNetworkForm({ ...networkForm, notes: event.target.value })} placeholder="Observacoes" />
-            <button className="primary-action" type="submit">
-              <Plus size={16} />
-              Adicionar rede
-            </button>
-          </form>
-        </article>
-
-        <article className="panel topology-form-panel">
-          <PanelHeader icon={Router} title="Adicionar equipamento" meta="switch, core, firewall, fibra" />
-          <form className="topology-form" onSubmit={addNode}>
-            <input value={nodeForm.name} onChange={(event) => setNodeForm({ ...nodeForm, name: event.target.value })} placeholder="Nome do equipamento" />
-            <select value={nodeForm.type} onChange={(event) => setNodeForm({ ...nodeForm, type: event.target.value as TopologyNodeType })}>
-              <option value="switch">Switch</option>
-              <option value="core">Core</option>
-              <option value="firewall">Firewall</option>
-              <option value="fiber">Fibra</option>
-              <option value="server">Servidor</option>
-              <option value="internet">Internet</option>
-            </select>
-            <input value={nodeForm.ip} onChange={(event) => setNodeForm({ ...nodeForm, ip: event.target.value })} placeholder="IP de gerenciamento" />
-            <input value={nodeForm.vendor} onChange={(event) => setNodeForm({ ...nodeForm, vendor: event.target.value })} placeholder="Fabricante. Ex: UniFi" />
-            <select value={nodeForm.network} onChange={(event) => setNodeForm({ ...nodeForm, network: event.target.value })}>
-              <option value="">Rede</option>
-              {topology.networks.map((network) => (
-                <option key={network.id} value={network.name}>{network.name}</option>
-              ))}
-            </select>
-            <div className="topology-position-grid">
-              <input value={nodeForm.x} onChange={(event) => setNodeForm({ ...nodeForm, x: Number(event.target.value) })} type="number" min="5" max="95" placeholder="X" />
-              <input value={nodeForm.y} onChange={(event) => setNodeForm({ ...nodeForm, y: Number(event.target.value) })} type="number" min="5" max="95" placeholder="Y" />
             </div>
-            <button className="primary-action" type="submit">
-              <Plus size={16} />
-              Adicionar equipamento
-            </button>
-          </form>
-        </article>
+          ) : null}
 
-        <article className="panel topology-form-panel">
-          <PanelHeader icon={Zap} title="Criar ligacao" meta="fibra, trunk, WAN" />
-          <form className="topology-form" onSubmit={addLink}>
-            <select value={linkForm.from} onChange={(event) => setLinkForm({ ...linkForm, from: event.target.value })}>
-              <option value="">Origem</option>
-              {topology.nodes.map((node) => (
-                <option key={node.id} value={node.id}>{node.name}</option>
-              ))}
-            </select>
-            <select value={linkForm.to} onChange={(event) => setLinkForm({ ...linkForm, to: event.target.value })}>
-              <option value="">Destino</option>
-              {topology.nodes.map((node) => (
-                <option key={node.id} value={node.id}>{node.name}</option>
-              ))}
-            </select>
-            <input value={linkForm.label} onChange={(event) => setLinkForm({ ...linkForm, label: event.target.value })} placeholder="Rotulo. Ex: Trunk VLANs" />
-            <select value={linkForm.medium} onChange={(event) => setLinkForm({ ...linkForm, medium: event.target.value as TopologyLink["medium"] })}>
-              <option value="fibra">Fibra</option>
-              <option value="trunk">Trunk</option>
-              <option value="utp">UTP</option>
-              <option value="wan">WAN</option>
-            </select>
-            <button className="primary-action" type="submit">
-              <Plus size={16} />
-              Criar ligacao
-            </button>
-          </form>
-        </article>
-
-        <article className="panel topology-inventory-panel">
-          <PanelHeader icon={Server} title="Inventario da topologia" meta="editar/remover" />
-          <TopologyInventory topology={topology} onRemoveNetwork={removeNetwork} onRemoveNode={removeNode} onRemoveLink={removeLink} />
-        </article>
-      </div>
+          {activePanel === "inventory" ? (
+            <TopologyInventory topology={topology} onRemoveNetwork={removeNetwork} onRemoveNode={removeNode} onRemoveLink={removeLink} />
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -5936,9 +6050,17 @@ function topologyNodeIcon(type: TopologyNodeType) {
   return Wifi;
 }
 
-function topologyNodeStatus(node: TopologyNode, ipByAddress: Map<string, IpInventoryItem>) {
+function topologyNodeStatus(node: TopologyNode, ipByAddress: Map<string, IpInventoryItem>, pingResults: Record<string, TopologyPingResult> = {}) {
   if (!node.ip) {
     return { tone: "online" as const, label: "Sem IP monitorado" };
+  }
+
+  const ping = pingResults[node.ip];
+  if (ping) {
+    return {
+      tone: ping.ok ? ("online" as const) : ("offline" as const),
+      label: ping.ok ? (ping.latencyMs !== null ? `${ping.latencyMs} ms` : "Ping OK") : "Sem ping",
+    };
   }
 
   const inventoryItem = ipByAddress.get(node.ip);
