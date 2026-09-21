@@ -998,6 +998,233 @@ h1 {
   align-items: start;
 }
 
+.topology-page {
+  display: grid;
+  gap: 14px;
+}
+
+.topology-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.topology-layout {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.topology-map-panel {
+  grid-column: span 8;
+}
+
+.topology-monitor-panel {
+  grid-column: span 4;
+}
+
+.topology-form-panel {
+  grid-column: span 4;
+}
+
+.topology-inventory-panel {
+  grid-column: 1 / -1;
+}
+
+.topology-map {
+  position: relative;
+  min-height: 460px;
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(22, 160, 133, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(22, 160, 133, 0.05) 1px, transparent 1px),
+    #f8faf8;
+  background-size: 28px 28px;
+  border: 1px solid #e1e8e1;
+  border-radius: 8px;
+}
+
+.topology-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.topology-line {
+  stroke: #7b8b82;
+  stroke-width: 0.55;
+  stroke-linecap: round;
+  opacity: 0.8;
+}
+
+.topology-line.fibra {
+  stroke: #277da1;
+  stroke-dasharray: 2 1.5;
+}
+
+.topology-line.wan {
+  stroke: #d9902f;
+}
+
+.topology-line.trunk {
+  stroke: #16a085;
+  stroke-width: 0.75;
+}
+
+.topology-node {
+  position: absolute;
+  display: grid;
+  min-width: 120px;
+  min-height: 74px;
+  padding: 10px;
+  transform: translate(-50%, -50%);
+  color: #171a18;
+  background: #ffffff;
+  border: 1px solid #dfe7df;
+  border-top: 4px solid #16a085;
+  border-radius: 8px;
+  box-shadow: 0 16px 32px rgba(23, 26, 24, 0.09);
+}
+
+.topology-node svg {
+  color: #16876f;
+}
+
+.topology-node.offline {
+  border-top-color: #c0392b;
+}
+
+.topology-node.warn,
+.topology-node.unknown {
+  border-top-color: #d9902f;
+}
+
+.topology-node strong,
+.topology-node span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topology-node strong {
+  margin-top: 7px;
+  font-size: 13px;
+}
+
+.topology-node span {
+  color: #718075;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.topology-refresh {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.topology-monitor-list,
+.topology-form,
+.topology-inventory-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.topology-monitor-row,
+.topology-inventory-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px;
+  background: #f8faf8;
+  border: 1px solid #e5ebe5;
+  border-left: 4px solid #16a085;
+  border-radius: 8px;
+}
+
+.topology-monitor-row.offline {
+  border-left-color: #c0392b;
+}
+
+.topology-monitor-row.warn,
+.topology-monitor-row.unknown {
+  border-left-color: #d9902f;
+}
+
+.topology-monitor-row strong,
+.topology-monitor-row span,
+.topology-monitor-row small,
+.topology-inventory-row strong,
+.topology-inventory-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topology-monitor-row strong,
+.topology-inventory-row strong {
+  color: #171a18;
+  font-size: 13px;
+}
+
+.topology-monitor-row span,
+.topology-monitor-row small,
+.topology-inventory-row span {
+  color: #718075;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.topology-form input,
+.topology-form select,
+.topology-form textarea {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  color: #1a1f1b;
+  background: #fbfdfb;
+  border: 1px solid #d8e0d8;
+  border-radius: 8px;
+}
+
+.topology-form textarea {
+  min-height: 74px;
+  padding-top: 10px;
+  resize: vertical;
+}
+
+.topology-position-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.topology-inventory-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.topology-inventory-grid h3 {
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.topology-inventory-row button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: #a3362e;
+  background: #fde8e4;
+  border: 1px solid #f4c6bd;
+  border-radius: 8px;
+}
+
 .ad-users-panel,
 .ad-groups-panel,
 .ad-lockouts-panel,
@@ -3346,6 +3573,12 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .topology-kpis,
+  .topology-layout,
+  .topology-inventory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .tv-main-panel,
   .tv-ad-panel,
   .tv-assets-panel,
@@ -3353,7 +3586,11 @@ h1 {
   .tv-sites-panel,
   .tv-wan-panel,
   .tv-tickets-panel,
-  .tv-events-panel {
+  .tv-events-panel,
+  .topology-map-panel,
+  .topology-monitor-panel,
+  .topology-form-panel,
+  .topology-inventory-panel {
     grid-column: span 1;
   }
 
@@ -3488,7 +3725,10 @@ h1 {
   .tv-metric-grid,
   .tv-ad-live-grid,
   .tv-board,
-  .ticket-status-board {
+  .ticket-status-board,
+  .topology-kpis,
+  .topology-layout,
+  .topology-inventory-grid {
     grid-template-columns: 1fr;
   }
 

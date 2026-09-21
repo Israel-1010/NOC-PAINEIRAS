@@ -345,6 +345,42 @@ type IpDetails = {
   links: IpInventoryLink[];
 };
 
+type TopologyNodeType = "core" | "switch" | "firewall" | "fiber" | "server" | "internet";
+
+type TopologyNode = {
+  id: string;
+  name: string;
+  type: TopologyNodeType;
+  ip: string;
+  vendor: string;
+  network: string;
+  x: number;
+  y: number;
+};
+
+type TopologyLink = {
+  id: string;
+  from: string;
+  to: string;
+  label: string;
+  medium: "fibra" | "utp" | "wan" | "trunk";
+};
+
+type TopologyNetwork = {
+  id: string;
+  name: string;
+  cidr: string;
+  vlan: string;
+  gateway: string;
+  notes: string;
+};
+
+type TopologyState = {
+  networks: TopologyNetwork[];
+  nodes: TopologyNode[];
+  links: TopologyLink[];
+};
+
 type AdUserDetails = {
   source: string;
   profile: {
@@ -514,13 +550,14 @@ const AUTH_STORAGE_KEY = "rede-clube-session";
 const AUTH_EXPIRED_EVENT = "rede-clube-auth-expired";
 const ACTIVE_VIEW_STORAGE_KEY = "rede-clube-active-view";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "rede-clube-sidebar-collapsed";
+const TOPOLOGY_STORAGE_KEY = "rede-clube-topology";
 const AD_UPN_SUFFIX = "clubepaineiras.com.br";
 
 function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "intune" || value === "milvusPortal" || value === "ips" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "milvusPortal" || value === "ips" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -540,6 +577,15 @@ function getStoredSidebarCollapsed() {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
   } catch {
     return false;
+  }
+}
+
+function getStoredTopology() {
+  try {
+    const raw = window.localStorage.getItem(TOPOLOGY_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as TopologyState) : fallbackTopology;
+  } catch {
+    return fallbackTopology;
   }
 }
 
@@ -847,6 +893,26 @@ const fallbackIpDetails: IpDetails = {
   links: [],
 };
 
+const fallbackTopology: TopologyState = {
+  networks: [
+    { id: "net-mgmt", name: "Gerencia UniFi", cidr: "192.168.9.0/24", vlan: "9", gateway: "192.168.9.1", notes: "Rede inicial para catracas/trielo e switches UniFi." },
+    { id: "net-core", name: "Core / Servidores", cidr: "10.200.1.0/24", vlan: "1", gateway: "10.200.1.1", notes: "Backbone principal." },
+  ],
+  nodes: [
+    { id: "node-internet", name: "Internet", type: "internet", ip: "", vendor: "ISP", network: "WAN", x: 50, y: 12 },
+    { id: "node-fortinet", name: "Fortinet", type: "firewall", ip: "10.200.1.1", vendor: "Fortinet", network: "Core / Servidores", x: 50, y: 30 },
+    { id: "node-core", name: "Core", type: "core", ip: "10.200.1.2", vendor: "Core", network: "Core / Servidores", x: 50, y: 50 },
+    { id: "node-unifi", name: "UniFi Switch", type: "switch", ip: "192.168.9.2", vendor: "UniFi", network: "Gerencia UniFi", x: 28, y: 70 },
+    { id: "node-fiber", name: "Fibra CFTV", type: "fiber", ip: "", vendor: "Fibra", network: "Backbone", x: 72, y: 70 },
+  ],
+  links: [
+    { id: "link-internet-fw", from: "node-internet", to: "node-fortinet", label: "WAN", medium: "wan" },
+    { id: "link-fw-core", from: "node-fortinet", to: "node-core", label: "LAN", medium: "trunk" },
+    { id: "link-core-unifi", from: "node-core", to: "node-unifi", label: "Trunk UniFi", medium: "utp" },
+    { id: "link-core-fiber", from: "node-core", to: "node-fiber", label: "Fibra", medium: "fibra" },
+  ],
+};
+
 const pageSize = 3;
 
 const requiredUserProfileFields: Array<{ field: keyof EditableUserProfile; label: string }> = [
@@ -879,6 +945,7 @@ const requiredCreateUserFields: Array<{ field: keyof CreateUserForm; label: stri
 
 const navItems = [
   { label: "TV Geral", icon: Tv, view: "tv" },
+  { label: "Topologia", icon: Network, view: "topology" },
   { label: "Ativos", icon: Server },
   { label: "AD", icon: Users, view: "ad" },
   { label: "IPs", icon: Network, view: "ips" },
@@ -891,7 +958,7 @@ const navItems = [
   { label: "Ajustes", icon: Settings },
 ];
 
-type View = "tv" | "ad" | "intune" | "tickets" | "milvusPortal" | "ips";
+type View = "tv" | "topology" | "ad" | "intune" | "tickets" | "milvusPortal" | "ips";
 
 function statusLabel(status: Status) {
   return {
@@ -907,6 +974,7 @@ function viewEyebrow(view: View) {
   if (view === "tickets") return "Atendimento e SLA";
   if (view === "milvusPortal") return "Portal oficial";
   if (view === "ips") return "Inventario de rede";
+  if (view === "topology") return "Mapa e monitoramento";
   return "Administracao de identidade";
 }
 
@@ -916,6 +984,7 @@ function viewTitle(view: View) {
   if (view === "tickets") return "Chamados Milvus";
   if (view === "milvusPortal") return "Chamado Milvus";
   if (view === "ips") return "IPs";
+  if (view === "topology") return "Topologia";
   return "Active Directory";
 }
 
@@ -947,6 +1016,7 @@ function App() {
   const [ticketsDetails, setTicketsDetails] = useState<TicketsDetails>(fallbackTicketsDetails);
   const [ipSummary, setIpSummary] = useState<IpSummary>(fallbackIpSummary);
   const [ipDetails, setIpDetails] = useState<IpDetails>(fallbackIpDetails);
+  const [topology, setTopology] = useState<TopologyState>(() => getStoredTopology());
 
   const clearSession = useCallback(() => {
     removeSession();
@@ -1227,6 +1297,10 @@ function App() {
   }, [sidebarCollapsed]);
 
   useEffect(() => {
+    window.localStorage.setItem(TOPOLOGY_STORAGE_KEY, JSON.stringify(topology));
+  }, [topology]);
+
+  useEffect(() => {
     if (activeView === "milvusPortal") {
       setSidebarCollapsed(true);
     }
@@ -1323,6 +1397,8 @@ function App() {
 
         {activeView === "tv" ? (
           <TvDashboard adSummary={adSummaryState} adStatus={adStatus} adDetails={adDetails} onRefreshAd={loadAd} />
+        ) : activeView === "topology" ? (
+          <TopologyDashboard topology={topology} onChange={setTopology} ipDetails={ipDetails} onRefreshIps={loadIps} />
         ) : activeView === "intune" ? (
           <IntuneDashboard intuneStatus={intuneStatus} intuneSummary={intuneSummary} intuneDetails={intuneDetails} onRefreshIntune={loadIntune} />
         ) : activeView === "tickets" ? (
@@ -1536,6 +1612,236 @@ function TvDashboard({
         </article>
       </section>
     </>
+  );
+}
+
+function TopologyDashboard({
+  topology,
+  onChange,
+  ipDetails,
+  onRefreshIps,
+}: {
+  topology: TopologyState;
+  onChange: React.Dispatch<React.SetStateAction<TopologyState>>;
+  ipDetails: IpDetails;
+  onRefreshIps: () => Promise<void>;
+}) {
+  const [networkForm, setNetworkForm] = useState<TopologyNetwork>(emptyTopologyNetwork());
+  const [nodeForm, setNodeForm] = useState<TopologyNode>(emptyTopologyNode());
+  const [linkForm, setLinkForm] = useState<TopologyLink>(emptyTopologyLink(topology.nodes));
+  const ipByAddress = new Map(ipDetails.items.map((item) => [item.ip, item]));
+  const monitoredNodes = topology.nodes.filter((node) => node.ip);
+  const onlineNodes = monitoredNodes.filter((node) => topologyNodeStatus(node, ipByAddress).tone === "online").length;
+  const unifiNodes = topology.nodes.filter((node) => node.vendor.toLowerCase().includes("unifi")).length;
+
+  function addNetwork(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!networkForm.name.trim() || !networkForm.cidr.trim()) return;
+
+    onChange((current) => ({
+      ...current,
+      networks: [...current.networks, { ...networkForm, id: makeTopologyId("net") }],
+    }));
+    setNetworkForm(emptyTopologyNetwork());
+  }
+
+  function addNode(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!nodeForm.name.trim()) return;
+
+    onChange((current) => ({
+      ...current,
+      nodes: [...current.nodes, { ...nodeForm, id: makeTopologyId("node") }],
+    }));
+    setNodeForm(emptyTopologyNode());
+  }
+
+  function addLink(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!linkForm.from || !linkForm.to || linkForm.from === linkForm.to) return;
+
+    onChange((current) => ({
+      ...current,
+      links: [...current.links, { ...linkForm, id: makeTopologyId("link") }],
+    }));
+    setLinkForm(emptyTopologyLink(topology.nodes));
+  }
+
+  function removeNetwork(id: string) {
+    onChange((current) => ({
+      ...current,
+      networks: current.networks.filter((network) => network.id !== id),
+    }));
+  }
+
+  function removeNode(id: string) {
+    onChange((current) => ({
+      ...current,
+      nodes: current.nodes.filter((node) => node.id !== id),
+      links: current.links.filter((link) => link.from !== id && link.to !== id),
+    }));
+  }
+
+  function removeLink(id: string) {
+    onChange((current) => ({
+      ...current,
+      links: current.links.filter((link) => link.id !== id),
+    }));
+  }
+
+  return (
+    <section className="topology-page">
+      <div className="topology-kpis">
+        <MetricCard icon={Network} label="Redes" value={String(topology.networks.length)} detail="sub-redes no desenho" tone="good" />
+        <MetricCard icon={Router} label="Equipamentos" value={String(topology.nodes.length)} detail={`${unifiNodes} UniFi`} tone="calm" />
+        <MetricCard icon={Activity} label="IPs monitorados" value={`${onlineNodes}/${monitoredNodes.length}`} detail="baseado no inventario" tone={onlineNodes === monitoredNodes.length ? "good" : "warn"} />
+        <MetricCard icon={Zap} label="Ligacoes" value={String(topology.links.length)} detail="fibra, trunk, WAN e UTP" tone="calm" />
+      </div>
+
+      <div className="topology-layout">
+        <article className="panel topology-map-panel">
+          <PanelHeader icon={Network} title="Mapa de topologia" meta="UniFi API pronta para conectar" />
+          <div className="topology-map" aria-label="Mapa visual da topologia">
+            <svg className="topology-links" viewBox="0 0 100 100" preserveAspectRatio="none">
+              {topology.links.map((link) => {
+                const from = topology.nodes.find((node) => node.id === link.from);
+                const to = topology.nodes.find((node) => node.id === link.to);
+                if (!from || !to) return null;
+                return (
+                  <line
+                    key={link.id}
+                    className={`topology-line ${link.medium}`}
+                    x1={from.x}
+                    y1={from.y}
+                    x2={to.x}
+                    y2={to.y}
+                  />
+                );
+              })}
+            </svg>
+            {topology.nodes.map((node) => {
+              const status = topologyNodeStatus(node, ipByAddress);
+              const Icon = topologyNodeIcon(node.type);
+              return (
+                <button
+                  className={`topology-node ${status.tone}`}
+                  key={node.id}
+                  style={{ left: `${node.x}%`, top: `${node.y}%` }}
+                  type="button"
+                  title={`${node.name} - ${status.label}`}
+                >
+                  <Icon size={20} />
+                  <strong>{node.name}</strong>
+                  <span>{node.ip || node.vendor}</span>
+                </button>
+              );
+            })}
+          </div>
+        </article>
+
+        <article className="panel topology-monitor-panel">
+          <PanelHeader icon={Activity} title="Monitoramento de IP" meta="tempo real" />
+          <button className="secondary-action topology-refresh" type="button" onClick={onRefreshIps}>
+            <RefreshCw size={16} />
+            Atualizar IPs
+          </button>
+          <div className="topology-monitor-list">
+            {topology.nodes.filter((node) => node.ip).map((node) => {
+              const status = topologyNodeStatus(node, ipByAddress);
+              return (
+                <div className={`topology-monitor-row ${status.tone}`} key={node.id}>
+                  <div>
+                    <strong>{node.name}</strong>
+                    <span>{node.ip} - {node.vendor}</span>
+                  </div>
+                  <small>{status.label}</small>
+                </div>
+              );
+            })}
+          </div>
+        </article>
+
+        <article className="panel topology-form-panel">
+          <PanelHeader icon={Plus} title="Adicionar rede" meta="VLAN e gateway" />
+          <form className="topology-form" onSubmit={addNetwork}>
+            <input value={networkForm.name} onChange={(event) => setNetworkForm({ ...networkForm, name: event.target.value })} placeholder="Nome da rede" />
+            <input value={networkForm.cidr} onChange={(event) => setNetworkForm({ ...networkForm, cidr: event.target.value })} placeholder="CIDR. Ex: 192.168.9.0/24" />
+            <input value={networkForm.vlan} onChange={(event) => setNetworkForm({ ...networkForm, vlan: event.target.value })} placeholder="VLAN" />
+            <input value={networkForm.gateway} onChange={(event) => setNetworkForm({ ...networkForm, gateway: event.target.value })} placeholder="Gateway" />
+            <textarea value={networkForm.notes} onChange={(event) => setNetworkForm({ ...networkForm, notes: event.target.value })} placeholder="Observacoes" />
+            <button className="primary-action" type="submit">
+              <Plus size={16} />
+              Adicionar rede
+            </button>
+          </form>
+        </article>
+
+        <article className="panel topology-form-panel">
+          <PanelHeader icon={Router} title="Adicionar equipamento" meta="switch, core, firewall, fibra" />
+          <form className="topology-form" onSubmit={addNode}>
+            <input value={nodeForm.name} onChange={(event) => setNodeForm({ ...nodeForm, name: event.target.value })} placeholder="Nome do equipamento" />
+            <select value={nodeForm.type} onChange={(event) => setNodeForm({ ...nodeForm, type: event.target.value as TopologyNodeType })}>
+              <option value="switch">Switch</option>
+              <option value="core">Core</option>
+              <option value="firewall">Firewall</option>
+              <option value="fiber">Fibra</option>
+              <option value="server">Servidor</option>
+              <option value="internet">Internet</option>
+            </select>
+            <input value={nodeForm.ip} onChange={(event) => setNodeForm({ ...nodeForm, ip: event.target.value })} placeholder="IP de gerenciamento" />
+            <input value={nodeForm.vendor} onChange={(event) => setNodeForm({ ...nodeForm, vendor: event.target.value })} placeholder="Fabricante. Ex: UniFi" />
+            <select value={nodeForm.network} onChange={(event) => setNodeForm({ ...nodeForm, network: event.target.value })}>
+              <option value="">Rede</option>
+              {topology.networks.map((network) => (
+                <option key={network.id} value={network.name}>{network.name}</option>
+              ))}
+            </select>
+            <div className="topology-position-grid">
+              <input value={nodeForm.x} onChange={(event) => setNodeForm({ ...nodeForm, x: Number(event.target.value) })} type="number" min="5" max="95" placeholder="X" />
+              <input value={nodeForm.y} onChange={(event) => setNodeForm({ ...nodeForm, y: Number(event.target.value) })} type="number" min="5" max="95" placeholder="Y" />
+            </div>
+            <button className="primary-action" type="submit">
+              <Plus size={16} />
+              Adicionar equipamento
+            </button>
+          </form>
+        </article>
+
+        <article className="panel topology-form-panel">
+          <PanelHeader icon={Zap} title="Criar ligacao" meta="fibra, trunk, WAN" />
+          <form className="topology-form" onSubmit={addLink}>
+            <select value={linkForm.from} onChange={(event) => setLinkForm({ ...linkForm, from: event.target.value })}>
+              <option value="">Origem</option>
+              {topology.nodes.map((node) => (
+                <option key={node.id} value={node.id}>{node.name}</option>
+              ))}
+            </select>
+            <select value={linkForm.to} onChange={(event) => setLinkForm({ ...linkForm, to: event.target.value })}>
+              <option value="">Destino</option>
+              {topology.nodes.map((node) => (
+                <option key={node.id} value={node.id}>{node.name}</option>
+              ))}
+            </select>
+            <input value={linkForm.label} onChange={(event) => setLinkForm({ ...linkForm, label: event.target.value })} placeholder="Rotulo. Ex: Trunk VLANs" />
+            <select value={linkForm.medium} onChange={(event) => setLinkForm({ ...linkForm, medium: event.target.value as TopologyLink["medium"] })}>
+              <option value="fibra">Fibra</option>
+              <option value="trunk">Trunk</option>
+              <option value="utp">UTP</option>
+              <option value="wan">WAN</option>
+            </select>
+            <button className="primary-action" type="submit">
+              <Plus size={16} />
+              Criar ligacao
+            </button>
+          </form>
+        </article>
+
+        <article className="panel topology-inventory-panel">
+          <PanelHeader icon={Server} title="Inventario da topologia" meta="editar/remover" />
+          <TopologyInventory topology={topology} onRemoveNetwork={removeNetwork} onRemoveNode={removeNode} onRemoveLink={removeLink} />
+        </article>
+      </div>
+    </section>
   );
 }
 
@@ -5581,6 +5887,137 @@ function ouPathFromDn(dn: string) {
 
 function parentDnFromDn(dn: string) {
   return dn.split(",").slice(1).join(",");
+}
+
+function makeTopologyId(prefix: string) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function emptyTopologyNetwork(): TopologyNetwork {
+  return {
+    id: "",
+    name: "",
+    cidr: "",
+    vlan: "",
+    gateway: "",
+    notes: "",
+  };
+}
+
+function emptyTopologyNode(): TopologyNode {
+  return {
+    id: "",
+    name: "",
+    type: "switch",
+    ip: "",
+    vendor: "UniFi",
+    network: "",
+    x: 50,
+    y: 50,
+  };
+}
+
+function emptyTopologyLink(nodes: TopologyNode[]): TopologyLink {
+  return {
+    id: "",
+    from: nodes[0]?.id || "",
+    to: nodes[1]?.id || "",
+    label: "",
+    medium: "trunk",
+  };
+}
+
+function topologyNodeIcon(type: TopologyNodeType) {
+  if (type === "firewall") return Shield;
+  if (type === "core") return Router;
+  if (type === "fiber") return RadioTower;
+  if (type === "server") return Server;
+  if (type === "internet") return Zap;
+  return Wifi;
+}
+
+function topologyNodeStatus(node: TopologyNode, ipByAddress: Map<string, IpInventoryItem>) {
+  if (!node.ip) {
+    return { tone: "online" as const, label: "Sem IP monitorado" };
+  }
+
+  const inventoryItem = ipByAddress.get(node.ip);
+  if (!inventoryItem) {
+    return { tone: "unknown" as const, label: "IP fora do inventario" };
+  }
+
+  if (inventoryItem.status === "Livre") {
+    return { tone: "offline" as const, label: "IP livre no inventario" };
+  }
+
+  if (inventoryItem.status === "Reservado") {
+    return { tone: "warn" as const, label: "IP reservado" };
+  }
+
+  return { tone: "online" as const, label: inventoryItem.name || "IP em uso" };
+}
+
+function TopologyInventory({
+  topology,
+  onRemoveNetwork,
+  onRemoveNode,
+  onRemoveLink,
+}: {
+  topology: TopologyState;
+  onRemoveNetwork: (id: string) => void;
+  onRemoveNode: (id: string) => void;
+  onRemoveLink: (id: string) => void;
+}) {
+  return (
+    <div className="topology-inventory-grid">
+      <section>
+        <h3>Redes</h3>
+        {topology.networks.map((network) => (
+          <div className="topology-inventory-row" key={network.id}>
+            <div>
+              <strong>{network.name}</strong>
+              <span>{network.cidr} - VLAN {network.vlan || "-"}</span>
+            </div>
+            <button type="button" onClick={() => onRemoveNetwork(network.id)} title="Remover rede" aria-label="Remover rede">
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+      </section>
+      <section>
+        <h3>Equipamentos</h3>
+        {topology.nodes.map((node) => (
+          <div className="topology-inventory-row" key={node.id}>
+            <div>
+              <strong>{node.name}</strong>
+              <span>{node.vendor} - {node.ip || "sem IP"}</span>
+            </div>
+            <button type="button" onClick={() => onRemoveNode(node.id)} title="Remover equipamento" aria-label="Remover equipamento">
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+      </section>
+      <section>
+        <h3>Ligacoes</h3>
+        {topology.links.map((link) => {
+          const from = topology.nodes.find((node) => node.id === link.from)?.name || "Origem";
+          const to = topology.nodes.find((node) => node.id === link.to)?.name || "Destino";
+          return (
+            <div className="topology-inventory-row" key={link.id}>
+              <div>
+                <strong>{from} / {to}</strong>
+                <span>{link.label || link.medium}</span>
+              </div>
+              <button type="button" onClick={() => onRemoveLink(link.id)} title="Remover ligacao" aria-label="Remover ligacao">
+                <Trash2 size={15} />
+              </button>
+            </div>
+          );
+        })}
+      </section>
+    </div>
+  );
 }
 
 function requiredUserValue(user: AdUser, field: keyof EditableUserProfile) {
