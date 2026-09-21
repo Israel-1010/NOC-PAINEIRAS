@@ -1458,29 +1458,30 @@ function TvDashboard({
   adDetails: AdDetails;
   onRefreshAd: () => Promise<void>;
 }) {
-  const openTickets = 42;
-  const riskyTickets = 7;
-  const apsOnline = 37;
-  const wifiClients = 623;
-  const fortinetSessions = "18.4k";
-  const offlineAssets = assets.filter((asset) => asset.status === "offline").length;
-  const warningAssets = assets.filter((asset) => asset.status === "warning").length;
-  const overallTone = adSummary.users.locked || offlineAssets ? "danger" : warningAssets || riskyTickets ? "warn" : "good";
+  const activeUsers = adDetails.users.filter((user) => user.enabled);
+  const standardIssues = activeUsers
+    .map((user) => ({ user, missingFields: missingRequiredUserFields(user) }))
+    .filter((item) => item.missingFields.length);
+  const standardOk = Math.max(activeUsers.length - standardIssues.length, 0);
+  const groupsTotal = adSummary.groups.total || adDetails.groups.length;
+  const lockoutEventsTotal = adDetails.lockoutEvents.length;
+  const overallTone = !adStatus.ok || adSummary.users.locked ? "danger" : standardIssues.length || adSummary.computers.inactive30d ? "warn" : "good";
+  const sourceLabel = adSummary.source === "ldap" ? "AD real" : "Modo mock";
 
   return (
     <>
       <section className="tv-hero" aria-label="Resumo operacional da TV">
         <div className={`tv-overall ${overallTone}`}>
-          <span>Saude operacional</span>
+          <span>Saude do Active Directory</span>
           <strong>{overallTone === "danger" ? "Atencao" : overallTone === "warn" ? "Observando" : "Estavel"}</strong>
-          <small>{adStatus.ok ? "AD conectado" : adStatus.message}</small>
+          <small>{adStatus.ok ? `${sourceLabel} conectado` : adStatus.message}</small>
         </div>
         <div className="tv-health-strip">
           <HealthTile icon={Users} label="AD" value={adStatus.ok ? "Online" : "Falha"} tone={adStatus.ok ? "good" : "danger"} />
-          <HealthTile icon={Shield} label="Fortinet" value="Online" tone="good" />
-          <HealthTile icon={Wifi} label="UniFi" value={`${apsOnline} APs`} tone="good" />
-          <HealthTile icon={Zap} label="WAN" value={offlineAssets ? "Critico" : "OK"} tone={offlineAssets ? "danger" : "good"} />
-          <HealthTile icon={ClipboardList} label="Chamados" value={`${riskyTickets} SLA`} tone={riskyTickets ? "warn" : "good"} />
+          <HealthTile icon={UserCheck} label="Usuarios" value={`${adSummary.users.enabled}/${adSummary.users.total}`} tone="good" />
+          <HealthTile icon={Monitor} label="Maquinas" value={String(adSummary.computers.total)} tone={adSummary.computers.inactive30d ? "warn" : "good"} />
+          <HealthTile icon={Users} label="Grupos" value={String(groupsTotal)} tone="good" />
+          <HealthTile icon={KeyRound} label="Eventos 4740" value={String(lockoutEventsTotal)} tone={adDetails.lockoutEventErrors.length ? "warn" : "good"} />
         </div>
       </section>
 
@@ -1488,15 +1489,15 @@ function TvDashboard({
         <TvMetric icon={LockKeyhole} label="Bloqueios agora" value={String(adSummary.users.locked)} detail={`${adDetails.lockouts.length} em destaque`} tone={adSummary.users.locked ? "danger" : "good"} />
         <TvMetric icon={Monitor} label="Maquinas AD" value={String(adSummary.computers.total)} detail={`${adSummary.computers.domainJoined} no dominio`} tone="good" />
         <TvMetric icon={Users} label="Usuarios ativos" value={String(adSummary.users.enabled)} detail={`${adSummary.users.disabled} desativados`} tone="calm" />
-        <TvMetric icon={ClipboardList} label="Chamados abertos" value={String(openTickets)} detail={`${riskyTickets} em risco de SLA`} tone="warn" />
-        <TvMetric icon={Wifi} label="Clientes Wi-Fi" value={String(wifiClients)} detail={`${apsOnline} APs online`} tone="good" />
-        <TvMetric icon={ShieldCheck} label="Fortinet" value={fortinetSessions} detail="sessoes ativas" tone="calm" />
+        <TvMetric icon={AlertTriangle} label="Fora do padrao" value={String(standardIssues.length)} detail={`${standardOk} usuarios OK`} tone={standardIssues.length ? "warn" : "good"} />
+        <TvMetric icon={Users} label="Grupos AD" value={String(groupsTotal)} detail={`${adSummary.groups.sensitive} sensiveis`} tone={adSummary.groups.sensitive ? "warn" : "good"} />
+        <TvMetric icon={KeyRound} label="Eventos 4740" value={String(lockoutEventsTotal)} detail={adDetails.lockoutEventErrors.length ? "coleta parcial" : "ultimas 24h"} tone={adDetails.lockoutEventErrors.length ? "warn" : "calm"} />
       </section>
 
       <section className="tv-board">
         <article className="panel tv-main-panel">
-          <PanelHeader icon={Activity} title="Latencia e disponibilidade" meta="Ultimas 8 horas" />
-          <LatencyChart />
+          <PanelHeader icon={Activity} title="Resumo AD em tempo real" meta={sourceLabel} />
+          <TvAdOverviewPanel adSummary={adSummary} adDetails={adDetails} standardIssues={standardIssues.length} />
         </article>
 
         <article className="panel tv-lockout-panel">
@@ -1505,13 +1506,13 @@ function TvDashboard({
         </article>
 
         <article className="panel tv-sites-panel">
-          <PanelHeader icon={RadioTower} title="Unidades" meta="UniFi e clientes" />
-          <SiteHealth />
+          <PanelHeader icon={AlertTriangle} title="Usuarios fora do padrao" meta={`${standardIssues.length} ativos`} />
+          <TvStandardUsersPanel items={standardIssues} />
         </article>
 
         <article className="panel tv-wan-panel">
-          <PanelHeader icon={Zap} title="Links WAN" meta="Mbps" />
-          <WanChart />
+          <PanelHeader icon={Monitor} title="Maquinas do dominio" meta={`${adDetails.computers.length} carregadas`} />
+          <TvComputersPanel computers={adDetails.computers} />
         </article>
 
         <article className="panel tv-ad-panel">
@@ -1520,8 +1521,8 @@ function TvDashboard({
         </article>
 
         <article className="panel tv-tickets-panel">
-          <PanelHeader icon={CircleGauge} title="Chamados" meta="Hoje" />
-          <TicketChart />
+          <PanelHeader icon={Users} title="Grupos do AD" meta={`${adDetails.groups.length} carregados`} />
+          <TvGroupsPanel groups={adDetails.groups} />
         </article>
 
         <article className="panel tv-events-panel">
@@ -1530,8 +1531,8 @@ function TvDashboard({
         </article>
 
         <article className="panel tv-assets-panel">
-          <PanelHeader icon={Router} title="Ativos monitorados" meta="5 principais" />
-          <AssetTable />
+          <PanelHeader icon={KeyRound} title="Eventos 4740" meta="Ultimas 24h" />
+          <TvLockoutEventsPanel events={adDetails.lockoutEvents} errors={adDetails.lockoutEventErrors} />
         </article>
       </section>
     </>
@@ -2899,6 +2900,11 @@ function TicketStatusCard({
   );
 }
 
+function percentOf(value: number, total: number) {
+  if (!total) return 0;
+  return Math.round((value / total) * 100);
+}
+
 function TvEventFeed({ adSummary, adDetails }: { adSummary: AdSummary; adDetails: AdDetails }) {
   const lockoutEvents = adDetails.lockouts.slice(0, 3).map((lockout) => ({
     title: `${lockout.user || lockout.cn} bloqueado`,
@@ -2913,8 +2919,18 @@ function TvEventFeed({ adSummary, adDetails }: { adSummary: AdSummary; adDetails
       tone: adSummary.users.locked ? ("warn" as const) : ("good" as const),
       time: "Agora",
     },
-    { title: "Backup WAN em observacao", detail: "Fortinet", tone: "warn" as const, time: "15 min" },
-    { title: "Fila de chamados dentro do SLA", detail: "Service Desk", tone: "good" as const, time: "Agora" },
+    {
+      title: `${adSummary.users.enabled} usuarios habilitados`,
+      detail: `${adSummary.users.disabled} contas desativadas`,
+      tone: "good" as const,
+      time: "AD",
+    },
+    {
+      title: `${adSummary.computers.total} maquinas no dominio`,
+      detail: `${adSummary.computers.inactive30d} inativas em 30d`,
+      tone: adSummary.computers.inactive30d ? ("warn" as const) : ("good" as const),
+      time: "AD",
+    },
   ];
   const events = [...lockoutEvents, ...operationalEvents].slice(0, 6);
 
@@ -3445,6 +3461,131 @@ function GroupsDirectoryModal({ groups, onClose }: { groups: ApiAdGroup[]; onClo
           <AdGroupsList groups={paginate(filteredGroups, page)} />
         </section>
       </div>
+    </div>
+  );
+}
+
+function TvAdOverviewPanel({
+  adSummary,
+  adDetails,
+  standardIssues,
+}: {
+  adSummary: AdSummary;
+  adDetails: AdDetails;
+  standardIssues: number;
+}) {
+  const enabledPercent = percentOf(adSummary.users.enabled, adSummary.users.total);
+  const disabledPercent = percentOf(adSummary.users.disabled, adSummary.users.total);
+  const computerPercent = percentOf(adSummary.computers.domainJoined, adSummary.computers.total);
+
+  const stats = [
+    { label: "Usuarios habilitados", value: adSummary.users.enabled, detail: `${enabledPercent}% do total`, tone: "good" },
+    { label: "Usuarios desativados", value: adSummary.users.disabled, detail: `${disabledPercent}% do total`, tone: adSummary.users.disabled ? "warn" : "good" },
+    { label: "Maquinas no dominio", value: adSummary.computers.domainJoined, detail: `${computerPercent}% inventariado`, tone: "good" },
+    { label: "Cadastro incompleto", value: standardIssues, detail: "usuarios ativos", tone: standardIssues ? "warn" : "good" },
+    { label: "Bloqueios ativos", value: adSummary.users.locked, detail: `${adDetails.lockouts.length} listados`, tone: adSummary.users.locked ? "danger" : "good" },
+    { label: "Eventos coletados", value: adDetails.lockoutEvents.length, detail: "4740 / 24h", tone: adDetails.lockoutEventErrors.length ? "warn" : "good" },
+  ];
+
+  return (
+    <div className="tv-ad-live-grid">
+      {stats.map((stat) => (
+        <div className={`tv-ad-live-tile ${stat.tone}`} key={stat.label}>
+          <span>{stat.label}</span>
+          <strong>{stat.value}</strong>
+          <small>{stat.detail}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TvStandardUsersPanel({ items }: { items: UserStandardItem[] }) {
+  const visibleItems = items.slice(0, 5);
+
+  if (!visibleItems.length) {
+    return <EmptyState title="Cadastro em ordem" detail="Nenhum usuario ativo fora do padrao nesta coleta." />;
+  }
+
+  return (
+    <div className="tv-compact-list">
+      {visibleItems.map(({ user, missingFields }) => (
+        <div className="tv-compact-row warn" key={user.distinguishedName || user.samAccountName}>
+          <div>
+            <strong>{user.displayName || user.cn || user.samAccountName}</strong>
+            <span>{user.department || "Sem departamento"}</span>
+          </div>
+          <small>{formatMissingFields(missingFields)}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TvComputersPanel({ computers }: { computers: AdComputer[] }) {
+  const visibleComputers = computers.slice(0, 5);
+
+  if (!visibleComputers.length) {
+    return <EmptyState title="Maquinas nao carregadas" detail="A API ainda nao retornou computadores do dominio." />;
+  }
+
+  return (
+    <div className="tv-compact-list">
+      {visibleComputers.map((computer) => (
+        <div className="tv-compact-row" key={computer.distinguishedName || computer.cn}>
+          <div>
+            <strong>{computer.cn}</strong>
+            <span>{computer.dNSHostName || "Sem DNS"}</span>
+          </div>
+          <small>{computer.operatingSystem || "SO nao informado"}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TvGroupsPanel({ groups }: { groups: ApiAdGroup[] }) {
+  const visibleGroups = [...groups]
+    .sort((first, second) => second.memberCount - first.memberCount)
+    .slice(0, 5);
+
+  if (!visibleGroups.length) {
+    return <EmptyState title="Grupos nao carregados" detail="A API ainda nao retornou grupos do AD." />;
+  }
+
+  return (
+    <div className="tv-compact-list">
+      {visibleGroups.map((group) => (
+        <div className="tv-compact-row" key={group.distinguishedName || group.cn}>
+          <div>
+            <strong>{group.cn}</strong>
+            <span>{group.description || "Sem descricao"}</span>
+          </div>
+          <small>{group.memberCount} membros</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TvLockoutEventsPanel({ events, errors }: { events: LockoutEvent[]; errors: string[] }) {
+  const visibleEvents = events.slice(0, 5);
+
+  if (!visibleEvents.length) {
+    return <EmptyState title="Sem eventos recentes" detail={errors.length ? "A coleta de 4740 retornou erro nos DCs." : "Nenhum evento 4740 retornado nas ultimas 24h."} />;
+  }
+
+  return (
+    <div className="tv-compact-list">
+      {visibleEvents.map((event) => (
+        <div className="tv-compact-row danger" key={`${event.domainController}-${event.targetUser}-${event.timeCreated}`}>
+          <div>
+            <strong>{event.targetUser}</strong>
+            <span>{event.callerComputer || "Origem nao informada"}</span>
+          </div>
+          <small>{event.domainController} - {formatDateTime(event.timeCreated)}</small>
+        </div>
+      ))}
     </div>
   );
 }

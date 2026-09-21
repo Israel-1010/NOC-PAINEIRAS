@@ -839,6 +839,108 @@ h1 {
   grid-column: span 4;
 }
 
+.tv-ad-live-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tv-ad-live-tile {
+  min-height: 96px;
+  padding: 12px;
+  background: #f8faf8;
+  border: 1px solid #e3e9e3;
+  border-left: 4px solid #16a085;
+  border-radius: 8px;
+}
+
+.tv-ad-live-tile.warn {
+  border-left-color: #d9902f;
+}
+
+.tv-ad-live-tile.danger {
+  border-left-color: #c0392b;
+}
+
+.tv-ad-live-tile span,
+.tv-ad-live-tile strong,
+.tv-ad-live-tile small {
+  display: block;
+}
+
+.tv-ad-live-tile span {
+  color: #718075;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.tv-ad-live-tile strong {
+  margin-top: 10px;
+  color: #171a18;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.tv-ad-live-tile small {
+  margin-top: 8px;
+  color: #718075;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tv-compact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.tv-compact-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 9px 10px;
+  background: #f8faf8;
+  border: 1px solid #e6ece6;
+  border-left: 4px solid #16a085;
+  border-radius: 8px;
+}
+
+.tv-compact-row.warn {
+  border-left-color: #d9902f;
+}
+
+.tv-compact-row.danger {
+  border-left-color: #c0392b;
+}
+
+.tv-compact-row strong,
+.tv-compact-row span,
+.tv-compact-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-compact-row strong {
+  color: #171a18;
+  font-size: 13px;
+}
+
+.tv-compact-row span,
+.tv-compact-row small {
+  color: #718075;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tv-compact-row small {
+  max-width: 180px;
+  text-align: right;
+}
+
 .tv-event-feed {
   display: grid;
   gap: 10px;
@@ -3231,7 +3333,8 @@ h1 {
   }
 
   .tv-health-strip,
-  .tv-metric-grid {
+  .tv-metric-grid,
+  .tv-ad-live-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
@@ -3383,6 +3486,7 @@ h1 {
 
   .tv-health-strip,
   .tv-metric-grid,
+  .tv-ad-live-grid,
   .tv-board,
   .ticket-status-board {
     grid-template-columns: 1fr;
