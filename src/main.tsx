@@ -1947,18 +1947,18 @@ function TopologyDashboard({
             const from = topology.nodes.find((node) => node.id === link.from);
             const to = topology.nodes.find((node) => node.id === link.to);
             if (!from || !to) return null;
-            return <line key={link.id} className={`topology-line ${link.medium}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+            const linkStatus = topologyLinkStatus(from, to, ipByAddress, pingResults);
+            return <line key={link.id} className={`topology-line ${link.medium} ${linkStatus}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
           })}
           {topology.links.map((link) => {
             const from = topology.nodes.find((node) => node.id === link.from);
             const to = topology.nodes.find((node) => node.id === link.to);
             if (!from || !to) return null;
-            const fromStatus = topologyNodeStatus(from, ipByAddress, pingResults).tone;
-            const toStatus = topologyNodeStatus(to, ipByAddress, pingResults).tone;
-            const flowTone = fromStatus === "offline" || toStatus === "offline" ? "offline" : fromStatus === "warn" || toStatus === "warn" || fromStatus === "unknown" || toStatus === "unknown" ? "warn" : "online";
+            const linkStatus = topologyLinkStatus(from, to, ipByAddress, pingResults);
+            if (linkStatus !== "online") return null;
 
             return (
-              <circle className={`topology-flow-dot ${flowTone}`} key={`${link.id}-flow`} r="0.72">
+              <circle className="topology-flow-dot online" key={`${link.id}-flow`} r="0.72">
                 <animateMotion dur={link.medium === "fibra" ? "1.8s" : "2.4s"} path={`M ${from.x} ${from.y} L ${to.x} ${to.y}`} repeatCount="indefinite" />
               </circle>
             );
@@ -1992,7 +1992,11 @@ function TopologyDashboard({
               onPointerMove={(event) => handleNodePointerMove(event, node)}
               onPointerUp={handleNodePointerUp}
             >
-              {node.imageUrl ? <img alt="" className="topology-node-image" draggable={false} src={node.imageUrl} /> : <Icon size={20} />}
+              {node.imageUrl ? (
+                <span className="topology-node-media">
+                  <img alt="" className="topology-node-image" draggable={false} src={node.imageUrl} />
+                </span>
+              ) : <Icon size={20} />}
               <strong>{node.name}</strong>
               <span>{node.ip || node.vendor}</span>
               <small>{status.label}</small>
@@ -6226,7 +6230,7 @@ function topologyNodeIcon(type: TopologyNodeType) {
 
 function topologyNodeStatus(node: TopologyNode, ipByAddress: Map<string, IpInventoryItem>, pingResults: Record<string, TopologyPingResult> = {}) {
   if (!node.ip) {
-    return { tone: "online" as const, label: "Sem IP monitorado" };
+    return { tone: "idle" as const, label: "Sem IP configurado" };
   }
 
   const ping = pingResults[node.ip];
@@ -6251,6 +6255,21 @@ function topologyNodeStatus(node: TopologyNode, ipByAddress: Map<string, IpInven
   }
 
   return { tone: "online" as const, label: inventoryItem.name || "IP em uso" };
+}
+
+function topologyLinkStatus(
+  from: TopologyNode,
+  to: TopologyNode,
+  ipByAddress: Map<string, IpInventoryItem>,
+  pingResults: Record<string, TopologyPingResult> = {},
+) {
+  const fromStatus = topologyNodeStatus(from, ipByAddress, pingResults).tone;
+  const toStatus = topologyNodeStatus(to, ipByAddress, pingResults).tone;
+
+  if (fromStatus === "idle" || toStatus === "idle") return "idle";
+  if (fromStatus === "offline" || toStatus === "offline") return "offline";
+  if (fromStatus === "warn" || toStatus === "warn" || fromStatus === "unknown" || toStatus === "unknown") return "warn";
+  return "online";
 }
 
 function TopologyInventory({

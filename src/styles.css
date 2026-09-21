@@ -1180,18 +1180,24 @@ h1 {
   stroke-width: 0.75;
 }
 
+.topology-line.idle {
+  stroke: #9aa59e;
+  opacity: 0.5;
+}
+
+.topology-line.warn {
+  stroke: #d9902f;
+}
+
+.topology-line.offline {
+  stroke: #c0392b;
+  animation: topologyCableAlarm 0.9s ease-in-out infinite;
+}
+
 .topology-flow-dot {
   fill: #16a085;
   opacity: 0.95;
   pointer-events: none;
-}
-
-.topology-flow-dot.warn {
-  fill: #d9902f;
-}
-
-.topology-flow-dot.offline {
-  fill: #c0392b;
 }
 
 .topology-link-label {
@@ -1211,8 +1217,8 @@ h1 {
 .topology-node {
   position: absolute;
   display: grid;
-  min-width: 138px;
-  min-height: 96px;
+  min-width: 154px;
+  min-height: 118px;
   padding: 12px;
   transform: translate(-50%, -50%);
   color: #171a18;
@@ -1230,9 +1236,17 @@ h1 {
   color: #16876f;
 }
 
+.topology-node-media {
+  display: grid;
+  width: 100%;
+  height: 46px;
+  place-items: center;
+  margin-bottom: 2px;
+}
+
 .topology-node-image {
-  width: 30px;
-  height: 30px;
+  width: 94px;
+  height: 44px;
   object-fit: contain;
   user-select: none;
   pointer-events: none;
@@ -1241,6 +1255,12 @@ h1 {
 .topology-node.offline {
   border-top-color: #c0392b;
   background: #fff3f1;
+  animation: topologyDeviceAlarm 0.9s ease-in-out infinite;
+}
+
+.topology-node.idle {
+  border-top-color: #9aa59e;
+  background: #ffffff;
 }
 
 .topology-node.warn,
@@ -1285,9 +1305,37 @@ h1 {
   color: #9b241b;
 }
 
+.topology-node.idle small {
+  color: #657166;
+}
+
 .topology-node.warn small,
 .topology-node.unknown small {
   color: #84520c;
+}
+
+@keyframes topologyCableAlarm {
+  0%,
+  100% {
+    opacity: 0.35;
+    stroke-width: 0.55;
+  }
+
+  50% {
+    opacity: 1;
+    stroke-width: 1.05;
+  }
+}
+
+@keyframes topologyDeviceAlarm {
+  0%,
+  100% {
+    box-shadow: 0 16px 32px rgba(23, 26, 24, 0.09);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(192, 57, 43, 0.18), 0 18px 38px rgba(192, 57, 43, 0.22);
+  }
 }
 
 .topology-canvas-hint {
