@@ -10,6 +10,7 @@ type TopologyNode = {
   ip: string;
   vendor: string;
   network: string;
+  imageUrl: string;
   x: number;
   y: number;
 };
@@ -46,11 +47,11 @@ const fallbackTopology: TopologyState = {
     { id: "net-core", name: "Core / Servidores", cidr: "10.200.1.0/24", vlan: "1", gateway: "10.200.1.1", notes: "Backbone principal." },
   ],
   nodes: [
-    { id: "node-internet", name: "Internet", type: "internet", ip: "", vendor: "ISP", network: "WAN", x: 50, y: 12 },
-    { id: "node-fortinet", name: "Fortinet", type: "firewall", ip: "10.200.1.1", vendor: "Fortinet", network: "Core / Servidores", x: 50, y: 30 },
-    { id: "node-core", name: "Core", type: "core", ip: "10.200.1.2", vendor: "Core", network: "Core / Servidores", x: 50, y: 50 },
-    { id: "node-unifi", name: "UniFi Switch", type: "switch", ip: "192.168.9.2", vendor: "UniFi", network: "Gerencia UniFi", x: 28, y: 70 },
-    { id: "node-fiber", name: "Fibra CFTV", type: "fiber", ip: "", vendor: "Fibra", network: "Backbone", x: 72, y: 70 },
+    { id: "node-internet", name: "Internet", type: "internet", ip: "", vendor: "ISP", network: "WAN", imageUrl: "", x: 50, y: 12 },
+    { id: "node-fortinet", name: "Fortinet", type: "firewall", ip: "10.200.1.1", vendor: "Fortinet", network: "Core / Servidores", imageUrl: "", x: 50, y: 30 },
+    { id: "node-core", name: "Core", type: "core", ip: "10.200.1.2", vendor: "Core", network: "Core / Servidores", imageUrl: "", x: 50, y: 50 },
+    { id: "node-unifi", name: "UniFi Switch", type: "switch", ip: "192.168.9.2", vendor: "UniFi", network: "Gerencia UniFi", imageUrl: "", x: 28, y: 70 },
+    { id: "node-fiber", name: "Fibra CFTV", type: "fiber", ip: "", vendor: "Fibra", network: "Backbone", imageUrl: "", x: 72, y: 70 },
   ],
   links: [
     { id: "link-internet-fw", from: "node-internet", to: "node-fortinet", label: "WAN", medium: "wan" },
@@ -59,6 +60,8 @@ const fallbackTopology: TopologyState = {
     { id: "link-core-fiber", from: "node-core", to: "node-fiber", label: "Fibra", medium: "fibra" },
   ],
 };
+
+let writeQueue = Promise.resolve();
 
 function clean(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -102,6 +105,7 @@ function normalizeTopology(input: unknown): TopologyState {
     ip: clean((node as Partial<TopologyNode>).ip),
     vendor: clean((node as Partial<TopologyNode>).vendor),
     network: clean((node as Partial<TopologyNode>).network),
+    imageUrl: clean((node as Partial<TopologyNode>).imageUrl),
     x: clampPercent((node as Partial<TopologyNode>).x, 50),
     y: clampPercent((node as Partial<TopologyNode>).y, 50),
   }));
@@ -120,10 +124,61 @@ function normalizeTopology(input: unknown): TopologyState {
   return { networks, nodes, links };
 }
 
+function parseTopologyJson(raw: string) {
+  try {
+    return JSON.parse(raw);
+  } catch (originalError) {
+    let inString = false;
+    let escaped = false;
+    let depth = 0;
+    let jsonStart = -1;
+
+    for (let index = 0; index < raw.length; index += 1) {
+      const char = raw[index];
+
+      if (jsonStart === -1) {
+        if (char === "{" || char === "[") {
+          jsonStart = index;
+          depth = 1;
+        }
+        continue;
+      }
+
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (char === "\\") {
+        escaped = inString;
+        continue;
+      }
+
+      if (char === "\"") {
+        inString = !inString;
+        continue;
+      }
+
+      if (inString) continue;
+
+      if (char === "{" || char === "[") depth += 1;
+      if (char === "}" || char === "]") depth -= 1;
+
+      if (depth === 0) {
+        return JSON.parse(raw.slice(jsonStart, index + 1));
+      }
+    }
+
+    throw originalError;
+  }
+}
+
 export async function getTopology() {
   try {
     const raw = await fs.readFile(storePath, "utf8");
-    return normalizeTopology(JSON.parse(raw));
+    const topology = normalizeTopology(parseTopologyJson(raw));
+    await saveTopology(topology);
+    return topology;
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "";
     if (code !== "ENOENT") {
@@ -137,8 +192,14 @@ export async function getTopology() {
 
 export async function saveTopology(topology: unknown) {
   const normalized = normalizeTopology(topology);
-  await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(`${storePath}.tmp`, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
-  await fs.rename(`${storePath}.tmp`, storePath);
+  const writeTask = writeQueue.then(async () => {
+    await fs.mkdir(dataDir, { recursive: true });
+    const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
+    await fs.writeFile(tempPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+    await fs.rename(tempPath, storePath);
+  });
+
+  writeQueue = writeTask.catch(() => undefined);
+  await writeTask;
   return normalized;
 }

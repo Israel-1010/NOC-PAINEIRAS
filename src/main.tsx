@@ -354,6 +354,7 @@ type TopologyNode = {
   ip: string;
   vendor: string;
   network: string;
+  imageUrl: string;
   x: number;
   y: number;
 };
@@ -897,11 +898,11 @@ const fallbackTopology: TopologyState = {
     { id: "net-core", name: "Core / Servidores", cidr: "10.200.1.0/24", vlan: "1", gateway: "10.200.1.1", notes: "Backbone principal." },
   ],
   nodes: [
-    { id: "node-internet", name: "Internet", type: "internet", ip: "", vendor: "ISP", network: "WAN", x: 50, y: 12 },
-    { id: "node-fortinet", name: "Fortinet", type: "firewall", ip: "10.200.1.1", vendor: "Fortinet", network: "Core / Servidores", x: 50, y: 30 },
-    { id: "node-core", name: "Core", type: "core", ip: "10.200.1.2", vendor: "Core", network: "Core / Servidores", x: 50, y: 50 },
-    { id: "node-unifi", name: "UniFi Switch", type: "switch", ip: "192.168.9.2", vendor: "UniFi", network: "Gerencia UniFi", x: 28, y: 70 },
-    { id: "node-fiber", name: "Fibra CFTV", type: "fiber", ip: "", vendor: "Fibra", network: "Backbone", x: 72, y: 70 },
+    { id: "node-internet", name: "Internet", type: "internet", ip: "", vendor: "ISP", network: "WAN", imageUrl: "", x: 50, y: 12 },
+    { id: "node-fortinet", name: "Fortinet", type: "firewall", ip: "10.200.1.1", vendor: "Fortinet", network: "Core / Servidores", imageUrl: "", x: 50, y: 30 },
+    { id: "node-core", name: "Core", type: "core", ip: "10.200.1.2", vendor: "Core", network: "Core / Servidores", imageUrl: "", x: 50, y: 50 },
+    { id: "node-unifi", name: "UniFi Switch", type: "switch", ip: "192.168.9.2", vendor: "UniFi", network: "Gerencia UniFi", imageUrl: "", x: 28, y: 70 },
+    { id: "node-fiber", name: "Fibra CFTV", type: "fiber", ip: "", vendor: "Fibra", network: "Backbone", imageUrl: "", x: 72, y: 70 },
   ],
   links: [
     { id: "link-internet-fw", from: "node-internet", to: "node-fortinet", label: "WAN", medium: "wan" },
@@ -1369,7 +1370,7 @@ function App() {
       } catch (error) {
         setTopologySaveStatus(error instanceof Error ? error.message : "Erro ao salvar arquivo");
       }
-    }, 600);
+    }, 250);
 
     return () => {
       if (topologySaveTimerRef.current) {
@@ -1948,6 +1949,20 @@ function TopologyDashboard({
             if (!from || !to) return null;
             return <line key={link.id} className={`topology-line ${link.medium}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
           })}
+          {topology.links.map((link) => {
+            const from = topology.nodes.find((node) => node.id === link.from);
+            const to = topology.nodes.find((node) => node.id === link.to);
+            if (!from || !to) return null;
+            const fromStatus = topologyNodeStatus(from, ipByAddress, pingResults).tone;
+            const toStatus = topologyNodeStatus(to, ipByAddress, pingResults).tone;
+            const flowTone = fromStatus === "offline" || toStatus === "offline" ? "offline" : fromStatus === "warn" || toStatus === "warn" || fromStatus === "unknown" || toStatus === "unknown" ? "warn" : "online";
+
+            return (
+              <circle className={`topology-flow-dot ${flowTone}`} key={`${link.id}-flow`} r="0.72">
+                <animateMotion dur={link.medium === "fibra" ? "1.8s" : "2.4s"} path={`M ${from.x} ${from.y} L ${to.x} ${to.y}`} repeatCount="indefinite" />
+              </circle>
+            );
+          })}
         </svg>
 
         {topology.links.map((link) => {
@@ -1977,7 +1992,7 @@ function TopologyDashboard({
               onPointerMove={(event) => handleNodePointerMove(event, node)}
               onPointerUp={handleNodePointerUp}
             >
-              <Icon size={20} />
+              {node.imageUrl ? <img alt="" className="topology-node-image" draggable={false} src={node.imageUrl} /> : <Icon size={20} />}
               <strong>{node.name}</strong>
               <span>{node.ip || node.vendor}</span>
               <small>{status.label}</small>
@@ -2059,6 +2074,10 @@ function TopologyDashboard({
               <label>
                 <span>IP de gerenciamento</span>
                 <input value={nodeForm.ip} onChange={(event) => setNodeForm({ ...nodeForm, ip: event.target.value })} placeholder="10.200.1.10" />
+              </label>
+              <label>
+                <span>Imagem do equipamento</span>
+                <input value={nodeForm.imageUrl} onChange={(event) => setNodeForm({ ...nodeForm, imageUrl: event.target.value })} placeholder="URL da imagem ou logo" />
               </label>
               <label>
                 <span>Rede</span>
@@ -6180,6 +6199,7 @@ function emptyTopologyNode(): TopologyNode {
     ip: "",
     vendor: "UniFi",
     network: "",
+    imageUrl: "",
     x: 50,
     y: 50,
   };

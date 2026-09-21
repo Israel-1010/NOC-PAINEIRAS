@@ -1180,6 +1180,20 @@ h1 {
   stroke-width: 0.75;
 }
 
+.topology-flow-dot {
+  fill: #16a085;
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+.topology-flow-dot.warn {
+  fill: #d9902f;
+}
+
+.topology-flow-dot.offline {
+  fill: #c0392b;
+}
+
 .topology-link-label {
   position: absolute;
   z-index: 2;
@@ -1214,6 +1228,14 @@ h1 {
 
 .topology-node svg {
   color: #16876f;
+}
+
+.topology-node-image {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
 }
 
 .topology-node.offline {
