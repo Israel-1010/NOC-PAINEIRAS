@@ -59,6 +59,7 @@ import {
   updateIpNetworkVlan,
   updateIp,
 } from "./ipInventoryClient";
+import { getTopology, saveTopology } from "./topologyStore";
 
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
@@ -331,6 +332,18 @@ app.patch("/api/ips/:id", asyncRoute((req) => updateIp(String(req.params.id), re
 app.delete("/api/ips/:id", asyncRoute((req) => deleteIp(String(req.params.id))));
 
 app.use("/api/topology", requireAuth);
+
+app.get("/api/topology", asyncRoute(async () => ({
+  ok: true,
+  topology: await getTopology(),
+})));
+
+app.put("/api/topology", asyncRoute(async (req) => ({
+  ok: true,
+  message: "Topologia salva no arquivo.",
+  topology: await saveTopology(req.body?.topology || req.body || {}),
+})));
+
 app.post("/api/topology/ping", asyncRoute(async (req) => {
   const ips: unknown[] = Array.isArray(req.body?.ips) ? req.body.ips : [];
   const uniqueIps = (Array.from(new Set(ips.map((ip: unknown) => String(ip || "").trim()).filter(Boolean))) as string[]).slice(0, 100);

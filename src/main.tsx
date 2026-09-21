@@ -558,7 +558,6 @@ const AUTH_STORAGE_KEY = "rede-clube-session";
 const AUTH_EXPIRED_EVENT = "rede-clube-auth-expired";
 const ACTIVE_VIEW_STORAGE_KEY = "rede-clube-active-view";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "rede-clube-sidebar-collapsed";
-const TOPOLOGY_STORAGE_KEY = "rede-clube-topology";
 const AD_UPN_SUFFIX = "clubepaineiras.com.br";
 
 function getStoredView(): View {
@@ -585,15 +584,6 @@ function getStoredSidebarCollapsed() {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
   } catch {
     return false;
-  }
-}
-
-function getStoredTopology() {
-  try {
-    const raw = window.localStorage.getItem(TOPOLOGY_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as TopologyState) : fallbackTopology;
-  } catch {
-    return fallbackTopology;
   }
 }
 
@@ -1024,7 +1014,11 @@ function App() {
   const [ticketsDetails, setTicketsDetails] = useState<TicketsDetails>(fallbackTicketsDetails);
   const [ipSummary, setIpSummary] = useState<IpSummary>(fallbackIpSummary);
   const [ipDetails, setIpDetails] = useState<IpDetails>(fallbackIpDetails);
-  const [topology, setTopology] = useState<TopologyState>(() => getStoredTopology());
+  const [topology, setTopology] = useState<TopologyState>(fallbackTopology);
+  const [topologyLoaded, setTopologyLoaded] = useState(false);
+  const [topologySaveStatus, setTopologySaveStatus] = useState("Aguardando arquivo");
+  const skipNextTopologySaveRef = useRef(false);
+  const topologySaveTimerRef = useRef<number | null>(null);
 
   const clearSession = useCallback(() => {
     removeSession();
@@ -1039,6 +1033,9 @@ function App() {
     setTicketsDetails(fallbackTicketsDetails);
     setIpSummary(fallbackIpSummary);
     setIpDetails(fallbackIpDetails);
+    setTopology(fallbackTopology);
+    setTopologyLoaded(false);
+    setTopologySaveStatus("Aguardando arquivo");
   }, []);
 
   const handleLogin = useCallback((nextSession: AuthSession) => {
@@ -1152,6 +1149,33 @@ function App() {
     } catch {
       setIpSummary(fallbackIpSummary);
       setIpDetails(fallbackIpDetails);
+    }
+  }, [clearSession, session]);
+
+  const loadTopology = useCallback(async () => {
+    if (!session) return;
+
+    try {
+      const response = await authFetch("/api/topology");
+
+      if (response.status === 401) {
+        clearSession();
+        return;
+      }
+
+      const payload = await parseApiPayload<{ topology?: TopologyState; message?: string }>(response, {});
+
+      if (!response.ok || !payload.topology) {
+        throw new Error(payload.message || "Nao foi possivel carregar a topologia.");
+      }
+
+      skipNextTopologySaveRef.current = true;
+      setTopology(payload.topology);
+      setTopologyLoaded(true);
+      setTopologySaveStatus("Carregado do arquivo");
+    } catch (error) {
+      setTopologyLoaded(false);
+      setTopologySaveStatus(error instanceof Error ? error.message : "Erro ao carregar arquivo");
     }
   }, [clearSession, session]);
 
@@ -1292,6 +1316,14 @@ function App() {
   }, [loadIps, session]);
 
   useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    loadTopology();
+  }, [loadTopology, session]);
+
+  useEffect(() => {
     window.addEventListener(AUTH_EXPIRED_EVENT, clearSession);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, clearSession);
   }, [clearSession]);
@@ -1305,8 +1337,46 @@ function App() {
   }, [sidebarCollapsed]);
 
   useEffect(() => {
-    window.localStorage.setItem(TOPOLOGY_STORAGE_KEY, JSON.stringify(topology));
-  }, [topology]);
+    if (!session || !topologyLoaded) {
+      return undefined;
+    }
+
+    if (skipNextTopologySaveRef.current) {
+      skipNextTopologySaveRef.current = false;
+      return undefined;
+    }
+
+    setTopologySaveStatus("Salvando no arquivo...");
+
+    if (topologySaveTimerRef.current) {
+      window.clearTimeout(topologySaveTimerRef.current);
+    }
+
+    topologySaveTimerRef.current = window.setTimeout(async () => {
+      try {
+        const response = await authFetch("/api/topology", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topology }),
+        });
+        const payload = await parseApiPayload<{ message?: string }>(response, {});
+
+        if (!response.ok) {
+          throw new Error(payload.message || "Nao foi possivel salvar a topologia.");
+        }
+
+        setTopologySaveStatus("Salvo no arquivo");
+      } catch (error) {
+        setTopologySaveStatus(error instanceof Error ? error.message : "Erro ao salvar arquivo");
+      }
+    }, 600);
+
+    return () => {
+      if (topologySaveTimerRef.current) {
+        window.clearTimeout(topologySaveTimerRef.current);
+      }
+    };
+  }, [session, topology, topologyLoaded]);
 
   useEffect(() => {
     if (activeView === "milvusPortal") {
@@ -1406,7 +1476,7 @@ function App() {
         {activeView === "tv" ? (
           <TvDashboard adSummary={adSummaryState} adStatus={adStatus} adDetails={adDetails} onRefreshAd={loadAd} />
         ) : activeView === "topology" ? (
-          <TopologyDashboard topology={topology} onChange={setTopology} ipDetails={ipDetails} onRefreshIps={loadIps} />
+          <TopologyDashboard topology={topology} onChange={setTopology} ipDetails={ipDetails} onRefreshIps={loadIps} saveStatus={topologySaveStatus} />
         ) : activeView === "intune" ? (
           <IntuneDashboard intuneStatus={intuneStatus} intuneSummary={intuneSummary} intuneDetails={intuneDetails} onRefreshIntune={loadIntune} />
         ) : activeView === "tickets" ? (
@@ -1628,11 +1698,13 @@ function TopologyDashboard({
   onChange,
   ipDetails,
   onRefreshIps,
+  saveStatus,
 }: {
   topology: TopologyState;
   onChange: React.Dispatch<React.SetStateAction<TopologyState>>;
   ipDetails: IpDetails;
   onRefreshIps: () => Promise<void>;
+  saveStatus: string;
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [networkForm, setNetworkForm] = useState<TopologyNetwork>(emptyTopologyNetwork());
@@ -1850,6 +1922,7 @@ function TopologyDashboard({
           </div>
           <div className="topology-toolbar-group">
             <span className="topology-live-pill">{onlineNodes}/{monitoredNodes.length} online</span>
+            <span className="topology-save-pill">{saveStatus}</span>
             {pingError ? <span className="topology-error-pill">{pingError}</span> : null}
             <button className="secondary-action" type="button" onClick={refreshTopologyPing} disabled={pingLoading}>
               <RefreshCw size={16} />

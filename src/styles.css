@@ -1071,6 +1071,7 @@ h1 {
 }
 
 .topology-live-pill,
+.topology-save-pill,
 .topology-error-pill {
   display: inline-flex;
   align-items: center;
@@ -1084,6 +1085,12 @@ h1 {
 .topology-live-pill {
   color: #0f6f59;
   background: #dff8ef;
+}
+
+.topology-save-pill {
+  color: #516158;
+  background: #f4f8f4;
+  border: 1px solid #dfe6df;
 }
 
 .topology-error-pill {
