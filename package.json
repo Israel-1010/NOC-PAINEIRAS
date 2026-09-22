@@ -22,6 +22,7 @@
     "express": "^5.2.1",
     "ldapts": "^9.0.0",
     "lucide-react": "^1.46.0",
+    "mysql2": "^3.24.4",
     "net-snmp": "^3.29.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

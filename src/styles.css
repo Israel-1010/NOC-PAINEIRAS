@@ -1812,6 +1812,167 @@ h1 {
   outline: 0;
 }
 
+.wifi-panel {
+  min-height: 650px;
+}
+
+.wifi-submenu {
+  display: inline-flex;
+  gap: 8px;
+  padding: 4px;
+  margin: 2px 0 14px;
+  background: #f4f8f4;
+  border: 1px solid #dfe6df;
+  border-radius: 8px;
+}
+
+.wifi-submenu button {
+  min-height: 34px;
+  padding: 0 14px;
+  color: #657166;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.wifi-submenu button.active {
+  color: #ffffff;
+  background: #1f7a62;
+}
+
+.wifi-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.wifi-list,
+.wifi-editor {
+  min-width: 0;
+}
+
+.wifi-table {
+  display: grid;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid #dfe6df;
+  border-radius: 8px;
+}
+
+.wifi-table-head,
+.wifi-table-row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  min-width: 860px;
+}
+
+.wifi-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 42px;
+  padding: 0 12px;
+  color: #657166;
+  background: #ffffff;
+  border-bottom: 2px solid #dfe6df;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wifi-table-row {
+  width: 100%;
+  min-height: 54px;
+  padding: 10px 12px;
+  text-align: left;
+  background: #fbfdfb;
+  border: 0;
+  border-bottom: 1px solid #e4eae4;
+}
+
+.wifi-table-row:hover {
+  background: #f1f8f5;
+}
+
+.wifi-table-row span,
+.wifi-table-row strong,
+.wifi-table-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wifi-table-row span {
+  color: #202520;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.wifi-table-row strong {
+  color: #0f6f59;
+  font-size: 12px;
+}
+
+.wifi-editor {
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid #dfe6df;
+  border-radius: 8px;
+}
+
+.wifi-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.wifi-editor-head h2 {
+  font-size: 20px;
+}
+
+.wifi-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wifi-form label,
+.wifi-form label span {
+  display: block;
+}
+
+.wifi-form label span {
+  margin-bottom: 6px;
+  color: #657166;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wifi-form input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  color: #1a1f1b;
+  background: #fbfdfb;
+  border: 1px solid #d8e0d8;
+  border-radius: 8px;
+  outline: 0;
+}
+
+.wifi-actions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .ip-table {
   display: grid;
   min-height: 0;
@@ -4083,6 +4244,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .wifi-layout {
+    grid-template-columns: 1fr;
+  }
+
   .ad-users-panel,
   .ad-groups-panel,
   .ad-lockouts-panel,
@@ -4311,6 +4476,12 @@ h1 {
   .snmp-device-meta {
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .wifi-layout,
+  .wifi-form,
+  .wifi-actions {
+    grid-template-columns: 1fr;
   }
 
   .topbar-actions {

@@ -27,6 +27,7 @@ import {
   Shield,
   ShieldCheck,
   Signal,
+  Table as TableIcon,
   Trash2,
   Tv,
   UserCheck,
@@ -270,6 +271,38 @@ type SnmpSummary = {
   enabled: number;
   online: number;
   offline: number;
+};
+
+type WifiKind = "associados" | "colaboradores";
+
+type WifiColumn = {
+  name: string;
+  type: string;
+  nullable: boolean;
+  key: string;
+  defaultValue: unknown;
+  extra: string;
+  primary: boolean;
+  autoIncrement: boolean;
+  writable: boolean;
+};
+
+type WifiStatus = {
+  ok: boolean;
+  configured: boolean;
+  database: string;
+  message: string;
+};
+
+type WifiListPayload = {
+  kind: WifiKind;
+  table: string;
+  columns: WifiColumn[];
+  primaryKey: string;
+  page: number;
+  pageSize: number;
+  total: number;
+  items: Array<Record<string, unknown>>;
 };
 
 type TicketsStatus = {
@@ -614,7 +647,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "milvusPortal" || value === "ips" || value === "snmp" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1013,13 +1046,13 @@ const navItems = [
   { label: "Intune", icon: ShieldCheck, view: "intune" },
   { label: "Bloqueios", icon: LockKeyhole },
   { label: "Chamado Milvus", icon: ClipboardList, view: "milvusPortal" },
-  { label: "UniFi", icon: Wifi },
+  { label: "WiFi", icon: Wifi, view: "wifi" },
   { label: "Fortinet", icon: Shield },
   { label: "Alertas", icon: Bell },
   { label: "Ajustes", icon: Settings },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "tickets" | "milvusPortal" | "ips" | "snmp";
+type View = "tv" | "topology" | "ad" | "intune" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi";
 
 function statusLabel(status: Status) {
   return {
@@ -1036,6 +1069,7 @@ function viewEyebrow(view: View) {
   if (view === "milvusPortal") return "Portal oficial";
   if (view === "ips") return "Inventario de rede";
   if (view === "snmp") return "Monitoramento de equipamentos";
+  if (view === "wifi") return "Portal WiFi";
   if (view === "topology") return "Mapa e monitoramento";
   return "Administracao de identidade";
 }
@@ -1047,6 +1081,7 @@ function viewTitle(view: View) {
   if (view === "milvusPortal") return "Chamado Milvus";
   if (view === "ips") return "IPs";
   if (view === "snmp") return "SNMP";
+  if (view === "wifi") return "WiFi";
   if (view === "topology") return "Topologia";
   return "Active Directory";
 }
@@ -1594,6 +1629,8 @@ function App() {
           <MilvusPortalView />
         ) : activeView === "ips" ? (
           <IpsDashboard ipSummary={ipSummary} ipDetails={ipDetails} onRefreshIps={loadIps} />
+        ) : activeView === "wifi" ? (
+          <WifiPortalDashboard />
         ) : (
           <AdDashboard adSummary={adSummaryState} adStatus={adStatus} adDetails={adDetails} onRefreshAd={loadAd} />
         )}
@@ -3095,6 +3132,250 @@ function MilvusPortalView() {
         referrerPolicy="no-referrer-when-downgrade"
       />
     </section>
+  );
+}
+
+function WifiPortalDashboard() {
+  const [kind, setKind] = useState<WifiKind>("associados");
+  const [status, setStatus] = useState<WifiStatus>({ ok: false, configured: false, database: "wifi_portal", message: "Carregando MySQL..." });
+  const [payload, setPayload] = useState<WifiListPayload | null>(null);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [form, setForm] = useState<Record<string, unknown>>({});
+  const [editingId, setEditingId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const columns = payload?.columns || [];
+  const primaryKey = payload?.primaryKey || columns.find((column) => column.primary)?.name || columns[0]?.name || "";
+  const writableColumns = columns.filter((column) => column.writable && !column.autoIncrement);
+  const visibleColumns = pickWifiVisibleColumns(columns, primaryKey);
+  const totalPages = Math.max(1, Math.ceil((payload?.total || 0) / (payload?.pageSize || 20)));
+
+  const loadWifi = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const params = new URLSearchParams({
+        search,
+        page: String(page),
+        pageSize: "20",
+      });
+      const [statusResponse, listResponse] = await Promise.all([
+        authFetch("/api/wifi/status"),
+        authFetch(`/api/wifi/${kind}?${params.toString()}`),
+      ]);
+
+      if (statusResponse.status === 401 || listResponse.status === 401) return;
+
+      const statusPayload = await parseApiPayload<WifiStatus>(statusResponse, { ok: false, configured: false, database: "wifi_portal", message: "Falha ao consultar status." });
+      setStatus(statusPayload);
+
+      const listPayload = await parseApiPayload<WifiListPayload | { message?: string }>(listResponse, {});
+      if (!listResponse.ok || !("items" in listPayload)) {
+        throw new Error("message" in listPayload ? listPayload.message || "Falha ao carregar tabela WiFi." : "Falha ao carregar tabela WiFi.");
+      }
+
+      setPayload(listPayload);
+      setForm((current) => Object.keys(current).length ? current : emptyWifiRecord(listPayload.columns));
+    } catch (loadError) {
+      setPayload(null);
+      setError(loadError instanceof Error ? loadError.message : "Nao foi possivel carregar dados WiFi.");
+    } finally {
+      setLoading(false);
+    }
+  }, [kind, page, search]);
+
+  useEffect(() => {
+    loadWifi();
+  }, [loadWifi]);
+
+  function changeKind(nextKind: WifiKind) {
+    setKind(nextKind);
+    setPage(1);
+    setSearch("");
+    setForm({});
+    setEditingId("");
+    setMessage("");
+    setError("");
+  }
+
+  function newRecord() {
+    setForm(emptyWifiRecord(columns));
+    setEditingId("");
+    setMessage("");
+    setError("");
+  }
+
+  function editRecord(record: Record<string, unknown>) {
+    setForm({ ...record });
+    setEditingId(String(record[primaryKey] ?? ""));
+    setMessage("");
+    setError("");
+  }
+
+  async function saveRecord(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const path = editingId
+        ? `/api/wifi/${kind}/${encodeURIComponent(editingId)}`
+        : `/api/wifi/${kind}`;
+      const result = await adRequest<{ message: string }>(path, {
+        method: editingId ? "PATCH" : "POST",
+        body: form,
+      });
+      setMessage(result.message || "Registro salvo.");
+      setEditingId("");
+      setForm(emptyWifiRecord(columns));
+      await loadWifi();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Nao foi possivel salvar registro WiFi.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeRecord() {
+    if (!editingId) return;
+    setSaving(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const result = await adRequest<{ message: string }>(`/api/wifi/${kind}/${encodeURIComponent(editingId)}`, { method: "DELETE" });
+      setMessage(result.message || "Registro removido.");
+      setEditingId("");
+      setForm(emptyWifiRecord(columns));
+      await loadWifi();
+    } catch (removeError) {
+      setError(removeError instanceof Error ? removeError.message : "Nao foi possivel remover registro WiFi.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <section className="kpi-grid" aria-label="Resumo WiFi">
+        <MetricCard icon={Wifi} label="MySQL" value={status.ok ? "Online" : "Offline"} detail={status.message} tone={status.ok ? "good" : "danger"} />
+        <MetricCard icon={Server} label="Base" value={status.database || "wifi_portal"} detail={status.configured ? "Configurada" : "Sem variaveis"} tone="calm" />
+        <MetricCard icon={Users} label={kind === "associados" ? "Associados" : "Colaboradores"} value={String(payload?.total || 0)} detail={payload?.table || "-"} tone="warn" />
+        <MetricCard icon={TableIcon} label="Campos" value={String(columns.length)} detail={primaryKey ? `Chave: ${primaryKey}` : "Schema dinamico"} tone="calm" />
+      </section>
+
+      <section className="panel wifi-panel">
+        <PanelHeader
+          icon={Wifi}
+          title="Portal WiFi"
+          meta={loading ? "Carregando..." : `${payload?.total || 0} registros`}
+          action={
+            <button className="secondary-action" type="button" onClick={loadWifi} disabled={loading}>
+              <RefreshCw size={15} />
+              Atualizar
+            </button>
+          }
+        />
+
+        <div className="wifi-submenu" role="tablist" aria-label="Cadastros WiFi">
+          <button className={kind === "associados" ? "active" : ""} type="button" onClick={() => changeKind("associados")}>
+            Associados
+          </button>
+          <button className={kind === "colaboradores" ? "active" : ""} type="button" onClick={() => changeKind("colaboradores")}>
+            Colaboradores
+          </button>
+        </div>
+
+        {error ? <div className="form-error">{error}</div> : null}
+        {message ? <div className="form-success">{message}</div> : null}
+
+        <div className="wifi-layout">
+          <section className="wifi-list">
+            <DirectoryTools
+              value={search}
+              onChange={(value) => {
+                setSearch(value);
+                setPage(1);
+              }}
+              page={page}
+              total={payload?.total || 0}
+              onPageChange={setPage}
+              placeholder="Pesquisar nome, e-mail, CPF, matricula ou qualquer campo"
+              pageSizeOverride={payload?.pageSize || 20}
+            />
+
+            <div className="wifi-table">
+              <div className="wifi-table-head" style={{ gridTemplateColumns: wifiGridTemplate(visibleColumns.length) }}>
+                {visibleColumns.map((column) => (
+                  <span key={column.name}>{column.name}</span>
+                ))}
+                <span>Acoes</span>
+              </div>
+              {(payload?.items || []).map((record, index) => {
+                const recordId = String(record[primaryKey] ?? index);
+                return (
+                  <button className="wifi-table-row" key={recordId} onClick={() => editRecord(record)} style={{ gridTemplateColumns: wifiGridTemplate(visibleColumns.length) }} type="button">
+                    {visibleColumns.map((column) => (
+                      <span key={column.name}>{formatWifiValue(record[column.name])}</span>
+                    ))}
+                    <strong>{editingId === String(record[primaryKey] ?? "") ? "Editando" : "Editar"}</strong>
+                  </button>
+                );
+              })}
+              {!payload?.items?.length ? (
+                <EmptyState title="Nenhum registro encontrado" detail="Use o formulario ao lado para inserir ou ajuste a pesquisa." />
+              ) : null}
+            </div>
+          </section>
+
+          <section className="wifi-editor">
+            <div className="wifi-editor-head">
+              <div>
+                <p className="eyebrow">{editingId ? "Editar registro" : "Novo registro"}</p>
+                <h2>{kind === "associados" ? "Associado" : "Colaborador"}</h2>
+              </div>
+              <button className="secondary-action" type="button" onClick={newRecord}>
+                <Plus size={15} />
+                Novo
+              </button>
+            </div>
+
+            <form className="wifi-form" onSubmit={saveRecord}>
+              {writableColumns.map((column) => (
+                <label key={column.name}>
+                  <span>{column.name}{column.nullable ? "" : " *"}</span>
+                  <input
+                    disabled={saving}
+                    onChange={(event) => setForm((current) => ({ ...current, [column.name]: event.target.value }))}
+                    placeholder={column.type}
+                    value={String(form[column.name] ?? "")}
+                  />
+                </label>
+              ))}
+              {!writableColumns.length ? (
+                <EmptyState title="Tabela sem campos editaveis" detail="Confira permissoes e estrutura da tabela." />
+              ) : null}
+              <div className="wifi-actions">
+                <button className="primary-action" type="submit" disabled={saving || !writableColumns.length}>
+                  <Save size={15} />
+                  Salvar
+                </button>
+                <button className="danger-action" type="button" onClick={removeRecord} disabled={saving || !editingId}>
+                  <Trash2 size={15} />
+                  Remover
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -6651,6 +6932,37 @@ function emptySnmpDevice(): SnmpDevice {
     notes: "",
     updatedAt: new Date().toISOString(),
   };
+}
+
+function emptyWifiRecord(columns: WifiColumn[]) {
+  return Object.fromEntries(
+    columns
+      .filter((column) => column.writable && !column.autoIncrement)
+      .map((column) => [column.name, ""]),
+  );
+}
+
+function pickWifiVisibleColumns(columns: WifiColumn[], primaryKey: string) {
+  const preferred = ["nome", "name", "email", "e-mail", "cpf", "matricula", "registro", "telefone", "celular", "status"];
+  const scored = [...columns].sort((a, b) => {
+    const aName = a.name.toLowerCase();
+    const bName = b.name.toLowerCase();
+    const aScore = a.name === primaryKey ? -2 : preferred.some((item) => aName.includes(item)) ? -1 : 0;
+    const bScore = b.name === primaryKey ? -2 : preferred.some((item) => bName.includes(item)) ? -1 : 0;
+    return aScore - bScore;
+  });
+
+  return scored.slice(0, 6);
+}
+
+function wifiGridTemplate(columns: number) {
+  return `repeat(${Math.max(1, columns)}, minmax(120px, 1fr)) 100px`;
+}
+
+function formatWifiValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }
 
 function createUserFormFromDetails(details: AdUserDetails): CreateUserForm {

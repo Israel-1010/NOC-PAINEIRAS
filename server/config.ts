@@ -34,6 +34,16 @@ export type MilvusConfig = {
   closeTicketPath: string;
 };
 
+export type WifiPortalConfig = {
+  host?: string;
+  port: number;
+  user?: string;
+  password?: string;
+  database: string;
+  associadosTable: string;
+  colaboradoresTable: string;
+};
+
 export const port = Number(process.env.PORT || 3333);
 export const sessionSecret = process.env.APP_SESSION_SECRET || "rede-clube-dev-secret-change-me";
 
@@ -84,4 +94,18 @@ export const milvusConfig: MilvusConfig = {
 
 export function isMilvusConfigured(config: MilvusConfig = milvusConfig) {
   return Boolean(config.baseUrl && config.apiToken);
+}
+
+export const wifiPortalConfig: WifiPortalConfig = {
+  host: process.env.WIFI_DB_HOST,
+  port: Number(process.env.WIFI_DB_PORT || 3306),
+  user: process.env.WIFI_DB_USER,
+  password: process.env.WIFI_DB_PASSWORD,
+  database: process.env.WIFI_DB_NAME || "wifi_portal",
+  associadosTable: process.env.WIFI_ASSOCIADOS_TABLE || "Tb_associados",
+  colaboradoresTable: process.env.WIFI_COLABORADORES_TABLE || "Tb_colaboradores",
+};
+
+export function isWifiPortalConfigured(config: WifiPortalConfig = wifiPortalConfig) {
+  return Boolean(config.host && config.user && config.database);
 }

@@ -55,6 +55,14 @@ import {
   testSnmpDevice,
 } from "./snmpAgent";
 import {
+  createWifiRecord,
+  deleteWifiRecord,
+  getWifiSchema,
+  getWifiStatus,
+  listWifiRecords,
+  updateWifiRecord,
+} from "./wifiPortalClient";
+import {
   createIp,
   createIpLink,
   createIpNetwork,
@@ -315,6 +323,19 @@ app.get("/api/intune/status", asyncRoute(() => getIntuneStatus()));
 app.get("/api/intune/summary", asyncRoute(() => getIntuneSummary()));
 app.get("/api/intune/devices", asyncRoute((req) => listIntuneDevices(String(req.query.search || ""), String(req.query.limit || ""))));
 app.get("/api/intune/devices/:id", asyncRoute((req) => getIntuneDeviceDetails(String(req.params.id))));
+
+app.use("/api/wifi", requireAuth);
+
+app.get("/api/wifi/status", asyncRoute(() => getWifiStatus()));
+app.get("/api/wifi/:kind/schema", asyncRoute((req) => getWifiSchema(String(req.params.kind))));
+app.get("/api/wifi/:kind", asyncRoute((req) => listWifiRecords(String(req.params.kind), {
+  search: String(req.query.search || ""),
+  page: String(req.query.page || "1"),
+  pageSize: String(req.query.pageSize || "20"),
+})));
+app.post("/api/wifi/:kind", asyncRoute((req) => createWifiRecord(String(req.params.kind), req.body || {})));
+app.patch("/api/wifi/:kind/:id", asyncRoute((req) => updateWifiRecord(String(req.params.kind), String(req.params.id), req.body || {})));
+app.delete("/api/wifi/:kind/:id", asyncRoute((req) => deleteWifiRecord(String(req.params.kind), String(req.params.id))));
 
 app.use("/api/snmp", requireAuth);
 
