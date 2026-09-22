@@ -3177,6 +3177,40 @@ function SnmpDashboard({
     }
   }
 
+  async function autoDetectVersion() {
+    setSaving(true);
+    setMessage("");
+    setError("");
+    setTestMetric(null);
+
+    try {
+      const attempts: SnmpVersion[] = ["2c", "1"];
+
+      for (const version of attempts) {
+        const candidate = { ...form, version };
+        const payload = await adRequest<{ metric: SnmpMetric }>("/api/snmp/test", {
+          method: "POST",
+          body: candidate,
+        });
+
+        if (payload.metric.ok) {
+          setForm(candidate);
+          setTestMetric(payload.metric);
+          setMessage(`SNMP respondeu usando v${version}. Salve o dispositivo com essa versao.`);
+          return;
+        }
+
+        setTestMetric(payload.metric);
+      }
+
+      setMessage("Nao respondeu em SNMP v2c nem v1. Confira community, UDP/161 e acesso do container ate o equipamento.");
+    } catch (testError) {
+      setError(testError instanceof Error ? testError.message : "Nao foi possivel detectar a versao SNMP.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function collectDevice(device: SnmpDevice) {
     setSaving(true);
     setMessage("");
@@ -3348,6 +3382,10 @@ function SnmpDashboard({
               <button className="secondary-action" type="button" onClick={testDevice} disabled={saving || !form.host.trim()}>
                 <Activity size={15} />
                 Testar SNMP
+              </button>
+              <button className="secondary-action" type="button" onClick={autoDetectVersion} disabled={saving || !form.host.trim() || form.version === "3"}>
+                <Signal size={15} />
+                Auto v2c/v1
               </button>
               <button className="primary-action" type="submit" disabled={saving || !form.host.trim()}>
                 <Save size={15} />

@@ -243,12 +243,17 @@ async function snmpGet(device: SnmpDevice) {
 }
 
 function failedMetric(device: SnmpDevice, error: unknown): SnmpMetric {
+  const rawMessage = error instanceof Error ? error.message : "Falha SNMP";
+  const message = /timed out|timeout/i.test(rawMessage)
+    ? "SNMP sem resposta na UDP/161. Confira versao, community, firewall do equipamento e se o container consegue alcancar esse IP."
+    : rawMessage;
+
   return {
     deviceId: device.id,
     ok: false,
     checkedAt: new Date().toISOString(),
     latencyMs: null,
-    message: error instanceof Error ? error.message : "Falha SNMP",
+    message,
     sysName: "",
     sysDescr: "",
     sysObjectId: "",
