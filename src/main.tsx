@@ -296,6 +296,7 @@ type WifiStatus = {
 
 type WifiListPayload = {
   kind: WifiKind;
+  database: string;
   table: string;
   columns: WifiColumn[];
   primaryKey: string;
@@ -3266,7 +3267,7 @@ function WifiPortalDashboard() {
       <section className="kpi-grid" aria-label="Resumo WiFi">
         <MetricCard icon={Wifi} label="MySQL" value={status.ok ? "Online" : "Offline"} detail={status.message} tone={status.ok ? "good" : "danger"} />
         <MetricCard icon={Server} label="Base" value={status.database || "wifi_portal"} detail={status.configured ? "Configurada" : "Sem variaveis"} tone="calm" />
-        <MetricCard icon={Users} label={kind === "associados" ? "Associados" : "Colaboradores"} value={String(payload?.total || 0)} detail={payload?.table || "-"} tone="warn" />
+        <MetricCard icon={Users} label={kind === "associados" ? "Associados" : "Colaboradores"} value={String(payload?.total || 0)} detail={payload ? `${payload.database}.${payload.table}` : "-"} tone="warn" />
         <MetricCard icon={TableIcon} label="Campos" value={String(columns.length)} detail={primaryKey ? `Chave: ${primaryKey}` : "Schema dinamico"} tone="calm" />
       </section>
 
@@ -3349,7 +3350,7 @@ function WifiPortalDashboard() {
             <form className="wifi-form" onSubmit={saveRecord}>
               {writableColumns.map((column) => (
                 <label key={column.name}>
-                  <span>{column.name}{column.nullable ? "" : " *"}</span>
+                  <span>{wifiFieldLabel(kind, column)}{column.nullable ? "" : " *"}</span>
                   <input
                     disabled={saving}
                     onChange={(event) => setForm((current) => ({ ...current, [column.name]: event.target.value }))}
@@ -6943,7 +6944,7 @@ function emptyWifiRecord(columns: WifiColumn[]) {
 }
 
 function pickWifiVisibleColumns(columns: WifiColumn[], primaryKey: string) {
-  const preferred = ["nome", "name", "email", "e-mail", "cpf", "matricula", "registro", "telefone", "celular", "status"];
+  const preferred = ["username", "value", "nome", "name", "email", "e-mail", "cpf", "matricula", "registro", "telefone", "celular", "status"];
   const scored = [...columns].sort((a, b) => {
     const aName = a.name.toLowerCase();
     const bName = b.name.toLowerCase();
@@ -6963,6 +6964,17 @@ function formatWifiValue(value: unknown) {
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function wifiFieldLabel(kind: WifiKind, column: WifiColumn) {
+  if (kind === "colaboradores") {
+    const name = column.name.toLowerCase();
+    if (name === "username") return "RE";
+    if (name === "value") return "Senha";
+    if (name === "attribute") return "Atributo";
+  }
+
+  return column.name;
 }
 
 function createUserFormFromDetails(details: AdUserDetails): CreateUserForm {

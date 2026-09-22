@@ -39,8 +39,9 @@ export type WifiPortalConfig = {
   port: number;
   user?: string;
   password?: string;
-  database: string;
+  associadosDatabase: string;
   associadosTable: string;
+  colaboradoresDatabase: string;
   colaboradoresTable: string;
 };
 
@@ -101,11 +102,12 @@ export const wifiPortalConfig: WifiPortalConfig = {
   port: Number(process.env.WIFI_DB_PORT || 3306),
   user: process.env.WIFI_DB_USER,
   password: process.env.WIFI_DB_PASSWORD,
-  database: process.env.WIFI_DB_NAME || "wifi_portal",
+  associadosDatabase: process.env.WIFI_ASSOCIADOS_DB_NAME || process.env.WIFI_DB_NAME || "wifi_portal",
   associadosTable: process.env.WIFI_ASSOCIADOS_TABLE || "Tb_associados",
-  colaboradoresTable: process.env.WIFI_COLABORADORES_TABLE || "Tb_colaboradores",
+  colaboradoresDatabase: process.env.WIFI_COLABORADORES_DB_NAME || "radius",
+  colaboradoresTable: process.env.WIFI_COLABORADORES_TABLE || "radcheck",
 };
 
 export function isWifiPortalConfigured(config: WifiPortalConfig = wifiPortalConfig) {
-  return Boolean(config.host && config.user && config.database);
+  return Boolean(config.host && config.user && config.associadosDatabase && config.colaboradoresDatabase);
 }
