@@ -46,6 +46,15 @@ import {
   listMilvusTickets,
 } from "./milvusClient";
 import {
+  collectAllSnmpDevices,
+  collectSnmpDevice,
+  deleteSnmpDevice,
+  getSnmpSummary,
+  listSnmp,
+  saveSnmpDevice,
+  testSnmpDevice,
+} from "./snmpAgent";
+import {
   createIp,
   createIpLink,
   createIpNetwork,
@@ -306,6 +315,29 @@ app.get("/api/intune/status", asyncRoute(() => getIntuneStatus()));
 app.get("/api/intune/summary", asyncRoute(() => getIntuneSummary()));
 app.get("/api/intune/devices", asyncRoute((req) => listIntuneDevices(String(req.query.search || ""), String(req.query.limit || ""))));
 app.get("/api/intune/devices/:id", asyncRoute((req) => getIntuneDeviceDetails(String(req.params.id))));
+
+app.use("/api/snmp", requireAuth);
+
+app.get("/api/snmp/summary", asyncRoute(() => getSnmpSummary()));
+app.get("/api/snmp", asyncRoute(() => listSnmp()));
+app.post("/api/snmp/devices", asyncRoute(async (req) => ({
+  ok: true,
+  message: "Dispositivo SNMP salvo.",
+  device: await saveSnmpDevice(req.body || {}),
+})));
+app.delete("/api/snmp/devices/:id", asyncRoute(async (req) => deleteSnmpDevice(String(req.params.id))));
+app.post("/api/snmp/test", asyncRoute(async (req) => ({
+  ok: true,
+  metric: await testSnmpDevice(req.body || {}),
+})));
+app.post("/api/snmp/collect", asyncRoute(async () => ({
+  ok: true,
+  metrics: await collectAllSnmpDevices(),
+})));
+app.post("/api/snmp/devices/:id/collect", asyncRoute(async (req) => ({
+  ok: true,
+  metric: await collectSnmpDevice(String(req.params.id)),
+})));
 
 app.use("/api/tickets", requireAuth);
 

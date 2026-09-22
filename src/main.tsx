@@ -223,6 +223,55 @@ type IntuneDetails = {
   devices: IntuneDevice[];
 };
 
+type SnmpVersion = "1" | "2c" | "3";
+
+type SnmpDevice = {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  type: "Fortinet" | "UniFi" | "Switch" | "Firewall" | "Servidor" | "Outro";
+  version: SnmpVersion;
+  community: string;
+  username: string;
+  authProtocol: "none" | "md5" | "sha";
+  authKey: string;
+  privProtocol: "none" | "des" | "aes";
+  privKey: string;
+  timeoutMs: number;
+  retries: number;
+  enabled: boolean;
+  notes: string;
+  updatedAt: string;
+};
+
+type SnmpMetric = {
+  deviceId: string;
+  ok: boolean;
+  checkedAt: string;
+  latencyMs: number | null;
+  message: string;
+  sysName: string;
+  sysDescr: string;
+  sysObjectId: string;
+  uptime: string;
+  contact: string;
+  location: string;
+  interfaces: number | null;
+};
+
+type SnmpDetails = {
+  devices: SnmpDevice[];
+  metrics: SnmpMetric[];
+};
+
+type SnmpSummary = {
+  total: number;
+  enabled: number;
+  online: number;
+  offline: number;
+};
+
 type TicketsStatus = {
   ok: boolean;
   source: string;
@@ -565,7 +614,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "milvusPortal" || value === "ips" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "milvusPortal" || value === "ips" || value === "snmp" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -858,6 +907,18 @@ const fallbackIntuneDetails: IntuneDetails = {
   devices: [],
 };
 
+const fallbackSnmpSummary: SnmpSummary = {
+  total: 0,
+  enabled: 0,
+  online: 0,
+  offline: 0,
+};
+
+const fallbackSnmpDetails: SnmpDetails = {
+  devices: [],
+  metrics: [],
+};
+
 const fallbackTicketsStatus: TicketsStatus = {
   ok: true,
   source: "mock",
@@ -948,6 +1009,7 @@ const navItems = [
   { label: "Ativos", icon: Server },
   { label: "AD", icon: Users, view: "ad" },
   { label: "IPs", icon: Network, view: "ips" },
+  { label: "SNMP", icon: Signal, view: "snmp" },
   { label: "Intune", icon: ShieldCheck, view: "intune" },
   { label: "Bloqueios", icon: LockKeyhole },
   { label: "Chamado Milvus", icon: ClipboardList, view: "milvusPortal" },
@@ -957,7 +1019,7 @@ const navItems = [
   { label: "Ajustes", icon: Settings },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "tickets" | "milvusPortal" | "ips";
+type View = "tv" | "topology" | "ad" | "intune" | "tickets" | "milvusPortal" | "ips" | "snmp";
 
 function statusLabel(status: Status) {
   return {
@@ -973,6 +1035,7 @@ function viewEyebrow(view: View) {
   if (view === "tickets") return "Atendimento e SLA";
   if (view === "milvusPortal") return "Portal oficial";
   if (view === "ips") return "Inventario de rede";
+  if (view === "snmp") return "Monitoramento de equipamentos";
   if (view === "topology") return "Mapa e monitoramento";
   return "Administracao de identidade";
 }
@@ -983,6 +1046,7 @@ function viewTitle(view: View) {
   if (view === "tickets") return "Chamados Milvus";
   if (view === "milvusPortal") return "Chamado Milvus";
   if (view === "ips") return "IPs";
+  if (view === "snmp") return "SNMP";
   if (view === "topology") return "Topologia";
   return "Active Directory";
 }
@@ -1010,6 +1074,8 @@ function App() {
   const [intuneStatus, setIntuneStatus] = useState<IntuneStatus>(fallbackIntuneStatus);
   const [intuneSummary, setIntuneSummary] = useState<IntuneSummary>(fallbackIntuneSummary);
   const [intuneDetails, setIntuneDetails] = useState<IntuneDetails>(fallbackIntuneDetails);
+  const [snmpSummary, setSnmpSummary] = useState<SnmpSummary>(fallbackSnmpSummary);
+  const [snmpDetails, setSnmpDetails] = useState<SnmpDetails>(fallbackSnmpDetails);
   const [ticketsStatus, setTicketsStatus] = useState<TicketsStatus>(fallbackTicketsStatus);
   const [ticketsSummary, setTicketsSummary] = useState<TicketsSummary>(fallbackTicketsSummary);
   const [ticketsDetails, setTicketsDetails] = useState<TicketsDetails>(fallbackTicketsDetails);
@@ -1029,6 +1095,8 @@ function App() {
     setIntuneStatus(fallbackIntuneStatus);
     setIntuneSummary(fallbackIntuneSummary);
     setIntuneDetails(fallbackIntuneDetails);
+    setSnmpSummary(fallbackSnmpSummary);
+    setSnmpDetails(fallbackSnmpDetails);
     setTicketsStatus(fallbackTicketsStatus);
     setTicketsSummary(fallbackTicketsSummary);
     setTicketsDetails(fallbackTicketsDetails);
@@ -1276,6 +1344,34 @@ function App() {
     }
   }, [clearSession, session]);
 
+  const loadSnmp = useCallback(async () => {
+    if (!session) return;
+
+    try {
+      const [summaryResponse, listResponse] = await Promise.all([
+        authFetch("/api/snmp/summary"),
+        authFetch("/api/snmp"),
+      ]);
+
+      if (summaryResponse.status === 401 || listResponse.status === 401) {
+        clearSession();
+        return;
+      }
+
+      if (summaryResponse.ok) {
+        setSnmpSummary(await summaryResponse.json());
+      }
+
+      if (listResponse.ok) {
+        const payload = await listResponse.json();
+        setSnmpDetails({ devices: payload.devices || [], metrics: payload.metrics || [] });
+      }
+    } catch {
+      setSnmpSummary(fallbackSnmpSummary);
+      setSnmpDetails(fallbackSnmpDetails);
+    }
+  }, [clearSession, session]);
+
   useEffect(() => {
     if (!session) {
       return undefined;
@@ -1295,6 +1391,16 @@ function App() {
     const interval = window.setInterval(loadIntune, 60000);
     return () => window.clearInterval(interval);
   }, [loadIntune, session]);
+
+  useEffect(() => {
+    if (!session) {
+      return undefined;
+    }
+
+    loadSnmp();
+    const interval = window.setInterval(loadSnmp, 60000);
+    return () => window.clearInterval(interval);
+  }, [loadSnmp, session]);
 
   useEffect(() => {
     if (!session) {
@@ -1480,6 +1586,8 @@ function App() {
           <TopologyDashboard topology={topology} onChange={setTopology} ipDetails={ipDetails} onRefreshIps={loadIps} saveStatus={topologySaveStatus} />
         ) : activeView === "intune" ? (
           <IntuneDashboard intuneStatus={intuneStatus} intuneSummary={intuneSummary} intuneDetails={intuneDetails} onRefreshIntune={loadIntune} />
+        ) : activeView === "snmp" ? (
+          <SnmpDashboard snmpSummary={snmpSummary} snmpDetails={snmpDetails} onRefreshSnmp={loadSnmp} />
         ) : activeView === "tickets" ? (
           <TicketsDashboard ticketsStatus={ticketsStatus} ticketsSummary={ticketsSummary} ticketsDetails={ticketsDetails} onRefreshTickets={loadTickets} sessionUser={session.user} />
         ) : activeView === "milvusPortal" ? (
@@ -2987,6 +3095,351 @@ function MilvusPortalView() {
         referrerPolicy="no-referrer-when-downgrade"
       />
     </section>
+  );
+}
+
+function SnmpDashboard({
+  snmpSummary,
+  snmpDetails,
+  onRefreshSnmp,
+}: {
+  snmpSummary: SnmpSummary;
+  snmpDetails: SnmpDetails;
+  onRefreshSnmp: () => Promise<void>;
+}) {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [form, setForm] = useState<SnmpDevice>(emptySnmpDevice());
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [testMetric, setTestMetric] = useState<SnmpMetric | null>(null);
+
+  const metricByDevice = new Map(snmpDetails.metrics.map((metric) => [metric.deviceId, metric]));
+  const filteredDevices = filterItems(snmpDetails.devices, search, (device) => {
+    const metric = metricByDevice.get(device.id);
+    return [device.name, device.host, device.type, device.version, device.notes, metric?.sysName, metric?.sysDescr, metric?.message];
+  });
+  const pagedDevices = paginate(filteredDevices, page, 8);
+
+  function editDevice(device: SnmpDevice) {
+    setForm({ ...device });
+    setMessage("");
+    setError("");
+    setTestMetric(metricByDevice.get(device.id) || null);
+  }
+
+  function newDevice() {
+    setForm(emptySnmpDevice());
+    setMessage("");
+    setError("");
+    setTestMetric(null);
+  }
+
+  async function saveDevice(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const payload = await adRequest<{ message: string; device: SnmpDevice }>("/api/snmp/devices", {
+        method: "POST",
+        body: form,
+      });
+      setForm(payload.device);
+      setMessage(payload.message || "Dispositivo SNMP salvo.");
+      await onRefreshSnmp();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Nao foi possivel salvar o dispositivo SNMP.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function testDevice() {
+    setSaving(true);
+    setMessage("");
+    setError("");
+    setTestMetric(null);
+
+    try {
+      const payload = await adRequest<{ metric: SnmpMetric }>("/api/snmp/test", {
+        method: "POST",
+        body: form,
+      });
+      setTestMetric(payload.metric);
+      setMessage(payload.metric.ok ? "SNMP respondeu." : payload.metric.message);
+    } catch (testError) {
+      setError(testError instanceof Error ? testError.message : "Nao foi possivel testar SNMP.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function collectDevice(device: SnmpDevice) {
+    setSaving(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const payload = await adRequest<{ metric: SnmpMetric }>(`/api/snmp/devices/${encodeURIComponent(device.id)}/collect`, {
+        method: "POST",
+      });
+      setMessage(payload.metric.ok ? `${device.name || device.host}: coleta OK.` : payload.metric.message);
+      await onRefreshSnmp();
+    } catch (collectError) {
+      setError(collectError instanceof Error ? collectError.message : "Nao foi possivel coletar SNMP.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function collectAll() {
+    setSaving(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const payload = await adRequest<{ metrics: SnmpMetric[] }>("/api/snmp/collect", { method: "POST" });
+      const online = payload.metrics.filter((metric) => metric.ok).length;
+      setMessage(`Coleta concluida: ${online}/${payload.metrics.length} online.`);
+      await onRefreshSnmp();
+    } catch (collectError) {
+      setError(collectError instanceof Error ? collectError.message : "Nao foi possivel coletar SNMP.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeDevice(device: SnmpDevice) {
+    setSaving(true);
+    setMessage("");
+    setError("");
+
+    try {
+      await adRequest(`/api/snmp/devices/${encodeURIComponent(device.id)}`, { method: "DELETE" });
+      if (form.id === device.id) newDevice();
+      setMessage("Dispositivo removido.");
+      await onRefreshSnmp();
+    } catch (removeError) {
+      setError(removeError instanceof Error ? removeError.message : "Nao foi possivel remover o dispositivo.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <section className="kpi-grid" aria-label="Resumo SNMP">
+        <MetricCard icon={Signal} label="Dispositivos" value={String(snmpSummary.total)} detail={`${snmpSummary.enabled} habilitados`} tone="calm" />
+        <MetricCard icon={CheckCircle2} label="Online" value={String(snmpSummary.online)} detail="Responderam SNMP" tone="good" />
+        <MetricCard icon={XCircle} label="Offline" value={String(snmpSummary.offline)} detail="Sem resposta SNMP" tone={snmpSummary.offline ? "danger" : "calm"} />
+        <MetricCard icon={Clock3} label="Intervalo" value="60s" detail="Atualizacao da tela" tone="warn" />
+      </section>
+
+      <section className="dashboard-grid snmp-dashboard-grid">
+        <section className="panel snmp-form-panel">
+          <PanelHeader
+            icon={Signal}
+            title={form.id ? "Editar dispositivo" : "Novo dispositivo SNMP"}
+            meta={form.version === "3" ? "SNMPv3" : `SNMPv${form.version}`}
+            action={
+              <button className="secondary-action" type="button" onClick={newDevice}>
+                <Plus size={15} />
+                Novo
+              </button>
+            }
+          />
+
+          {error ? <div className="form-error">{error}</div> : null}
+          {message ? <div className="form-success">{message}</div> : null}
+
+          <form className="snmp-form" onSubmit={saveDevice}>
+            <div className="snmp-form-grid">
+              <label>
+                <span>Nome</span>
+                <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Fortinet borda" />
+              </label>
+              <label>
+                <span>IP ou DNS</span>
+                <input value={form.host} onChange={(event) => setForm({ ...form, host: event.target.value })} placeholder="10.200.1.1" required />
+              </label>
+              <label>
+                <span>Tipo</span>
+                <select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as SnmpDevice["type"] })}>
+                  <option value="Fortinet">Fortinet</option>
+                  <option value="UniFi">UniFi</option>
+                  <option value="Switch">Switch</option>
+                  <option value="Firewall">Firewall</option>
+                  <option value="Servidor">Servidor</option>
+                  <option value="Outro">Outro</option>
+                </select>
+              </label>
+              <label>
+                <span>Porta</span>
+                <input type="number" min={1} max={65535} value={form.port} onChange={(event) => setForm({ ...form, port: Number(event.target.value) })} />
+              </label>
+              <label>
+                <span>Versao</span>
+                <select value={form.version} onChange={(event) => setForm({ ...form, version: event.target.value as SnmpVersion })}>
+                  <option value="2c">SNMP v2c</option>
+                  <option value="1">SNMP v1</option>
+                  <option value="3">SNMP v3</option>
+                </select>
+              </label>
+              {form.version !== "3" ? (
+                <label>
+                  <span>Community</span>
+                  <input value={form.community} onChange={(event) => setForm({ ...form, community: event.target.value })} placeholder="public" />
+                </label>
+              ) : (
+                <label>
+                  <span>Usuario v3</span>
+                  <input value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} placeholder="snmp-user" />
+                </label>
+              )}
+              {form.version === "3" ? (
+                <>
+                  <label>
+                    <span>Auth</span>
+                    <select value={form.authProtocol} onChange={(event) => setForm({ ...form, authProtocol: event.target.value as SnmpDevice["authProtocol"] })}>
+                      <option value="none">Sem auth</option>
+                      <option value="md5">MD5</option>
+                      <option value="sha">SHA</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Senha auth</span>
+                    <input value={form.authKey} onChange={(event) => setForm({ ...form, authKey: event.target.value })} type="password" />
+                  </label>
+                  <label>
+                    <span>Privacidade</span>
+                    <select value={form.privProtocol} onChange={(event) => setForm({ ...form, privProtocol: event.target.value as SnmpDevice["privProtocol"] })}>
+                      <option value="none">Sem priv</option>
+                      <option value="des">DES</option>
+                      <option value="aes">AES</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Senha priv</span>
+                    <input value={form.privKey} onChange={(event) => setForm({ ...form, privKey: event.target.value })} type="password" />
+                  </label>
+                </>
+              ) : null}
+              <label>
+                <span>Timeout ms</span>
+                <input type="number" min={500} max={15000} value={form.timeoutMs} onChange={(event) => setForm({ ...form, timeoutMs: Number(event.target.value) })} />
+              </label>
+              <label>
+                <span>Tentativas</span>
+                <input type="number" min={0} max={5} value={form.retries} onChange={(event) => setForm({ ...form, retries: Number(event.target.value) })} />
+              </label>
+            </div>
+            <label className="snmp-enabled">
+              <input checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} type="checkbox" />
+              <span>Coletar este dispositivo</span>
+            </label>
+            <label>
+              <span>Observacoes</span>
+              <textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Portas importantes, local fisico, link..." />
+            </label>
+            <div className="snmp-actions">
+              <button className="secondary-action" type="button" onClick={testDevice} disabled={saving || !form.host.trim()}>
+                <Activity size={15} />
+                Testar SNMP
+              </button>
+              <button className="primary-action" type="submit" disabled={saving || !form.host.trim()}>
+                <Save size={15} />
+                Salvar
+              </button>
+            </div>
+          </form>
+
+          {testMetric ? <SnmpMetricPreview metric={testMetric} /> : null}
+        </section>
+
+        <section className="panel snmp-list-panel">
+          <PanelHeader
+            icon={Server}
+            title="Dispositivos monitorados"
+            meta={`${filteredDevices.length}/${snmpDetails.devices.length} dispositivos`}
+            action={
+              <button className="secondary-action" type="button" onClick={collectAll} disabled={saving || !snmpDetails.devices.length}>
+                <RefreshCw size={15} />
+                Coletar todos
+              </button>
+            }
+          />
+          <DirectoryTools
+            value={search}
+            onChange={(value) => {
+              setSearch(value);
+              setPage(1);
+            }}
+            page={page}
+            total={filteredDevices.length}
+            onPageChange={setPage}
+            placeholder="Procurar IP, nome, tipo ou descricao"
+            pageSizeOverride={8}
+          />
+          <div className="snmp-device-list">
+            {pagedDevices.map((device) => {
+              const metric = metricByDevice.get(device.id);
+              const tone = !device.enabled ? "idle" : metric?.ok ? "online" : metric ? "offline" : "warn";
+              return (
+                <article className={`snmp-device-row ${tone}`} key={device.id}>
+                  <div>
+                    <strong>{device.name || device.host}</strong>
+                    <span>{device.host}:{device.port} - {device.type} - SNMPv{device.version}</span>
+                    <small>{metric?.sysName || metric?.message || "Ainda sem coleta"}</small>
+                  </div>
+                  <div className="snmp-device-meta">
+                    <span>{metric?.latencyMs !== null && metric?.latencyMs !== undefined ? `${metric.latencyMs} ms` : device.enabled ? "Aguardando" : "Desativado"}</span>
+                    <button className="secondary-action" type="button" onClick={() => collectDevice(device)} disabled={saving || !device.enabled}>
+                      <RefreshCw size={14} />
+                      Coletar
+                    </button>
+                    <button className="secondary-action" type="button" onClick={() => editDevice(device)}>
+                      <Settings size={14} />
+                      Editar
+                    </button>
+                    <button className="danger-action" type="button" onClick={() => removeDevice(device)} disabled={saving}>
+                      <Trash2 size={14} />
+                      Remover
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            {!pagedDevices.length ? (
+              <div className="empty-state">
+                <strong>Nenhum dispositivo SNMP cadastrado</strong>
+                <span>Cadastre o IP do Fortinet, UniFi ou switch para testar a coleta.</span>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </section>
+    </>
+  );
+}
+
+function SnmpMetricPreview({ metric }: { metric: SnmpMetric }) {
+  return (
+    <div className={`snmp-test-result ${metric.ok ? "online" : "offline"}`}>
+      <strong>{metric.ok ? "SNMP OK" : "Falha SNMP"}</strong>
+      <span>{metric.message}</span>
+      {metric.ok ? (
+        <div className="snmp-metric-grid">
+          <div><span>Nome</span><strong>{metric.sysName || "-"}</strong></div>
+          <div><span>Uptime</span><strong>{metric.uptime || "-"}</strong></div>
+          <div><span>Interfaces</span><strong>{metric.interfaces ?? "-"}</strong></div>
+          <div><span>Latencia</span><strong>{metric.latencyMs ?? "-"} ms</strong></div>
+        </div>
+      ) : null}
+      {metric.sysDescr ? <p>{metric.sysDescr}</p> : null}
+    </div>
   );
 }
 
@@ -6135,6 +6588,28 @@ function emptyIpLink(): IpInventoryLink {
     service: "",
     ports: "",
     status: "Ativo",
+    notes: "",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function emptySnmpDevice(): SnmpDevice {
+  return {
+    id: "",
+    name: "",
+    host: "",
+    port: 161,
+    type: "Switch",
+    version: "2c",
+    community: "public",
+    username: "",
+    authProtocol: "none",
+    authKey: "",
+    privProtocol: "none",
+    privKey: "",
+    timeoutMs: 1800,
+    retries: 1,
+    enabled: true,
     notes: "",
     updatedAt: new Date().toISOString(),
   };

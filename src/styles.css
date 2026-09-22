@@ -1515,6 +1515,214 @@ h1 {
   align-items: start;
 }
 
+.snmp-dashboard-grid {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: start;
+}
+
+.snmp-form-panel {
+  grid-column: span 4;
+}
+
+.snmp-list-panel {
+  grid-column: span 8;
+}
+
+.snmp-form,
+.snmp-device-list {
+  display: grid;
+  gap: 10px;
+}
+
+.snmp-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.snmp-form label,
+.snmp-form label span {
+  display: block;
+}
+
+.snmp-form label span {
+  margin-bottom: 6px;
+  color: #657166;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.snmp-form input,
+.snmp-form select,
+.snmp-form textarea {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  color: #1a1f1b;
+  background: #fbfdfb;
+  border: 1px solid #d8e0d8;
+  border-radius: 8px;
+  outline: 0;
+}
+
+.snmp-form textarea {
+  min-height: 78px;
+  padding-top: 10px;
+  resize: vertical;
+}
+
+.snmp-enabled {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f7faf7;
+  border: 1px solid #e2e8e2;
+  border-radius: 8px;
+}
+
+.snmp-enabled input {
+  width: auto;
+  min-height: auto;
+}
+
+.snmp-enabled span {
+  margin: 0 !important;
+  color: #1f7a62 !important;
+}
+
+.snmp-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.snmp-test-result {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  background: #f8faf8;
+  border: 1px solid #e2e8e2;
+  border-left: 4px solid #16a085;
+  border-radius: 8px;
+}
+
+.snmp-test-result.offline {
+  border-left-color: #c0392b;
+  background: #fff5f3;
+}
+
+.snmp-test-result > strong,
+.snmp-test-result > span,
+.snmp-test-result p {
+  display: block;
+}
+
+.snmp-test-result > span,
+.snmp-test-result p {
+  color: #657166;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.snmp-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.snmp-metric-grid div {
+  min-width: 0;
+  padding: 9px;
+  background: #ffffff;
+  border: 1px solid #e2e8e2;
+  border-radius: 8px;
+}
+
+.snmp-metric-grid span,
+.snmp-metric-grid strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snmp-metric-grid span {
+  color: #657166;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.snmp-metric-grid strong {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.snmp-device-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 82px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #dfe6df;
+  border-left: 4px solid #d9902f;
+  border-radius: 8px;
+}
+
+.snmp-device-row.online {
+  border-left-color: #16a085;
+}
+
+.snmp-device-row.offline {
+  border-left-color: #c0392b;
+  background: #fff8f7;
+}
+
+.snmp-device-row.idle {
+  border-left-color: #9aa59e;
+  opacity: 0.78;
+}
+
+.snmp-device-row strong,
+.snmp-device-row span,
+.snmp-device-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snmp-device-row strong {
+  font-size: 14px;
+}
+
+.snmp-device-row span,
+.snmp-device-row small {
+  color: #657166;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.snmp-device-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.snmp-device-meta > span {
+  min-width: 76px;
+  color: #0f6f59;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: right;
+}
+
 .intune-devices-panel {
   grid-column: span 8;
   display: flex;
@@ -3871,12 +4079,18 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .snmp-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
   .ad-users-panel,
   .ad-groups-panel,
   .ad-lockouts-panel,
   .ad-computers-panel,
   .intune-devices-panel,
   .intune-insights-panel,
+  .snmp-form-panel,
+  .snmp-list-panel,
   .tickets-list-panel,
   .tickets-insights-panel {
     grid-column: span 1;
@@ -4061,6 +4275,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .snmp-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
   .tickets-dashboard-grid {
     grid-template-columns: 1fr;
   }
@@ -4076,9 +4294,23 @@ h1 {
   .ad-ops-panel,
   .intune-devices-panel,
   .intune-insights-panel,
+  .snmp-form-panel,
+  .snmp-list-panel,
   .tickets-list-panel,
   .tickets-insights-panel {
     grid-column: auto;
+  }
+
+  .snmp-form-grid,
+  .snmp-actions,
+  .snmp-metric-grid,
+  .snmp-device-row {
+    grid-template-columns: 1fr;
+  }
+
+  .snmp-device-meta {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .topbar-actions {
