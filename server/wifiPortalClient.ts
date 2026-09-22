@@ -25,6 +25,8 @@ type DescribeRow = {
 };
 
 const pools = new Map<string, Pool>();
+const schemaCache = new Map<string, { expiresAt: number; columns: WifiColumn[] }>();
+const schemaCacheMs = 5 * 60 * 1000;
 
 function ensureName(value: string, label: string) {
   if (!/^[A-Za-z0-9_]+$/.test(value)) {
@@ -74,11 +76,30 @@ function getPool(database: string) {
       connectionLimit: 6,
       charset: "utf8mb4",
       dateStrings: true,
+      connectTimeout: wifiPortalConfig.connectTimeoutMs,
     });
     pools.set(normalizedDatabase, pool);
   }
 
   return pool;
+}
+
+async function queryRows<T>(database: string, sql: string, values: unknown[] = []) {
+  const [rows] = await getPool(database).query({
+    sql,
+    values,
+    timeout: wifiPortalConfig.queryTimeoutMs,
+  } as any);
+  return rows as T[];
+}
+
+async function executeQuery(database: string, sql: string, values: unknown[] = []) {
+  const [result] = await getPool(database).query({
+    sql,
+    values,
+    timeout: wifiPortalConfig.queryTimeoutMs,
+  } as any);
+  return result;
 }
 
 function normalizeColumn(row: DescribeRow): WifiColumn {
@@ -101,8 +122,17 @@ function normalizeColumn(row: DescribeRow): WifiColumn {
 
 async function getColumns(kind: string) {
   const source = sourceForKind(kind);
-  const [rows] = await getPool(source.database).query(`DESCRIBE ${quoteId(source.table)}`);
-  return (rows as DescribeRow[]).map(normalizeColumn);
+  const cacheKey = `${source.database}.${source.table}`;
+  const cached = schemaCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.columns;
+  }
+
+  const rows = await queryRows<DescribeRow>(source.database, `DESCRIBE ${quoteId(source.table)}`);
+  const columns = rows.map(normalizeColumn);
+  schemaCache.set(cacheKey, { expiresAt: Date.now() + schemaCacheMs, columns });
+  return columns;
 }
 
 function primaryColumn(columns: WifiColumn[]) {
@@ -147,7 +177,31 @@ function applyKindDefaults(kind: string, data: Record<string, unknown>, columns:
   return next;
 }
 
-export async function getWifiStatus() {
+function isTextColumn(column: WifiColumn) {
+  return /(char|text|enum|set|json)/i.test(column.type);
+}
+
+function searchableColumns(kind: string, columns: WifiColumn[]) {
+  if (kind === "colaboradores") {
+    const preferred = ["username", "value", "attribute"];
+    const selected = preferred
+      .map((name) => columns.find((column) => column.name.toLowerCase() === name))
+      .filter(Boolean) as WifiColumn[];
+
+    if (selected.length) return selected;
+  }
+
+  const preferred = ["nome", "name", "email", "cpf", "matricula", "registro", "username", "value"];
+  const selected = columns.filter((column) => {
+    const name = column.name.toLowerCase();
+    return isTextColumn(column) && preferred.some((item) => name.includes(item));
+  });
+
+  if (selected.length) return selected;
+  return columns.filter(isTextColumn).slice(0, 8);
+}
+
+export async function getWifiStatus(kind?: string) {
   if (!isWifiPortalConfigured()) {
     return {
       ok: false,
@@ -158,10 +212,13 @@ export async function getWifiStatus() {
   }
 
   try {
-    await Promise.all([
-      getPool(wifiPortalConfig.associadosDatabase).query("SELECT 1"),
-      getPool(wifiPortalConfig.colaboradoresDatabase).query("SELECT 1"),
-    ]);
+    if (kind) {
+      const source = sourceForKind(kind);
+      await queryRows(source.database, "SELECT 1 AS ok");
+    } else {
+      await queryRows(wifiPortalConfig.associadosDatabase, "SELECT 1 AS ok");
+    }
+
     return {
       ok: true,
       configured: true,
@@ -197,23 +254,25 @@ export async function listWifiRecords(kind: string, query: { search?: string; pa
   const page = Math.max(1, Number(query.page || 1) || 1);
   const pageSize = Math.max(5, Math.min(100, Number(query.pageSize || 20) || 20));
   const offset = (page - 1) * pageSize;
-  const searchable = columns.map((column) => column.name);
+  const searchable = searchableColumns(kind, columns).map((column) => column.name);
   const search = String(query.search || "").trim();
   const params: unknown[] = [];
   let where = "";
 
   if (search && searchable.length) {
-    where = `WHERE ${searchable.map((column) => `CAST(${quoteId(column)} AS CHAR) LIKE ?`).join(" OR ")}`;
+    where = `WHERE ${searchable.map((column) => `${quoteId(column)} LIKE ?`).join(" OR ")}`;
     params.push(...searchable.map(() => `%${search}%`));
   }
 
-  const [countRows] = await getPool(source.database).query(
+  const countRows = await queryRows<{ total: number }>(
+    source.database,
     `SELECT COUNT(*) AS total FROM ${quoteId(source.table)} ${where}`,
     params,
   );
-  const total = Number((countRows as Array<{ total: number }>)[0]?.total || 0);
+  const total = Number(countRows[0]?.total || 0);
 
-  const [rows] = await getPool(source.database).query(
+  const rows = await queryRows<Record<string, unknown>>(
+    source.database,
     `SELECT * FROM ${quoteId(source.table)} ${where} ORDER BY ${quoteId(primary.name)} DESC LIMIT ? OFFSET ?`,
     [...params, pageSize, offset],
   );
@@ -227,7 +286,7 @@ export async function listWifiRecords(kind: string, query: { search?: string; pa
     page,
     pageSize,
     total,
-    items: rows as Record<string, unknown>[],
+    items: rows,
   };
 }
 
@@ -241,7 +300,8 @@ export async function createWifiRecord(kind: string, body: unknown) {
     throw new Error("Informe ao menos um campo para inserir.");
   }
 
-  const [result] = await getPool(source.database).execute(
+  const result = await executeQuery(
+    source.database,
     `INSERT INTO ${quoteId(source.table)} (${names.map(quoteId).join(", ")}) VALUES (${names.map(() => "?").join(", ")})`,
     names.map((name) => data[name]) as any[],
   );
@@ -262,7 +322,8 @@ export async function updateWifiRecord(kind: string, id: string, body: unknown) 
   if (!primary) throw new Error("Tabela sem coluna primaria para edicao.");
   if (!names.length) throw new Error("Informe ao menos um campo para atualizar.");
 
-  const [result] = await getPool(source.database).execute(
+  const result = await executeQuery(
+    source.database,
     `UPDATE ${quoteId(source.table)} SET ${names.map((name) => `${quoteId(name)} = ?`).join(", ")} WHERE ${quoteId(primary.name)} = ? LIMIT 1`,
     [...names.map((name) => data[name]), id] as any[],
   );
@@ -279,7 +340,8 @@ export async function deleteWifiRecord(kind: string, id: string) {
   const primary = primaryColumn(columns);
   if (!primary) throw new Error("Tabela sem coluna primaria para remocao.");
 
-  const [result] = await getPool(source.database).execute(
+  const result = await executeQuery(
+    source.database,
     `DELETE FROM ${quoteId(source.table)} WHERE ${quoteId(primary.name)} = ? LIMIT 1`,
     [id],
   );

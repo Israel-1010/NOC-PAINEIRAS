@@ -326,7 +326,7 @@ app.get("/api/intune/devices/:id", asyncRoute((req) => getIntuneDeviceDetails(St
 
 app.use("/api/wifi", requireAuth);
 
-app.get("/api/wifi/status", asyncRoute(() => getWifiStatus()));
+app.get("/api/wifi/status", asyncRoute((req) => getWifiStatus(String(req.query.kind || ""))));
 app.get("/api/wifi/:kind/schema", asyncRoute((req) => getWifiSchema(String(req.params.kind))));
 app.get("/api/wifi/:kind", asyncRoute((req) => listWifiRecords(String(req.params.kind), {
   search: String(req.query.search || ""),

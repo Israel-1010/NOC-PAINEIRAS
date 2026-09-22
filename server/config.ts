@@ -39,6 +39,8 @@ export type WifiPortalConfig = {
   port: number;
   user?: string;
   password?: string;
+  connectTimeoutMs: number;
+  queryTimeoutMs: number;
   associadosDatabase: string;
   associadosTable: string;
   colaboradoresDatabase: string;
@@ -102,6 +104,8 @@ export const wifiPortalConfig: WifiPortalConfig = {
   port: Number(process.env.WIFI_DB_PORT || 3306),
   user: process.env.WIFI_DB_USER,
   password: process.env.WIFI_DB_PASSWORD,
+  connectTimeoutMs: Number(process.env.WIFI_DB_CONNECT_TIMEOUT_MS || 5000),
+  queryTimeoutMs: Number(process.env.WIFI_DB_QUERY_TIMEOUT_MS || 8000),
   associadosDatabase: process.env.WIFI_ASSOCIADOS_DB_NAME || process.env.WIFI_DB_NAME || "wifi_portal",
   associadosTable: process.env.WIFI_ASSOCIADOS_TABLE || "Tb_associados",
   colaboradoresDatabase: process.env.WIFI_COLABORADORES_DB_NAME || "radius",

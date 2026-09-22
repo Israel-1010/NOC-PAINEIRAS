@@ -3166,7 +3166,7 @@ function WifiPortalDashboard() {
         pageSize: "20",
       });
       const [statusResponse, listResponse] = await Promise.all([
-        authFetch("/api/wifi/status"),
+        authFetch(`/api/wifi/status?kind=${encodeURIComponent(kind)}`),
         authFetch(`/api/wifi/${kind}?${params.toString()}`),
       ]);
 
