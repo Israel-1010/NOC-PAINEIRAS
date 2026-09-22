@@ -303,6 +303,8 @@ type WifiListPayload = {
   page: number;
   pageSize: number;
   total: number;
+  hasMore?: boolean;
+  exactTotal?: boolean;
   items: Array<Record<string, unknown>>;
 };
 
@@ -3165,15 +3167,8 @@ function WifiPortalDashboard() {
         page: String(page),
         pageSize: "20",
       });
-      const [statusResponse, listResponse] = await Promise.all([
-        authFetch(`/api/wifi/status?kind=${encodeURIComponent(kind)}`),
-        authFetch(`/api/wifi/${kind}?${params.toString()}`),
-      ]);
-
-      if (statusResponse.status === 401 || listResponse.status === 401) return;
-
-      const statusPayload = await parseApiPayload<WifiStatus>(statusResponse, { ok: false, configured: false, database: "wifi_portal", message: "Falha ao consultar status." });
-      setStatus(statusPayload);
+      const listResponse = await authFetch(`/api/wifi/${kind}?${params.toString()}`);
+      if (listResponse.status === 401) return;
 
       const listPayload = await parseApiPayload<WifiListPayload | { message?: string }>(listResponse, {});
       if (!listResponse.ok || !("items" in listPayload)) {
@@ -3181,9 +3176,22 @@ function WifiPortalDashboard() {
       }
 
       setPayload(listPayload);
+      setStatus({
+        ok: true,
+        configured: true,
+        database: listPayload.database,
+        message: `MySQL conectado em ${listPayload.table}.`,
+      });
       setForm((current) => Object.keys(current).length ? current : emptyWifiRecord(listPayload.columns));
     } catch (loadError) {
       setPayload(null);
+      setStatus((current) => ({
+        ...current,
+        ok: false,
+        configured: true,
+        database: kind === "associados" ? "wifi_portal" : "radius",
+        message: loadError instanceof Error ? loadError.message : "Falha MySQL.",
+      }));
       setError(loadError instanceof Error ? loadError.message : "Nao foi possivel carregar dados WiFi.");
     } finally {
       setLoading(false);
@@ -3275,7 +3283,7 @@ function WifiPortalDashboard() {
         <PanelHeader
           icon={Wifi}
           title="Portal WiFi"
-          meta={loading ? "Carregando..." : `${payload?.total || 0} registros`}
+          meta={loading ? "Carregando..." : payload?.hasMore ? `${payload.total}+ registros` : `${payload?.total || 0} registros`}
           action={
             <button className="secondary-action" type="button" onClick={loadWifi} disabled={loading}>
               <RefreshCw size={15} />

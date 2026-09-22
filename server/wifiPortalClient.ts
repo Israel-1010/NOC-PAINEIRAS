@@ -27,6 +27,7 @@ type DescribeRow = {
 const pools = new Map<string, Pool>();
 const schemaCache = new Map<string, { expiresAt: number; columns: WifiColumn[] }>();
 const schemaCacheMs = 5 * 60 * 1000;
+const firstPage = 1;
 
 function ensureName(value: string, label: string) {
   if (!/^[A-Za-z0-9_]+$/.test(value)) {
@@ -84,22 +85,52 @@ function getPool(database: string) {
   return pool;
 }
 
+function formatMysqlError(error: unknown, database: string) {
+  const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code || "") : "";
+
+  if (code === "ETIMEDOUT") {
+    return `Timeout conectando no MySQL ${wifiPortalConfig.host}:${wifiPortalConfig.port}/${database}. Confira rede, firewall, porta 3306 e permissao do usuario para o container.`;
+  }
+
+  if (code === "ECONNREFUSED") {
+    return `MySQL recusou conexao em ${wifiPortalConfig.host}:${wifiPortalConfig.port}. Confira host, porta e se o servico esta ativo.`;
+  }
+
+  if (code === "ENOTFOUND") {
+    return `Host MySQL nao encontrado: ${wifiPortalConfig.host}. Use um IP ou DNS acessivel pelo container.`;
+  }
+
+  if (code === "ER_ACCESS_DENIED_ERROR") {
+    return "Usuario ou senha do MySQL invalidos, ou usuario sem permissao para conectar deste servidor.";
+  }
+
+  return error instanceof Error ? error.message : "Falha MySQL.";
+}
+
 async function queryRows<T>(database: string, sql: string, values: unknown[] = []) {
-  const [rows] = await getPool(database).query({
-    sql,
-    values,
-    timeout: wifiPortalConfig.queryTimeoutMs,
-  } as any);
-  return rows as T[];
+  try {
+    const [rows] = await getPool(database).query({
+      sql,
+      values,
+      timeout: wifiPortalConfig.queryTimeoutMs,
+    } as any);
+    return rows as T[];
+  } catch (error) {
+    throw new Error(formatMysqlError(error, database));
+  }
 }
 
 async function executeQuery(database: string, sql: string, values: unknown[] = []) {
-  const [result] = await getPool(database).query({
-    sql,
-    values,
-    timeout: wifiPortalConfig.queryTimeoutMs,
-  } as any);
-  return result;
+  try {
+    const [result] = await getPool(database).query({
+      sql,
+      values,
+      timeout: wifiPortalConfig.queryTimeoutMs,
+    } as any);
+    return result;
+  } catch (error) {
+    throw new Error(formatMysqlError(error, database));
+  }
 }
 
 function normalizeColumn(row: DescribeRow): WifiColumn {
@@ -202,34 +233,31 @@ function searchableColumns(kind: string, columns: WifiColumn[]) {
 }
 
 export async function getWifiStatus(kind?: string) {
+  const source = kind ? sourceForKind(kind) : sourceForKind("associados");
+
   if (!isWifiPortalConfigured()) {
     return {
       ok: false,
       configured: false,
-      database: `${wifiPortalConfig.associadosDatabase} / ${wifiPortalConfig.colaboradoresDatabase}`,
+      database: source.database,
       message: "Banco WiFi nao configurado.",
     };
   }
 
   try {
-    if (kind) {
-      const source = sourceForKind(kind);
-      await queryRows(source.database, "SELECT 1 AS ok");
-    } else {
-      await queryRows(wifiPortalConfig.associadosDatabase, "SELECT 1 AS ok");
-    }
+    await queryRows(source.database, "SELECT 1 AS ok");
 
     return {
       ok: true,
       configured: true,
-      database: `${wifiPortalConfig.associadosDatabase} / ${wifiPortalConfig.colaboradoresDatabase}`,
-      message: "MySQL conectado.",
+      database: source.database,
+      message: `MySQL conectado em ${source.table}.`,
     };
   } catch (error) {
     return {
       ok: false,
       configured: true,
-      database: `${wifiPortalConfig.associadosDatabase} / ${wifiPortalConfig.colaboradoresDatabase}`,
+      database: source.database,
       message: error instanceof Error ? error.message : "Falha MySQL.",
     };
   }
@@ -264,18 +292,14 @@ export async function listWifiRecords(kind: string, query: { search?: string; pa
     params.push(...searchable.map(() => `%${search}%`));
   }
 
-  const countRows = await queryRows<{ total: number }>(
-    source.database,
-    `SELECT COUNT(*) AS total FROM ${quoteId(source.table)} ${where}`,
-    params,
-  );
-  const total = Number(countRows[0]?.total || 0);
-
   const rows = await queryRows<Record<string, unknown>>(
     source.database,
     `SELECT * FROM ${quoteId(source.table)} ${where} ORDER BY ${quoteId(primary.name)} DESC LIMIT ? OFFSET ?`,
-    [...params, pageSize, offset],
+    [...params, pageSize + 1, offset],
   );
+  const hasMore = rows.length > pageSize;
+  const items = hasMore ? rows.slice(0, pageSize) : rows;
+  const total = offset + items.length + (hasMore ? 1 : 0);
 
   return {
     kind,
@@ -286,7 +310,9 @@ export async function listWifiRecords(kind: string, query: { search?: string; pa
     page,
     pageSize,
     total,
-    items: rows,
+    hasMore,
+    exactTotal: !hasMore && page === firstPage,
+    items,
   };
 }
 
