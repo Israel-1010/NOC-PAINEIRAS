@@ -1017,7 +1017,6 @@ const requiredUserProfileFields: Array<{ field: keyof EditableUserProfile; label
   { field: "department", label: "Departamento" },
   { field: "title", label: "Cargo" },
   { field: "company", label: "Empresa" },
-  { field: "telephoneNumber", label: "Telefone" },
   { field: "office", label: "Escritorio" },
   { field: "managerDn", label: "Responsavel" },
   { field: "description", label: "Descricao" },
@@ -1032,7 +1031,6 @@ const requiredCreateUserFields: Array<{ field: keyof CreateUserForm; label: stri
   { field: "department", label: "Departamento" },
   { field: "title", label: "Cargo" },
   { field: "company", label: "Empresa" },
-  { field: "telephoneNumber", label: "Telefone" },
   { field: "office", label: "Escritorio" },
   { field: "managerDn", label: "Responsavel" },
   { field: "targetOu", label: "OU destino" },
@@ -4537,7 +4535,7 @@ function CreateUserModal({
               <section className="modal-section modal-section-wide">
                 <h3>Telefones</h3>
                 <div className="create-user-grid">
-                  <EditableField label="Telefone" value={form.telephoneNumber} onChange={(value) => onChange("telephoneNumber", value)} required />
+                  <EditableField label="Telefone" value={form.telephoneNumber} onChange={(value) => onChange("telephoneNumber", value)} />
                   <EditableField label="Celular" value={form.mobile} onChange={(value) => onChange("mobile", value)} />
                 </div>
               </section>
@@ -6420,7 +6418,7 @@ function UserDetailsModal({
                   <EditableField label="Departamento" value={form.department} onChange={(value) => updateForm("department", value)} required />
                   <EditableField label="Cargo" value={form.title} onChange={(value) => updateForm("title", value)} required />
                   <EditableField label="Empresa" value={form.company} onChange={(value) => updateForm("company", value)} required />
-                  <EditableField label="Telefone" value={form.telephoneNumber} onChange={(value) => updateForm("telephoneNumber", value)} required />
+                  <EditableField label="Telefone" value={form.telephoneNumber} onChange={(value) => updateForm("telephoneNumber", value)} />
                   <EditableField label="Celular" value={form.mobile} onChange={(value) => updateForm("mobile", value)} />
                   <EditableField label="Escritorio" value={form.office} onChange={(value) => updateForm("office", value)} required />
                   <EditableField label="Matricula/ID" value={form.employeeID} onChange={(value) => updateForm("employeeID", value)} />
