@@ -9,6 +9,10 @@ import {
   CircleGauge,
   ClipboardList,
   Clock3,
+  BookOpen,
+  ExternalLink,
+  FileText,
+  FolderOpen,
   KeyRound,
   LockKeyhole,
   LogOut,
@@ -306,6 +310,31 @@ type WifiListPayload = {
   hasMore?: boolean;
   exactTotal?: boolean;
   items: Array<Record<string, unknown>>;
+};
+
+type PopDocument = {
+  id: string;
+  name: string;
+  kind: "folder" | "file";
+  webUrl: string;
+  size: number;
+  extension: string;
+  mimeType: string;
+  category: string;
+  path: string;
+  modifiedAt: string;
+  modifiedBy: string;
+};
+
+type PopPayload = {
+  ok: boolean;
+  configured: boolean;
+  source: string;
+  message: string;
+  siteName: string;
+  driveName: string;
+  total: number;
+  items: PopDocument[];
 };
 
 type TicketsStatus = {
@@ -650,7 +679,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1048,12 +1077,13 @@ const navItems = [
   { label: "Bloqueios", icon: LockKeyhole },
   { label: "Chamado Milvus", icon: ClipboardList, view: "milvusPortal" },
   { label: "WiFi", icon: Wifi, view: "wifi" },
+  { label: "POP", icon: BookOpen, view: "pop" },
   { label: "Fortinet", icon: Shield },
   { label: "Alertas", icon: Bell },
   { label: "Ajustes", icon: Settings },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi";
+type View = "tv" | "topology" | "ad" | "intune" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop";
 
 function statusLabel(status: Status) {
   return {
@@ -1071,6 +1101,7 @@ function viewEyebrow(view: View) {
   if (view === "ips") return "Inventario de rede";
   if (view === "snmp") return "Monitoramento de equipamentos";
   if (view === "wifi") return "Portal WiFi";
+  if (view === "pop") return "Procedimento operacional padrao";
   if (view === "topology") return "Mapa e monitoramento";
   return "Administracao de identidade";
 }
@@ -1083,6 +1114,7 @@ function viewTitle(view: View) {
   if (view === "ips") return "IPs";
   if (view === "snmp") return "SNMP";
   if (view === "wifi") return "WiFi";
+  if (view === "pop") return "POP";
   if (view === "topology") return "Topologia";
   return "Active Directory";
 }
@@ -1632,6 +1664,8 @@ function App() {
           <IpsDashboard ipSummary={ipSummary} ipDetails={ipDetails} onRefreshIps={loadIps} />
         ) : activeView === "wifi" ? (
           <WifiPortalDashboard />
+        ) : activeView === "pop" ? (
+          <PopDashboard />
         ) : (
           <AdDashboard adSummary={adSummaryState} adStatus={adStatus} adDetails={adDetails} onRefreshAd={loadAd} />
         )}
@@ -3133,6 +3167,127 @@ function MilvusPortalView() {
         referrerPolicy="no-referrer-when-downgrade"
       />
     </section>
+  );
+}
+
+function PopDashboard() {
+  const [payload, setPayload] = useState<PopPayload>({
+    ok: false,
+    configured: false,
+    source: "sharepoint",
+    message: "Carregando POP...",
+    siteName: "SharePoint",
+    driveName: "POP",
+    total: 0,
+    items: [],
+  });
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadPop = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const params = new URLSearchParams({ search });
+      const response = await authFetch(`/api/pop/documents?${params.toString()}`);
+      if (response.status === 401) return;
+
+      const nextPayload = await parseApiPayload<PopPayload | { message?: string }>(response, {});
+      if (!response.ok || !("items" in nextPayload)) {
+        throw new Error("message" in nextPayload ? nextPayload.message || "Falha ao carregar POP." : "Falha ao carregar POP.");
+      }
+
+      setPayload(nextPayload);
+      if (!nextPayload.ok && nextPayload.message) {
+        setError(nextPayload.message);
+      }
+    } catch (loadError) {
+      setPayload((current) => ({ ...current, ok: false, items: [], total: 0 }));
+      setError(loadError instanceof Error ? loadError.message : "Nao foi possivel carregar documentos POP.");
+    } finally {
+      setLoading(false);
+    }
+  }, [search]);
+
+  useEffect(() => {
+    loadPop();
+  }, [loadPop]);
+
+  const folders = payload.items.filter((item) => item.kind === "folder").length;
+  const files = payload.items.filter((item) => item.kind === "file").length;
+  const recent = payload.items[0];
+
+  return (
+    <>
+      <section className="kpi-grid" aria-label="Resumo POP">
+        <MetricCard icon={BookOpen} label="POP" value={payload.ok ? "Online" : "Pendente"} detail={payload.message} tone={payload.ok ? "good" : "warn"} />
+        <MetricCard icon={FolderOpen} label="Pastas" value={String(folders)} detail={payload.driveName || "Biblioteca"} tone="calm" />
+        <MetricCard icon={FileText} label="Documentos" value={String(files)} detail={payload.siteName || "SharePoint"} tone="calm" />
+        <MetricCard icon={Clock3} label="Atualizado" value={recent ? formatDateTime(recent.modifiedAt) : "-"} detail={recent?.name || "Sem documentos"} tone="warn" />
+      </section>
+
+      <section className="panel pop-panel">
+        <PanelHeader
+          icon={BookOpen}
+          title="Procedimentos operacionais"
+          meta={loading ? "Sincronizando..." : `${payload.total} itens`}
+          action={
+            <button className="secondary-action" type="button" onClick={loadPop} disabled={loading}>
+              <RefreshCw size={15} />
+              Atualizar
+            </button>
+          }
+        />
+
+        <div className="pop-toolbar">
+          <label className="search-field">
+            <Search size={17} />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Pesquisar procedimento, categoria, arquivo ou responsavel"
+            />
+          </label>
+        </div>
+
+        {error ? <div className={payload.configured ? "form-error" : "form-success"}>{error}</div> : null}
+
+        <div className="pop-grid">
+          {payload.items.map((item) => (
+            <article className={`pop-card ${item.kind}`} key={item.id}>
+              <div className="pop-card-icon">
+                {item.kind === "folder" ? <FolderOpen size={24} /> : <FileText size={24} />}
+              </div>
+              <div className="pop-card-body">
+                <div className="pop-card-title">
+                  <h3>{item.name}</h3>
+                  <span>{item.extension || (item.kind === "folder" ? "PASTA" : "DOC")}</span>
+                </div>
+                <p>{item.category}</p>
+                <div className="pop-meta">
+                  <span>{formatDateTime(item.modifiedAt)}</span>
+                  <span>{item.modifiedBy}</span>
+                  {item.kind === "file" ? <span>{formatBytes(item.size)}</span> : null}
+                </div>
+              </div>
+              <a className="secondary-action pop-open" href={item.webUrl} target="_blank" rel="noreferrer">
+                <ExternalLink size={15} />
+                Abrir
+              </a>
+            </article>
+          ))}
+
+          {!payload.items.length ? (
+            <EmptyState
+              title={payload.configured ? "Nenhum POP encontrado" : "SharePoint aguardando configuracao"}
+              detail={payload.configured ? "Ajuste a pesquisa ou confira a pasta do SharePoint." : "Configure Microsoft Graph e a pasta do SharePoint no ambiente do servidor."}
+            />
+          ) : null}
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -7677,6 +7832,20 @@ function formatDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatBytes(value: number) {
+  if (!value) return "0 KB";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${size.toFixed(unitIndex ? 1 : 0)} ${units[unitIndex]}`;
 }
 
 function formatIntuneOs(device: IntuneDevice) {

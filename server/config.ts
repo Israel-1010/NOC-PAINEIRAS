@@ -47,6 +47,17 @@ export type WifiPortalConfig = {
   colaboradoresTable: string;
 };
 
+export type SharePointConfig = {
+  tenantId?: string;
+  clientId?: string;
+  clientSecret?: string;
+  hostname?: string;
+  sitePath?: string;
+  driveId?: string;
+  folderItemId?: string;
+  folderPath?: string;
+};
+
 export const port = Number(process.env.PORT || 3333);
 export const sessionSecret = process.env.APP_SESSION_SECRET || "rede-clube-dev-secret-change-me";
 
@@ -114,4 +125,25 @@ export const wifiPortalConfig: WifiPortalConfig = {
 
 export function isWifiPortalConfigured(config: WifiPortalConfig = wifiPortalConfig) {
   return Boolean(config.host && config.user && config.associadosDatabase && config.colaboradoresDatabase);
+}
+
+export const sharePointConfig: SharePointConfig = {
+  tenantId: process.env.SHAREPOINT_TENANT_ID,
+  clientId: process.env.SHAREPOINT_CLIENT_ID,
+  clientSecret: process.env.SHAREPOINT_CLIENT_SECRET,
+  hostname: process.env.SHAREPOINT_HOSTNAME,
+  sitePath: process.env.SHAREPOINT_SITE_PATH,
+  driveId: process.env.SHAREPOINT_DRIVE_ID,
+  folderItemId: process.env.SHAREPOINT_FOLDER_ITEM_ID,
+  folderPath: process.env.SHAREPOINT_FOLDER_PATH,
+};
+
+export function isSharePointConfigured(config: SharePointConfig = sharePointConfig) {
+  return Boolean(
+    config.tenantId &&
+    config.clientId &&
+    config.clientSecret &&
+    (config.driveId || (config.hostname && config.sitePath)) &&
+    (config.folderItemId || config.folderPath),
+  );
 }

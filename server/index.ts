@@ -54,6 +54,7 @@ import {
   saveSnmpDevice,
   testSnmpDevice,
 } from "./snmpAgent";
+import { listPopDocuments } from "./sharePointClient";
 import {
   createWifiRecord,
   deleteWifiRecord,
@@ -336,6 +337,10 @@ app.get("/api/wifi/:kind", asyncRoute((req) => listWifiRecords(String(req.params
 app.post("/api/wifi/:kind", asyncRoute((req) => createWifiRecord(String(req.params.kind), req.body || {})));
 app.patch("/api/wifi/:kind/:id", asyncRoute((req) => updateWifiRecord(String(req.params.kind), String(req.params.id), req.body || {})));
 app.delete("/api/wifi/:kind/:id", asyncRoute((req) => deleteWifiRecord(String(req.params.kind), String(req.params.id))));
+
+app.use("/api/pop", requireAuth);
+
+app.get("/api/pop/documents", asyncRoute((req) => listPopDocuments(String(req.query.search || ""))));
 
 app.use("/api/snmp", requireAuth);
 
