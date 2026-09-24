@@ -257,7 +257,13 @@ function decodeGraphLapsPassword(value: unknown) {
   const encoded = String(value || "");
   if (!encoded) return "";
 
-  return Buffer.from(encoded, "base64").toString("utf16le").replace(/\u0000/g, "");
+  const buffer = Buffer.from(encoded, "base64");
+  const oddBytes = Math.floor(buffer.length / 2);
+  const oddNullBytes = Array.from(buffer).filter((byte, index) => index % 2 === 1 && byte === 0).length;
+  const looksLikeUtf16Le = oddBytes > 0 && oddNullBytes / oddBytes > 0.6;
+  const decoded = buffer.toString(looksLikeUtf16Le ? "utf16le" : "utf8");
+
+  return decoded.replace(/\u0000/g, "");
 }
 
 async function listGraphDevices() {
