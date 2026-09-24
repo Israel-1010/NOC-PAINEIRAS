@@ -1727,13 +1727,173 @@ h1 {
   grid-column: span 8;
   display: flex;
   flex-direction: column;
-  height: 520px;
-  min-height: 0;
+  min-height: 620px;
   overflow: hidden;
 }
 
 .intune-insights-panel {
   grid-column: span 4;
+}
+
+.intune-filter-board {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.intune-filter-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 58px;
+  padding: 12px;
+  color: #202520;
+  text-align: left;
+  background: #ffffff;
+  border: 1px solid #dfe6df;
+  border-left: 4px solid #277da1;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.intune-filter-card.active {
+  border-color: #1f7a62;
+  box-shadow: 0 0 0 3px rgb(31 122 98 / 12%);
+}
+
+.intune-filter-card.good {
+  border-left-color: #16a085;
+}
+
+.intune-filter-card.warn {
+  border-left-color: #d9902f;
+}
+
+.intune-filter-card.danger {
+  border-left-color: #c0392b;
+}
+
+.intune-filter-card svg {
+  color: #1f7a62;
+}
+
+.intune-filter-card span {
+  overflow: hidden;
+  color: #657166;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.intune-filter-card strong {
+  font-size: 22px;
+}
+
+.intune-table {
+  display: grid;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid #dfe6df;
+  border-radius: 8px;
+}
+
+.intune-table-head,
+.intune-table-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(210px, 1.2fr) minmax(190px, 1.1fr) minmax(160px, 0.85fr) minmax(110px, 0.65fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 1040px;
+  padding: 0 12px;
+}
+
+.intune-table-head {
+  min-height: 40px;
+  color: #657166;
+  background: #ffffff;
+  border-bottom: 1px solid #dfe6df;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.intune-table-row {
+  min-height: 76px;
+  color: #07110d;
+  text-align: left;
+  background: #ffffff;
+  border: 0;
+  border-bottom: 1px solid #dfe6df;
+  cursor: pointer;
+}
+
+.intune-table-row.risk {
+  border-left: 4px solid #d9902f;
+}
+
+.intune-table-row:hover {
+  background: #f7fbf8;
+}
+
+.intune-table-row strong,
+.intune-table-row span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.intune-table-row strong {
+  font-size: 13px;
+}
+
+.intune-table-row span {
+  color: #657166;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.intune-security-cell {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.intune-risk-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.intune-risk-list button {
+  display: grid;
+  gap: 4px;
+  min-height: 58px;
+  padding: 10px 12px;
+  text-align: left;
+  background: #fff8f0;
+  border: 1px solid #f1d4ad;
+  border-left: 4px solid #d9902f;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.intune-risk-list strong,
+.intune-risk-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.intune-risk-list span {
+  color: #855615;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .tickets-dashboard-grid {
@@ -4401,6 +4561,10 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .intune-filter-board {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .snmp-dashboard-grid {
     grid-template-columns: 1fr;
   }
@@ -4598,6 +4762,10 @@ h1 {
   }
 
   .intune-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .intune-filter-board {
     grid-template-columns: 1fr;
   }
 

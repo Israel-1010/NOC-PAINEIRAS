@@ -13,19 +13,31 @@ type GraphToken = {
 export type IntuneDevice = {
   id: string;
   deviceName: string;
+  userDisplayName: string;
   userPrincipalName: string;
   emailAddress: string;
   operatingSystem: string;
   osVersion: string;
   complianceState: string;
   managementAgent: string;
+  managementState: string;
   managedDeviceOwnerType: string;
+  deviceEnrollmentType: string;
+  deviceCategoryDisplayName: string;
   lastSyncDateTime: string;
   enrolledDateTime: string;
   azureADDeviceId: string;
+  azureADRegistered: boolean;
   manufacturer: string;
   model: string;
   serialNumber: string;
+  isEncrypted: boolean;
+  jailBroken: string;
+  wiFiMacAddress: string;
+  ethernetMacAddress: string;
+  totalStorageSpaceInBytes: number;
+  freeStorageSpaceInBytes: number;
+  partnerReportedThreatState: string;
 };
 
 let tokenCache: CacheEntry<string> | null = null;
@@ -35,53 +47,89 @@ const mockDevices: IntuneDevice[] = [
   {
     id: "mock-note-ti-022",
     deviceName: "NOTE-TI-022",
+    userDisplayName: "Fabiano Tecnologia",
     userPrincipalName: "fabiano.tecnologia@clubepaineiras.com.br",
     emailAddress: "fabiano.tecnologia@clubepaineiras.com.br",
     operatingSystem: "Windows",
     osVersion: "11 23H2",
     complianceState: "compliant",
     managementAgent: "mdm",
+    managementState: "managed",
     managedDeviceOwnerType: "company",
+    deviceEnrollmentType: "windowsAzureADJoin",
+    deviceCategoryDisplayName: "Notebooks",
     lastSyncDateTime: new Date().toISOString(),
     enrolledDateTime: "2026-07-02T12:30:00Z",
     azureADDeviceId: "mock-azuread-note-ti-022",
+    azureADRegistered: true,
     manufacturer: "Dell Inc.",
     model: "Latitude 5440",
     serialNumber: "MOCK-5440-022",
+    isEncrypted: true,
+    jailBroken: "False",
+    wiFiMacAddress: "00-11-22-33-44-55",
+    ethernetMacAddress: "00-11-22-33-44-56",
+    totalStorageSpaceInBytes: 512 * 1024 * 1024 * 1024,
+    freeStorageSpaceInBytes: 318 * 1024 * 1024 * 1024,
+    partnerReportedThreatState: "activated",
   },
   {
     id: "mock-note-atd-041",
     deviceName: "NOTE-ATD-041",
+    userDisplayName: "Central de Atendimento",
     userPrincipalName: "central@clubepaineiras.com.br",
     emailAddress: "central@clubepaineiras.com.br",
     operatingSystem: "Windows",
     osVersion: "10 22H2",
     complianceState: "noncompliant",
     managementAgent: "mdm",
+    managementState: "managed",
     managedDeviceOwnerType: "company",
+    deviceEnrollmentType: "windowsCoManagement",
+    deviceCategoryDisplayName: "Atendimento",
     lastSyncDateTime: "2026-09-15T09:18:00Z",
     enrolledDateTime: "2025-11-10T13:00:00Z",
     azureADDeviceId: "mock-azuread-note-atd-041",
+    azureADRegistered: true,
     manufacturer: "Lenovo",
     model: "ThinkPad E14",
     serialNumber: "MOCK-E14-041",
+    isEncrypted: false,
+    jailBroken: "False",
+    wiFiMacAddress: "00-22-33-44-55-66",
+    ethernetMacAddress: "00-22-33-44-55-67",
+    totalStorageSpaceInBytes: 256 * 1024 * 1024 * 1024,
+    freeStorageSpaceInBytes: 42 * 1024 * 1024 * 1024,
+    partnerReportedThreatState: "unknown",
   },
   {
     id: "mock-ipad-dir-003",
     deviceName: "IPAD-DIR-003",
+    userDisplayName: "Diretoria",
     userPrincipalName: "diretoria@clubepaineiras.com.br",
     emailAddress: "diretoria@clubepaineiras.com.br",
     operatingSystem: "iOS",
     osVersion: "18.4",
     complianceState: "unknown",
     managementAgent: "mdm",
+    managementState: "managed",
     managedDeviceOwnerType: "company",
+    deviceEnrollmentType: "appleBulkWithUser",
+    deviceCategoryDisplayName: "Mobile",
     lastSyncDateTime: "2026-09-10T16:25:00Z",
     enrolledDateTime: "2026-02-20T18:10:00Z",
     azureADDeviceId: "mock-azuread-ipad-dir-003",
+    azureADRegistered: true,
     manufacturer: "Apple",
     model: "iPad Air",
     serialNumber: "MOCK-IPAD-003",
+    isEncrypted: true,
+    jailBroken: "False",
+    wiFiMacAddress: "00-33-44-55-66-77",
+    ethernetMacAddress: "",
+    totalStorageSpaceInBytes: 128 * 1024 * 1024 * 1024,
+    freeStorageSpaceInBytes: 91 * 1024 * 1024 * 1024,
+    partnerReportedThreatState: "unknown",
   },
 ];
 
@@ -105,19 +153,31 @@ function normalizeDevice(raw: Record<string, unknown>): IntuneDevice {
   return {
     id: String(raw.id || ""),
     deviceName: String(raw.deviceName || ""),
+    userDisplayName: String(raw.userDisplayName || ""),
     userPrincipalName: String(raw.userPrincipalName || ""),
     emailAddress: String(raw.emailAddress || ""),
     operatingSystem: String(raw.operatingSystem || ""),
     osVersion: String(raw.osVersion || ""),
     complianceState: String(raw.complianceState || ""),
     managementAgent: String(raw.managementAgent || ""),
+    managementState: String(raw.managementState || ""),
     managedDeviceOwnerType: String(raw.managedDeviceOwnerType || ""),
+    deviceEnrollmentType: String(raw.deviceEnrollmentType || ""),
+    deviceCategoryDisplayName: String(raw.deviceCategoryDisplayName || ""),
     lastSyncDateTime: String(raw.lastSyncDateTime || ""),
     enrolledDateTime: String(raw.enrolledDateTime || ""),
     azureADDeviceId: String(raw.azureADDeviceId || ""),
+    azureADRegistered: Boolean(raw.azureADRegistered),
     manufacturer: String(raw.manufacturer || ""),
     model: String(raw.model || ""),
     serialNumber: String(raw.serialNumber || ""),
+    isEncrypted: Boolean(raw.isEncrypted),
+    jailBroken: String(raw.jailBroken || ""),
+    wiFiMacAddress: String(raw.wiFiMacAddress || ""),
+    ethernetMacAddress: String(raw.ethernetMacAddress || ""),
+    totalStorageSpaceInBytes: Number(raw.totalStorageSpaceInBytes || 0),
+    freeStorageSpaceInBytes: Number(raw.freeStorageSpaceInBytes || 0),
+    partnerReportedThreatState: String(raw.partnerReportedThreatState || ""),
   };
 }
 
@@ -177,19 +237,31 @@ async function listGraphDevices() {
   const select = [
     "id",
     "deviceName",
+    "userDisplayName",
     "userPrincipalName",
     "emailAddress",
     "operatingSystem",
     "osVersion",
     "complianceState",
     "managementAgent",
+    "managementState",
     "managedDeviceOwnerType",
+    "deviceEnrollmentType",
+    "deviceCategoryDisplayName",
     "lastSyncDateTime",
     "enrolledDateTime",
     "azureADDeviceId",
+    "azureADRegistered",
     "manufacturer",
     "model",
     "serialNumber",
+    "isEncrypted",
+    "jailBroken",
+    "wiFiMacAddress",
+    "ethernetMacAddress",
+    "totalStorageSpaceInBytes",
+    "freeStorageSpaceInBytes",
+    "partnerReportedThreatState",
   ].join(",");
   const payload = await graphGet<{ value?: Array<Record<string, unknown>> }>(`/deviceManagement/managedDevices?$top=500&$select=${select}`);
   return (payload.value || []).map(normalizeDevice);
@@ -252,6 +324,7 @@ export async function listIntuneDevices(query = "", limit?: string | number) {
     ? devices.filter((device) =>
         [
           device.deviceName,
+          device.userDisplayName,
           device.userPrincipalName,
           device.emailAddress,
           device.operatingSystem,
@@ -278,19 +351,31 @@ export async function getIntuneDeviceDetails(id: string) {
   const select = [
     "id",
     "deviceName",
+    "userDisplayName",
     "userPrincipalName",
     "emailAddress",
     "operatingSystem",
     "osVersion",
     "complianceState",
     "managementAgent",
+    "managementState",
     "managedDeviceOwnerType",
+    "deviceEnrollmentType",
+    "deviceCategoryDisplayName",
     "lastSyncDateTime",
     "enrolledDateTime",
     "azureADDeviceId",
+    "azureADRegistered",
     "manufacturer",
     "model",
     "serialNumber",
+    "isEncrypted",
+    "jailBroken",
+    "wiFiMacAddress",
+    "ethernetMacAddress",
+    "totalStorageSpaceInBytes",
+    "freeStorageSpaceInBytes",
+    "partnerReportedThreatState",
   ].join(",");
   const payload = await graphGet<Record<string, unknown>>(`/deviceManagement/managedDevices/${encodeURIComponent(id)}?$select=${select}`);
   return { source: "graph", device: normalizeDevice(payload) };

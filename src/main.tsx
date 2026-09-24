@@ -40,6 +40,7 @@ import {
   X,
   XCircle,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 import {
   Area,
@@ -209,19 +210,31 @@ type IntuneSummary = {
 type IntuneDevice = {
   id: string;
   deviceName: string;
+  userDisplayName: string;
   userPrincipalName: string;
   emailAddress: string;
   operatingSystem: string;
   osVersion: string;
   complianceState: string;
   managementAgent: string;
+  managementState: string;
   managedDeviceOwnerType: string;
+  deviceEnrollmentType: string;
+  deviceCategoryDisplayName: string;
   lastSyncDateTime: string;
   enrolledDateTime: string;
   azureADDeviceId: string;
+  azureADRegistered: boolean;
   manufacturer: string;
   model: string;
   serialNumber: string;
+  isEncrypted: boolean;
+  jailBroken: string;
+  wiFiMacAddress: string;
+  ethernetMacAddress: string;
+  totalStorageSpaceInBytes: number;
+  freeStorageSpaceInBytes: number;
+  partnerReportedThreatState: string;
 };
 
 type IntuneDetails = {
@@ -2813,13 +2826,16 @@ function IntuneDashboard({
 }) {
   const [deviceSearch, setDeviceSearch] = useState("");
   const [devicePage, setDevicePage] = useState(1);
+  const [deviceFilter, setDeviceFilter] = useState<"all" | "risk" | "stale" | "windows" | "mobile">("all");
   const [selectedDevice, setSelectedDevice] = useState<IntuneDevice | null>(null);
   const [deviceDetails, setDeviceDetails] = useState<IntuneDevice | null>(null);
   const [deviceDetailsLoading, setDeviceDetailsLoading] = useState(false);
   const [deviceDetailsError, setDeviceDetailsError] = useState("");
 
-  const filteredDevices = filterItems(intuneDetails.devices, deviceSearch, (device) => [
+  const devicesByFilter = intuneDetails.devices.filter((device) => intuneDeviceMatchesFilter(device, deviceFilter));
+  const filteredDevices = filterItems(devicesByFilter, deviceSearch, (device) => [
     device.deviceName,
+    device.userDisplayName,
     device.userPrincipalName,
     device.emailAddress,
     device.operatingSystem,
@@ -2829,6 +2845,11 @@ function IntuneDashboard({
     device.model,
     device.serialNumber,
   ]);
+  const riskDevices = intuneDetails.devices.filter((device) => intuneDeviceRiskReasons(device).length);
+  const staleDevices = intuneDetails.devices.filter((device) => intuneDeviceIsStale(device));
+  const windowsDevices = intuneDetails.devices.filter((device) => intuneDeviceIsWindows(device));
+  const mobileDevices = intuneDetails.devices.filter((device) => !intuneDeviceIsWindows(device));
+  const storageAlerts = intuneDetails.devices.filter((device) => intuneFreeStoragePercent(device) <= 15);
 
   async function openDeviceDetails(device: IntuneDevice) {
     setSelectedDevice(device);
@@ -2878,12 +2899,20 @@ function IntuneDashboard({
         <MetricCard icon={Clock3} label="Sem sync 7d" value={String(intuneSummary.staleSync)} detail="Ultima sincronizacao" tone="warn" />
       </section>
 
+      <section className="intune-filter-board" aria-label="Filtros Intune">
+        <IntuneFilterCard active={deviceFilter === "all"} count={intuneDetails.devices.length} icon={Monitor} label="Todos" tone="calm" onClick={() => { setDeviceFilter("all"); setDevicePage(1); }} />
+        <IntuneFilterCard active={deviceFilter === "risk"} count={riskDevices.length} icon={AlertTriangle} label="Risco" tone="danger" onClick={() => { setDeviceFilter("risk"); setDevicePage(1); }} />
+        <IntuneFilterCard active={deviceFilter === "stale"} count={staleDevices.length} icon={Clock3} label="Sem sync" tone="warn" onClick={() => { setDeviceFilter("stale"); setDevicePage(1); }} />
+        <IntuneFilterCard active={deviceFilter === "windows"} count={windowsDevices.length} icon={Monitor} label="Windows" tone="good" onClick={() => { setDeviceFilter("windows"); setDevicePage(1); }} />
+        <IntuneFilterCard active={deviceFilter === "mobile"} count={mobileDevices.length} icon={Wifi} label="Mobile" tone="calm" onClick={() => { setDeviceFilter("mobile"); setDevicePage(1); }} />
+      </section>
+
       <section className="dashboard-grid intune-dashboard-grid">
         <article className="panel intune-devices-panel">
           <PanelHeader
             icon={ShieldCheck}
             title="Dispositivos Intune"
-            meta={`${filteredDevices.length}/${intuneDetails.devices.length} registros`}
+            meta={`${filteredDevices.length}/${devicesByFilter.length} registros`}
             action={
               <button className="secondary-action" type="button" onClick={onRefreshIntune}>
                 <RefreshCw size={15} />
@@ -2906,11 +2935,22 @@ function IntuneDashboard({
         </article>
 
         <article className="panel intune-insights-panel">
-          <PanelHeader icon={CircleGauge} title="Conformidade" meta="Intune" />
+          <PanelHeader icon={CircleGauge} title="Operacao" meta="Riscos e inventario" />
           <div className="compliance-stack">
             <ComplianceBar label="Dispositivos conformes" current={intuneSummary.compliant} expected={Math.max(intuneSummary.total, 1)} status="OK" />
             <ComplianceBar label="Nao conformes" current={intuneSummary.nonCompliant} expected={0} status="Corrigir" />
             <ComplianceBar label="Sem sync em 7 dias" current={intuneSummary.staleSync} expected={0} status="Revisar" />
+            <ComplianceBar label="Pouco armazenamento" current={storageAlerts.length} expected={0} status="Limpar" />
+          </div>
+
+          <div className="intune-risk-list">
+            {riskDevices.slice(0, 6).map((device) => (
+              <button type="button" key={device.id || device.deviceName} onClick={() => openDeviceDetails(device)}>
+                <strong>{device.deviceName || "Sem nome"}</strong>
+                <span>{intuneDeviceRiskReasons(device).join(", ")}</span>
+              </button>
+            ))}
+            {!riskDevices.length ? <EmptyState title="Sem riscos criticos" detail="Nenhum dispositivo com alerta nesta coleta." /> : null}
           </div>
         </article>
       </section>
@@ -5385,24 +5425,66 @@ function AdUsersList({ users, onSelect }: { users: AdUser[]; onSelect: (user: Ad
   );
 }
 
+function IntuneFilterCard({
+  active,
+  count,
+  icon: Icon,
+  label,
+  tone,
+  onClick,
+}: {
+  active: boolean;
+  count: number;
+  icon: LucideIcon;
+  label: string;
+  tone: "good" | "warn" | "danger" | "calm";
+  onClick: () => void;
+}) {
+  return (
+    <button className={`intune-filter-card ${tone} ${active ? "active" : ""}`} type="button" onClick={onClick}>
+      <Icon size={18} />
+      <span>{label}</span>
+      <strong>{count}</strong>
+    </button>
+  );
+}
+
 function IntuneDevicesList({ devices, onSelect }: { devices: IntuneDevice[]; onSelect: (device: IntuneDevice) => void }) {
   if (!devices.length) {
     return <EmptyState title="Dispositivos nao carregados" detail="O Intune nao retornou dispositivos nesta coleta." />;
   }
 
   return (
-    <div className="directory-list">
+    <div className="intune-table" role="table" aria-label="Dispositivos Intune">
+      <div className="intune-table-head" role="row">
+        <span>Dispositivo</span>
+        <span>Usuario</span>
+        <span>Inventario</span>
+        <span>Seguranca</span>
+        <span>Ultimo sync</span>
+      </div>
       {devices.map((device) => (
-        <button className="directory-row directory-button intune-row" key={device.id || device.deviceName} type="button" onClick={() => onSelect(device)}>
+        <button className={`intune-table-row ${intuneDeviceRiskReasons(device).length ? "risk" : ""}`} key={device.id || device.deviceName} type="button" onClick={() => onSelect(device)} role="row">
           <div>
             <strong>{device.deviceName || "Sem nome"}</strong>
-            <span>{device.userPrincipalName || device.emailAddress || "Sem usuario principal"}</span>
+            <span>{formatIntuneOs(device)}</span>
           </div>
           <div>
-            <span>{formatIntuneOs(device)}</span>
-            <small>{device.manufacturer || "Fabricante nao informado"} {device.model || ""}</small>
+            <strong>{device.userDisplayName || device.userPrincipalName || "Sem usuario"}</strong>
+            <span>{device.userPrincipalName || device.emailAddress || "Sem e-mail"}</span>
           </div>
-          <StatusPill label={intuneComplianceLabel(device.complianceState)} />
+          <div>
+            <strong>{[device.manufacturer, device.model].filter(Boolean).join(" ") || "Modelo nao informado"}</strong>
+            <span>{device.serialNumber || "Serial nao informado"}</span>
+          </div>
+          <div className="intune-security-cell">
+            <StatusPill label={intuneComplianceLabel(device.complianceState)} />
+            <span>{device.isEncrypted ? "Criptografado" : "Sem BitLocker"}</span>
+          </div>
+          <div>
+            <strong>{formatDateTime(device.lastSyncDateTime)}</strong>
+            <span>{intuneRelativeDays(device.lastSyncDateTime)}</span>
+          </div>
         </button>
       ))}
     </div>
@@ -6273,11 +6355,14 @@ function IntuneDeviceModal({
             <h3>Inventario</h3>
             <div className="detail-grid">
               <DetailItem label="Sistema" value={formatIntuneOs(device)} />
+              <DetailItem label="Categoria" value={device.deviceCategoryDisplayName || "Nao informada"} />
               <DetailItem label="Fabricante" value={device.manufacturer} />
               <DetailItem label="Modelo" value={device.model} />
               <DetailItem label="Serial" value={device.serialNumber} />
               <DetailItem label="Tipo" value={device.managedDeviceOwnerType} />
               <DetailItem label="Agente" value={device.managementAgent} />
+              <DetailItem label="Inscricao" value={device.deviceEnrollmentType} />
+              <DetailItem label="Estado" value={device.managementState || "Nao informado"} />
             </div>
           </section>
 
@@ -6288,6 +6373,26 @@ function IntuneDeviceModal({
               <DetailItem label="Ultimo sync" value={formatDateTime(device.lastSyncDateTime)} />
               <DetailItem label="Inscrito em" value={formatDateTime(device.enrolledDateTime)} />
               <DetailItem label="Azure AD Device ID" value={device.azureADDeviceId} />
+            </div>
+          </section>
+
+          <section className="modal-section">
+            <h3>Seguranca</h3>
+            <div className="detail-grid">
+              <DetailItem label="Criptografia" value={device.isEncrypted ? "Ativa" : "Nao informada/inativa"} />
+              <DetailItem label="Azure AD registrado" value={device.azureADRegistered ? "Sim" : "Nao informado"} />
+              <DetailItem label="Jailbreak" value={device.jailBroken || "Nao informado"} />
+              <DetailItem label="Ameaca reportada" value={device.partnerReportedThreatState || "Nao informado"} />
+            </div>
+          </section>
+
+          <section className="modal-section">
+            <h3>Rede e armazenamento</h3>
+            <div className="detail-grid">
+              <DetailItem label="Wi-Fi MAC" value={device.wiFiMacAddress} />
+              <DetailItem label="Ethernet MAC" value={device.ethernetMacAddress} />
+              <DetailItem label="Armazenamento total" value={formatBytes(device.totalStorageSpaceInBytes)} />
+              <DetailItem label="Livre" value={`${formatBytes(device.freeStorageSpaceInBytes)} (${intuneFreeStoragePercent(device)}%)`} />
             </div>
           </section>
         </div>
@@ -7913,6 +8018,53 @@ function isPopChildOfFolder(item: PopDocument, folder: PopDocument) {
 
 function formatIntuneOs(device: IntuneDevice) {
   return [device.operatingSystem, device.osVersion].filter(Boolean).join(" ") || "SO nao informado";
+}
+
+function intuneDeviceIsWindows(device: IntuneDevice) {
+  return normalizeText(device.operatingSystem).includes("windows");
+}
+
+function intuneDeviceIsStale(device: IntuneDevice) {
+  const date = new Date(device.lastSyncDateTime);
+  return Number.isNaN(date.getTime()) || date.getTime() < Date.now() - 1000 * 60 * 60 * 24 * 7;
+}
+
+function intuneFreeStoragePercent(device: IntuneDevice) {
+  if (!device.totalStorageSpaceInBytes || !device.freeStorageSpaceInBytes) return 100;
+  return Math.max(0, Math.round((device.freeStorageSpaceInBytes / device.totalStorageSpaceInBytes) * 100));
+}
+
+function intuneThreatIsActive(device: IntuneDevice) {
+  const threat = normalizeText(device.partnerReportedThreatState);
+  return Boolean(threat && !["unknown", "none", "clear", "activated"].includes(threat));
+}
+
+function intuneDeviceRiskReasons(device: IntuneDevice) {
+  const reasons: string[] = [];
+  if (normalizeText(device.complianceState) === "noncompliant") reasons.push("Nao conforme");
+  if (intuneDeviceIsStale(device)) reasons.push("Sem sync 7d");
+  if (intuneDeviceIsWindows(device) && !device.isEncrypted) reasons.push("Sem BitLocker");
+  if (normalizeText(device.jailBroken) === "true") reasons.push("Jailbreak");
+  if (intuneThreatIsActive(device)) reasons.push("Ameaca");
+  if (intuneFreeStoragePercent(device) <= 15) reasons.push("Pouco espaco");
+  return reasons;
+}
+
+function intuneDeviceMatchesFilter(device: IntuneDevice, filter: "all" | "risk" | "stale" | "windows" | "mobile") {
+  if (filter === "risk") return intuneDeviceRiskReasons(device).length > 0;
+  if (filter === "stale") return intuneDeviceIsStale(device);
+  if (filter === "windows") return intuneDeviceIsWindows(device);
+  if (filter === "mobile") return !intuneDeviceIsWindows(device);
+  return true;
+}
+
+function intuneRelativeDays(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sem data";
+  const days = Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+  if (days <= 0) return "Hoje";
+  if (days === 1) return "1 dia atras";
+  return `${days} dias atras`;
 }
 
 function normalizeText(value: string) {
