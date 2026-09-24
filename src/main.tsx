@@ -244,6 +244,67 @@ type IntuneDetails = {
   devices: IntuneDevice[];
 };
 
+type Office365Status = {
+  ok: boolean;
+  source: string;
+  configured: boolean;
+  message: string;
+};
+
+type Office365Summary = {
+  source: string;
+  users: number;
+  enabledUsers: number;
+  licensedUsers: number;
+  groups: number;
+  licensedGroups: number;
+  licenses: number;
+  enabledLicenseUnits: number;
+  consumedLicenseUnits: number;
+  availableLicenseUnits: number;
+};
+
+type Office365User = {
+  id: string;
+  displayName: string;
+  userPrincipalName: string;
+  mail: string;
+  accountEnabled: boolean;
+  department: string;
+  jobTitle: string;
+  createdDateTime: string;
+  assignedLicenses: string[];
+};
+
+type Office365License = {
+  skuId: string;
+  skuPartNumber: string;
+  consumedUnits: number;
+  enabledUnits: number;
+  suspendedUnits: number;
+  warningUnits: number;
+  availableUnits: number;
+  servicePlans: number;
+};
+
+type Office365Group = {
+  id: string;
+  displayName: string;
+  description: string;
+  mail: string;
+  mailEnabled: boolean;
+  securityEnabled: boolean;
+  groupTypes: string[];
+  createdDateTime: string;
+  assignedLicenses: string[];
+};
+
+type Office365Details = {
+  users: Office365User[];
+  licenses: Office365License[];
+  groups: Office365Group[];
+};
+
 type IntuneLapsCredential = {
   deviceId: string;
   deviceName: string;
@@ -706,7 +767,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -999,6 +1060,32 @@ const fallbackIntuneDetails: IntuneDetails = {
   devices: [],
 };
 
+const fallbackOffice365Status: Office365Status = {
+  ok: true,
+  source: "graph",
+  configured: false,
+  message: "Office 365 aguardando configuracao",
+};
+
+const fallbackOffice365Summary: Office365Summary = {
+  source: "graph",
+  users: 0,
+  enabledUsers: 0,
+  licensedUsers: 0,
+  groups: 0,
+  licensedGroups: 0,
+  licenses: 0,
+  enabledLicenseUnits: 0,
+  consumedLicenseUnits: 0,
+  availableLicenseUnits: 0,
+};
+
+const fallbackOffice365Details: Office365Details = {
+  users: [],
+  licenses: [],
+  groups: [],
+};
+
 const fallbackSnmpSummary: SnmpSummary = {
   total: 0,
   enabled: 0,
@@ -1101,6 +1188,7 @@ const navItems = [
   { label: "IPs", icon: Network, view: "ips" },
   { label: "SNMP", icon: Signal, view: "snmp" },
   { label: "Intune", icon: ShieldCheck, view: "intune" },
+  { label: "Office 365", icon: TableIcon, view: "office365" },
   { label: "Bloqueios", icon: LockKeyhole },
   { label: "Chamado Milvus", icon: ClipboardList, view: "milvusPortal" },
   { label: "WiFi", icon: Wifi, view: "wifi" },
@@ -1110,7 +1198,7 @@ const navItems = [
   { label: "Ajustes", icon: Settings },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop";
+type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop";
 
 function statusLabel(status: Status) {
   return {
@@ -1123,6 +1211,7 @@ function statusLabel(status: Status) {
 function viewEyebrow(view: View) {
   if (view === "tv") return "Operacao de TI ao vivo";
   if (view === "intune") return "Gerenciamento de dispositivos";
+  if (view === "office365") return "Administracao Microsoft 365";
   if (view === "tickets") return "Atendimento e SLA";
   if (view === "milvusPortal") return "Portal oficial";
   if (view === "ips") return "Inventario de rede";
@@ -1136,6 +1225,7 @@ function viewEyebrow(view: View) {
 function viewTitle(view: View) {
   if (view === "tv") return "Painel da TV";
   if (view === "intune") return "Microsoft Intune";
+  if (view === "office365") return "Office 365";
   if (view === "tickets") return "Chamados Milvus";
   if (view === "milvusPortal") return "Chamado Milvus";
   if (view === "ips") return "IPs";
@@ -1169,6 +1259,9 @@ function App() {
   const [intuneStatus, setIntuneStatus] = useState<IntuneStatus>(fallbackIntuneStatus);
   const [intuneSummary, setIntuneSummary] = useState<IntuneSummary>(fallbackIntuneSummary);
   const [intuneDetails, setIntuneDetails] = useState<IntuneDetails>(fallbackIntuneDetails);
+  const [office365Status, setOffice365Status] = useState<Office365Status>(fallbackOffice365Status);
+  const [office365Summary, setOffice365Summary] = useState<Office365Summary>(fallbackOffice365Summary);
+  const [office365Details, setOffice365Details] = useState<Office365Details>(fallbackOffice365Details);
   const [snmpSummary, setSnmpSummary] = useState<SnmpSummary>(fallbackSnmpSummary);
   const [snmpDetails, setSnmpDetails] = useState<SnmpDetails>(fallbackSnmpDetails);
   const [ticketsStatus, setTicketsStatus] = useState<TicketsStatus>(fallbackTicketsStatus);
@@ -1190,6 +1283,9 @@ function App() {
     setIntuneStatus(fallbackIntuneStatus);
     setIntuneSummary(fallbackIntuneSummary);
     setIntuneDetails(fallbackIntuneDetails);
+    setOffice365Status(fallbackOffice365Status);
+    setOffice365Summary(fallbackOffice365Summary);
+    setOffice365Details(fallbackOffice365Details);
     setSnmpSummary(fallbackSnmpSummary);
     setSnmpDetails(fallbackSnmpDetails);
     setTicketsStatus(fallbackTicketsStatus);
@@ -1459,6 +1555,78 @@ function App() {
     }
   }, [clearSession, session]);
 
+  const loadOffice365 = useCallback(async () => {
+    if (!session) {
+      return;
+    }
+
+    try {
+      const statusResponse = await authFetch("/api/office365/status");
+
+      if (statusResponse.status === 401) {
+        clearSession();
+        return;
+      }
+
+      const statusPayload = await parseApiPayload<Partial<Office365Status>>(statusResponse, {});
+      setOffice365Status(
+        statusResponse.ok
+          ? (statusPayload as Office365Status)
+          : {
+              ok: false,
+              source: "graph",
+              configured: true,
+              message: statusPayload.message || `API Office 365 retornou erro ${statusResponse.status}.`,
+            },
+      );
+
+      const [summaryResponse, detailsResponse] = await Promise.all([
+        authFetch("/api/office365/summary"),
+        authFetch("/api/office365/details"),
+      ]);
+
+      if (summaryResponse.ok) {
+        setOffice365Summary(await summaryResponse.json());
+      } else {
+        const payload = await parseApiPayload<{ message?: string }>(summaryResponse, {});
+        setOffice365Summary(fallbackOffice365Summary);
+        setOffice365Status({
+          ok: false,
+          source: "graph",
+          configured: statusPayload.configured ?? true,
+          message: payload.message || `Resumo Office 365 retornou erro ${summaryResponse.status}.`,
+        });
+      }
+
+      if (detailsResponse.ok) {
+        const payload = await detailsResponse.json();
+        setOffice365Details({
+          users: payload.users || [],
+          licenses: payload.licenses || [],
+          groups: payload.groups || [],
+        });
+      } else {
+        const payload = await parseApiPayload<{ message?: string }>(detailsResponse, {});
+        setOffice365Details(fallbackOffice365Details);
+        setOffice365Status({
+          ok: false,
+          source: "graph",
+          configured: statusPayload.configured ?? true,
+          message: payload.message || `Detalhes Office 365 retornaram erro ${detailsResponse.status}.`,
+        });
+      }
+    } catch (error) {
+      setOffice365Summary(fallbackOffice365Summary);
+      setOffice365Details(fallbackOffice365Details);
+      setOffice365Status({
+        ok: false,
+        source: "offline",
+        configured: false,
+        message: error instanceof Error ? error.message : "API Office 365 offline.",
+      });
+    }
+  }, [clearSession, session]);
+
   const loadSnmp = useCallback(async () => {
     if (!session) return;
 
@@ -1506,6 +1674,16 @@ function App() {
     const interval = window.setInterval(loadIntune, 60000);
     return () => window.clearInterval(interval);
   }, [loadIntune, session]);
+
+  useEffect(() => {
+    if (!session) {
+      return undefined;
+    }
+
+    loadOffice365();
+    const interval = window.setInterval(loadOffice365, 60000);
+    return () => window.clearInterval(interval);
+  }, [loadOffice365, session]);
 
   useEffect(() => {
     if (!session) {
@@ -1701,6 +1879,8 @@ function App() {
           <TopologyDashboard topology={topology} onChange={setTopology} ipDetails={ipDetails} onRefreshIps={loadIps} saveStatus={topologySaveStatus} />
         ) : activeView === "intune" ? (
           <IntuneDashboard intuneStatus={intuneStatus} intuneSummary={intuneSummary} intuneDetails={intuneDetails} onRefreshIntune={loadIntune} />
+        ) : activeView === "office365" ? (
+          <Office365Dashboard office365Status={office365Status} office365Summary={office365Summary} office365Details={office365Details} onRefreshOffice365={loadOffice365} />
         ) : activeView === "snmp" ? (
           <SnmpDashboard snmpSummary={snmpSummary} snmpDetails={snmpDetails} onRefreshSnmp={loadSnmp} />
         ) : activeView === "tickets" ? (
@@ -2997,6 +3177,136 @@ function IntuneDashboard({
           onClose={closeDeviceDetails}
         />
       ) : null}
+    </>
+  );
+}
+
+function Office365Dashboard({
+  office365Status,
+  office365Summary,
+  office365Details,
+  onRefreshOffice365,
+}: {
+  office365Status: Office365Status;
+  office365Summary: Office365Summary;
+  office365Details: Office365Details;
+  onRefreshOffice365: () => Promise<void>;
+}) {
+  const [tab, setTab] = useState<"users" | "licenses" | "groups">("users");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+
+  const currentItems = tab === "users" ? office365Details.users : tab === "licenses" ? office365Details.licenses : office365Details.groups;
+  const filteredUsers = filterItems(office365Details.users, search, (user) => [
+    user.displayName,
+    user.userPrincipalName,
+    user.mail,
+    user.department,
+    user.jobTitle,
+    user.assignedLicenses.join(" "),
+  ]);
+  const filteredLicenses = filterItems(office365Details.licenses, search, (license) => [
+    license.skuPartNumber,
+    license.skuId,
+    String(license.consumedUnits),
+    String(license.availableUnits),
+  ]);
+  const filteredGroups = filterItems(office365Details.groups, search, (group) => [
+    group.displayName,
+    group.description,
+    group.mail,
+    group.groupTypes.join(" "),
+    group.assignedLicenses.join(" "),
+  ]);
+  const filteredItems = tab === "users" ? filteredUsers : tab === "licenses" ? filteredLicenses : filteredGroups;
+  const licensedUserPercent = office365Summary.users ? Math.round((office365Summary.licensedUsers / office365Summary.users) * 100) : 0;
+
+  function changeTab(nextTab: "users" | "licenses" | "groups") {
+    setTab(nextTab);
+    setSearch("");
+    setPage(1);
+  }
+
+  return (
+    <>
+      {!office365Status.ok ? (
+        <section className="ad-alert">
+          <AlertTriangle size={20} />
+          <div>
+            <strong>Office 365 nao esta retornando dados</strong>
+            <span>{office365Status.message}</span>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="kpi-grid" aria-label="Resumo Office 365">
+        <MetricCard icon={Users} label="Usuarios" value={String(office365Summary.users)} detail={`${office365Summary.enabledUsers} ativos`} tone="calm" />
+        <MetricCard icon={ShieldCheck} label="Licenciados" value={String(office365Summary.licensedUsers)} detail={`${licensedUserPercent}% dos usuarios`} tone="good" />
+        <MetricCard icon={TableIcon} label="Licencas" value={String(office365Summary.licenses)} detail={`${office365Summary.availableLicenseUnits} disponiveis`} tone="warn" />
+        <MetricCard icon={Network} label="Grupos" value={String(office365Summary.groups)} detail={`${office365Summary.licensedGroups} com licenca`} tone="calm" />
+      </section>
+
+      <section className="dashboard-grid office365-dashboard-grid">
+        <article className="panel office365-main-panel">
+          <PanelHeader
+            icon={TableIcon}
+            title="Centro Office 365"
+            meta={`${filteredItems.length}/${currentItems.length} registros`}
+            action={
+              <button className="secondary-action" type="button" onClick={onRefreshOffice365}>
+                <RefreshCw size={15} />
+                Atualizar
+              </button>
+            }
+          />
+
+          <div className="office365-tabs" role="tablist" aria-label="Office 365">
+            <button className={tab === "users" ? "active" : ""} type="button" onClick={() => changeTab("users")}>Usuarios</button>
+            <button className={tab === "licenses" ? "active" : ""} type="button" onClick={() => changeTab("licenses")}>Licencas</button>
+            <button className={tab === "groups" ? "active" : ""} type="button" onClick={() => changeTab("groups")}>Grupos</button>
+          </div>
+
+          <DirectoryTools
+            value={search}
+            onChange={(value) => {
+              setSearch(value);
+              setPage(1);
+            }}
+            page={page}
+            total={filteredItems.length}
+            onPageChange={setPage}
+            placeholder={tab === "users" ? "Procurar usuario, e-mail, setor ou licenca" : tab === "licenses" ? "Procurar SKU ou ID da licenca" : "Procurar grupo, e-mail, tipo ou licenca"}
+          />
+
+          {tab === "users" ? (
+            <Office365UsersList users={paginate(filteredUsers, page)} />
+          ) : tab === "licenses" ? (
+            <Office365LicensesList licenses={paginate(filteredLicenses, page)} />
+          ) : (
+            <Office365GroupsList groups={paginate(filteredGroups, page)} />
+          )}
+        </article>
+
+        <article className="panel office365-side-panel">
+          <PanelHeader icon={CircleGauge} title="Operacao" meta="Licencas e identidade" />
+          <div className="compliance-stack">
+            <ComplianceBar label="Usuarios ativos" current={office365Summary.enabledUsers} expected={Math.max(office365Summary.users, 1)} status="OK" />
+            <ComplianceBar label="Usuarios licenciados" current={office365Summary.licensedUsers} expected={Math.max(office365Summary.users, 1)} status="Revisar" />
+            <ComplianceBar label="Licencas usadas" current={office365Summary.consumedLicenseUnits} expected={Math.max(office365Summary.enabledLicenseUnits, 1)} status="Uso" />
+            <ComplianceBar label="Grupos com licenca" current={office365Summary.licensedGroups} expected={Math.max(office365Summary.groups, 1)} status="Grupos" />
+          </div>
+
+          <div className="office365-license-stack">
+            {office365Details.licenses.slice(0, 6).map((license) => (
+              <div className="office365-license-card" key={license.skuId || license.skuPartNumber}>
+                <strong>{formatSkuName(license.skuPartNumber)}</strong>
+                <span>{license.consumedUnits} usadas de {license.enabledUnits}</span>
+              </div>
+            ))}
+            {!office365Details.licenses.length ? <EmptyState title="Licencas nao carregadas" detail="O Graph nao retornou licencas nesta coleta." /> : null}
+          </div>
+        </article>
+      </section>
     </>
   );
 }
@@ -5520,6 +5830,108 @@ function IntuneDevicesList({ devices, onSelect }: { devices: IntuneDevice[]; onS
             <span>{intuneRelativeDays(device.lastSyncDateTime)}</span>
           </div>
         </button>
+      ))}
+    </div>
+  );
+}
+
+function Office365UsersList({ users }: { users: Office365User[] }) {
+  if (!users.length) {
+    return <EmptyState title="Usuarios nao carregados" detail="O Microsoft Graph nao retornou usuarios nesta coleta." />;
+  }
+
+  return (
+    <div className="office365-table office365-users-table" role="table" aria-label="Usuarios Office 365">
+      <div className="office365-table-head" role="row">
+        <span>Usuario</span>
+        <span>Setor</span>
+        <span>Licencas</span>
+        <span>Status</span>
+      </div>
+      {users.map((user) => (
+        <div className="office365-table-row" key={user.id || user.userPrincipalName} role="row">
+          <div>
+            <strong>{user.displayName || user.userPrincipalName || "Sem nome"}</strong>
+            <span>{user.userPrincipalName || user.mail || "Sem e-mail"}</span>
+          </div>
+          <div>
+            <strong>{user.department || "Sem departamento"}</strong>
+            <span>{user.jobTitle || "Sem cargo"}</span>
+          </div>
+          <div>
+            <strong>{user.assignedLicenses.length ? `${user.assignedLicenses.length} licenca(s)` : "Sem licenca"}</strong>
+            <span>{user.assignedLicenses.map(formatSkuName).join(", ") || "Nao atribuido"}</span>
+          </div>
+          <StatusPill label={user.accountEnabled ? "Ativo" : "Desativado"} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Office365LicensesList({ licenses }: { licenses: Office365License[] }) {
+  if (!licenses.length) {
+    return <EmptyState title="Licencas nao carregadas" detail="O Microsoft Graph nao retornou licencas nesta coleta." />;
+  }
+
+  return (
+    <div className="office365-table office365-licenses-table" role="table" aria-label="Licencas Office 365">
+      <div className="office365-table-head" role="row">
+        <span>SKU</span>
+        <span>Uso</span>
+        <span>Disponivel</span>
+        <span>Planos</span>
+      </div>
+      {licenses.map((license) => (
+        <div className="office365-table-row" key={license.skuId || license.skuPartNumber} role="row">
+          <div>
+            <strong>{formatSkuName(license.skuPartNumber)}</strong>
+            <span>{license.skuPartNumber || license.skuId}</span>
+          </div>
+          <div>
+            <strong>{license.consumedUnits} / {license.enabledUnits}</strong>
+            <span>{license.suspendedUnits} suspensas, {license.warningUnits} alerta</span>
+          </div>
+          <div>
+            <strong>{license.availableUnits}</strong>
+            <span>unidades livres</span>
+          </div>
+          <StatusPill label={`${license.servicePlans} planos`} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Office365GroupsList({ groups }: { groups: Office365Group[] }) {
+  if (!groups.length) {
+    return <EmptyState title="Grupos nao carregados" detail="O Microsoft Graph nao retornou grupos nesta coleta." />;
+  }
+
+  return (
+    <div className="office365-table office365-groups-table" role="table" aria-label="Grupos Office 365">
+      <div className="office365-table-head" role="row">
+        <span>Grupo</span>
+        <span>Tipo</span>
+        <span>Licencas</span>
+        <span>Status</span>
+      </div>
+      {groups.map((group) => (
+        <div className="office365-table-row" key={group.id || group.displayName} role="row">
+          <div>
+            <strong>{group.displayName || "Sem nome"}</strong>
+            <span>{group.mail || group.description || "Sem e-mail"}</span>
+          </div>
+          <div>
+            <strong>{group.groupTypes.includes("Unified") ? "Microsoft 365" : group.securityEnabled ? "Seguranca" : "Distribuicao"}</strong>
+            <span>{group.mailEnabled ? "Mail habilitado" : "Sem mail"}</span>
+          </div>
+          <div>
+            <strong>{group.assignedLicenses.length ? `${group.assignedLicenses.length} licenca(s)` : "Sem licenca"}</strong>
+            <span>{group.assignedLicenses.map(formatSkuName).join(", ") || "Nao atribuido"}</span>
+          </div>
+          <StatusPill label={group.securityEnabled ? "Security" : "Grupo"} />
+        </div>
       ))}
     </div>
   );
@@ -8225,6 +8637,23 @@ function intuneComplianceLabel(value: string) {
   if (normalized === "error") return "Erro";
   if (normalized === "unknown") return "Desconhecido";
   return value || "Sem status";
+}
+
+function formatSkuName(value: string) {
+  const known: Record<string, string> = {
+    ENTERPRISEPACK: "Office 365 E3",
+    ENTERPRISEPREMIUM: "Office 365 E5",
+    SPE_E3: "Microsoft 365 E3",
+    SPE_E5: "Microsoft 365 E5",
+    BUSINESS_PREMIUM: "Business Premium",
+    BUSINESS_STANDARD: "Business Standard",
+    EXCHANGESTANDARD: "Exchange Online",
+    POWER_BI_STANDARD: "Power BI",
+    FLOW_FREE: "Power Automate Free",
+    TEAMS_EXPLORATORY: "Teams Exploratory",
+  };
+  const normalized = String(value || "").trim();
+  return known[normalized] || normalized.replace(/_/g, " ") || "Nao informado";
 }
 
 function extractOu(distinguishedName: string) {

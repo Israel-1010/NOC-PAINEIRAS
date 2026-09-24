@@ -1896,6 +1896,134 @@ h1 {
   font-weight: 800;
 }
 
+.office365-dashboard-grid {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: start;
+}
+
+.office365-main-panel {
+  grid-column: span 8;
+  display: flex;
+  flex-direction: column;
+  min-height: 620px;
+  overflow: hidden;
+}
+
+.office365-side-panel {
+  grid-column: span 4;
+}
+
+.office365-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.office365-tabs button {
+  min-height: 38px;
+  color: #1f6b55;
+  background: #f8faf8;
+  border: 1px solid #dfe6df;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.office365-tabs button.active {
+  color: #ffffff;
+  background: #1f7a62;
+  border-color: #1f7a62;
+}
+
+.office365-table {
+  display: grid;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid #dfe6df;
+  border-radius: 8px;
+}
+
+.office365-table-head,
+.office365-table-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.3fr) minmax(180px, 1fr) minmax(240px, 1.4fr) minmax(110px, 0.6fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 920px;
+  padding: 0 12px;
+}
+
+.office365-table-head {
+  min-height: 40px;
+  color: #657166;
+  background: #ffffff;
+  border-bottom: 1px solid #dfe6df;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.office365-table-row {
+  min-height: 74px;
+  background: #ffffff;
+  border-bottom: 1px solid #dfe6df;
+}
+
+.office365-table-row strong,
+.office365-table-row span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office365-table-row strong {
+  color: #07110d;
+  font-size: 13px;
+}
+
+.office365-table-row span {
+  color: #657166;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.office365-license-stack {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.office365-license-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  background: #f8faf8;
+  border: 1px solid #dfe6df;
+  border-left: 4px solid #277da1;
+  border-radius: 8px;
+}
+
+.office365-license-card strong,
+.office365-license-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office365-license-card strong {
+  font-size: 13px;
+}
+
+.office365-license-card span {
+  color: #657166;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .tickets-dashboard-grid {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   align-items: start;

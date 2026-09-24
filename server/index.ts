@@ -47,6 +47,11 @@ import {
   listMilvusTickets,
 } from "./milvusClient";
 import {
+  getOffice365Details,
+  getOffice365Status,
+  getOffice365Summary,
+} from "./office365Client";
+import {
   collectAllSnmpDevices,
   collectSnmpDevice,
   deleteSnmpDevice,
@@ -326,6 +331,12 @@ app.get("/api/intune/summary", asyncRoute(() => getIntuneSummary()));
 app.get("/api/intune/devices", asyncRoute((req) => listIntuneDevices(String(req.query.search || ""), String(req.query.limit || ""))));
 app.get("/api/intune/devices/:id/laps", asyncRoute((req) => getIntuneDeviceLapsCredential(String(req.params.id))));
 app.get("/api/intune/devices/:id", asyncRoute((req) => getIntuneDeviceDetails(String(req.params.id))));
+
+app.use("/api/office365", requireAuth);
+
+app.get("/api/office365/status", asyncRoute(() => getOffice365Status()));
+app.get("/api/office365/summary", asyncRoute(() => getOffice365Summary()));
+app.get("/api/office365/details", asyncRoute(() => getOffice365Details()));
 
 app.use("/api/wifi", requireAuth);
 
