@@ -22,6 +22,15 @@ type GraphDrive = {
   webUrl?: string;
 };
 
+type ResolvedDrive = {
+  siteId?: string;
+  driveId: string;
+  siteName: string;
+  driveName: string;
+  expiresAt: number;
+  drives: GraphDrive[];
+};
+
 type GraphIdentity = {
   user?: {
     displayName?: string;
@@ -69,7 +78,7 @@ type FolderReadError = {
 };
 
 let tokenCache: { token: string; expiresAt: number } | null = null;
-let driveCache: { siteId?: string; driveId: string; siteName: string; driveName: string; expiresAt: number } | null = null;
+let driveCache: ResolvedDrive | null = null;
 
 function encodePath(path: string) {
   return path
@@ -82,7 +91,7 @@ function encodePath(path: string) {
 function folderPathCandidates(path: string) {
   const normalized = decodeURIComponent(path).replace(/^\/+/, "").trim();
   const candidates = new Set<string>([normalized]);
-  const libraryPrefixes = ["Documentos Compartilhados/", "Shared Documents/", "Documents/"];
+  const libraryPrefixes = ["Documentos Compartilhados/", "Documentos/", "Shared Documents/", "Documents/"];
 
   for (const prefix of libraryPrefixes) {
     if (normalized.toLowerCase().startsWith(prefix.toLowerCase())) {
@@ -94,6 +103,11 @@ function folderPathCandidates(path: string) {
     if (markerIndex >= 0) {
       candidates.add(normalized.slice(markerIndex + marker.length));
     }
+  }
+
+  const popIndex = normalized.toLowerCase().lastIndexOf("/pop");
+  if (popIndex >= 0) {
+    candidates.add(normalized.slice(popIndex + 1));
   }
 
   return Array.from(candidates).filter(Boolean);
@@ -187,6 +201,7 @@ async function resolveDrive() {
   let siteName = "SharePoint";
   let driveId = sharePointConfig.driveId || "";
   let driveName = "Documentos";
+  let drives: GraphDrive[] = [];
 
   if (!driveId) {
     if (!sharePointConfig.hostname || !sharePointConfig.sitePath) {
@@ -197,9 +212,19 @@ async function resolveDrive() {
     const site = await graphGet<GraphSite>(`/sites/${sharePointConfig.hostname}:${sitePath}`);
     siteId = site.id;
     siteName = site.displayName || site.webUrl || "SharePoint";
-    const drive = await graphGet<GraphDrive>(`/sites/${site.id}/drive`);
-    driveId = drive.id;
-    driveName = drive.name || "Documentos";
+    const driveList = await graphGet<GraphCollection<GraphDrive>>(`/sites/${site.id}/drives?$select=id,name,webUrl`);
+    drives = driveList.value || [];
+    const selectedDrive = drives.find((drive) => /documentos compartilhados|documentos|shared documents|documents/i.test(`${drive.name || ""} ${drive.webUrl || ""}`))
+      || drives[0];
+
+    if (!selectedDrive) {
+      throw new Error("Nenhuma biblioteca de documentos encontrada no site SharePoint.");
+    }
+
+    driveId = selectedDrive.id;
+    driveName = selectedDrive.name || "Documentos";
+  } else {
+    drives = [{ id: driveId, name: "Drive configurado" }];
   }
 
   driveCache = {
@@ -207,6 +232,7 @@ async function resolveDrive() {
     driveId,
     siteName,
     driveName,
+    drives,
     expiresAt: Date.now() + 10 * 60 * 1000,
   };
   return driveCache;
@@ -292,25 +318,55 @@ export async function listPopDocuments(search = "") {
     };
   }
 
-  const drive = await resolveDrive();
-  const items = await listFolderChildren(drive.driveId, 0, sharePointConfig.folderItemId, sharePointConfig.folderPath) as Array<PopDocument> & { readErrors?: FolderReadError[] };
-  const readErrors = items.readErrors || [];
-  const normalizedSearch = search.trim().toLowerCase();
-  const filtered = normalizedSearch
-    ? items.filter((item) => `${item.name} ${item.category} ${item.extension} ${item.modifiedBy}`.toLowerCase().includes(normalizedSearch))
-    : items;
+  try {
+    const drive = await resolveDrive();
+    let selectedDrive = { id: drive.driveId, name: drive.driveName };
+    let items = [] as Array<PopDocument> & { readErrors?: FolderReadError[] };
+    let lastError: unknown = null;
 
-  return {
-    ok: true,
-    configured: true,
-    source: "sharepoint",
-    message: readErrors.length
-      ? `POP carregado, mas ${readErrors.length} subpasta(s) nao abriram.`
-      : "POP sincronizado com SharePoint.",
-    warnings: readErrors,
-    siteName: drive.siteName,
-    driveName: drive.driveName,
-    total: filtered.length,
-    items: filtered.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)).slice(0, 200),
-  };
+    for (const candidateDrive of drive.drives.length ? drive.drives : [{ id: drive.driveId, name: drive.driveName }]) {
+      try {
+        items = await listFolderChildren(candidateDrive.id, 0, sharePointConfig.folderItemId, sharePointConfig.folderPath) as Array<PopDocument> & { readErrors?: FolderReadError[] };
+        selectedDrive = { id: candidateDrive.id, name: candidateDrive.name || "Documentos" };
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (!items.length && lastError) {
+      throw lastError;
+    }
+
+    const readErrors = items.readErrors || [];
+    const normalizedSearch = search.trim().toLowerCase();
+    const filtered = normalizedSearch
+      ? items.filter((item) => `${item.name} ${item.category} ${item.extension} ${item.modifiedBy}`.toLowerCase().includes(normalizedSearch))
+      : items;
+
+    return {
+      ok: true,
+      configured: true,
+      source: "sharepoint",
+      message: readErrors.length
+        ? `POP carregado, mas ${readErrors.length} subpasta(s) nao abriram.`
+        : "POP sincronizado com SharePoint.",
+      warnings: readErrors,
+      siteName: drive.siteName,
+      driveName: selectedDrive.name,
+      total: filtered.length,
+      items: filtered.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)).slice(0, 200),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      configured: true,
+      source: "sharepoint",
+      message: error instanceof Error ? error.message : "Falha ao consultar SharePoint.",
+      siteName: "SharePoint",
+      driveName: "POP",
+      total: 0,
+      items: [] as PopDocument[],
+    };
+  }
 }
