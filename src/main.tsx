@@ -3196,14 +3196,28 @@ function Office365Dashboard({
   const [tab, setTab] = useState<"users" | "licenses" | "groups">("users");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [operationFilter, setOperationFilter] = useState("");
   const [licenseUser, setLicenseUser] = useState<Office365User | null>(null);
   const [licenseSelection, setLicenseSelection] = useState<string[]>([]);
   const [licenseSaving, setLicenseSaving] = useState(false);
   const [licenseError, setLicenseError] = useState("");
   const [licenseMessage, setLicenseMessage] = useState("");
 
-  const currentItems = tab === "users" ? office365Details.users : tab === "licenses" ? office365Details.licenses : office365Details.groups;
-  const filteredUsers = filterItems(office365Details.users, search, (user) => [
+  const usersByOperation = operationFilter === "licensed-users"
+    ? office365Details.users.filter((user) => user.assignedLicenses.length)
+    : operationFilter === "unlicensed-users"
+      ? office365Details.users.filter((user) => !user.assignedLicenses.length)
+      : office365Details.users;
+  const licensesByOperation = operationFilter === "license-usage"
+    ? office365Details.licenses.filter((license) => license.consumedUnits > 0)
+    : operationFilter === "license-full"
+      ? office365Details.licenses.filter((license) => license.enabledUnits > 0 && license.availableUnits === 0)
+      : office365Details.licenses;
+  const groupsByOperation = operationFilter === "licensed-groups"
+    ? office365Details.groups.filter((group) => group.assignedLicenses.length)
+    : office365Details.groups;
+  const currentItems = tab === "users" ? usersByOperation : tab === "licenses" ? licensesByOperation : groupsByOperation;
+  const filteredUsers = filterItems(usersByOperation, search, (user) => [
     user.displayName,
     user.userPrincipalName,
     user.mail,
@@ -3211,13 +3225,13 @@ function Office365Dashboard({
     user.jobTitle,
     user.assignedLicenses.join(" "),
   ]);
-  const filteredLicenses = filterItems(office365Details.licenses, search, (license) => [
+  const filteredLicenses = filterItems(licensesByOperation, search, (license) => [
     license.skuPartNumber,
     license.skuId,
     String(license.consumedUnits),
     String(license.availableUnits),
   ]);
-  const filteredGroups = filterItems(office365Details.groups, search, (group) => [
+  const filteredGroups = filterItems(groupsByOperation, search, (group) => [
     group.displayName,
     group.description,
     group.mail,
@@ -3226,11 +3240,18 @@ function Office365Dashboard({
   ]);
   const filteredItems = tab === "users" ? filteredUsers : tab === "licenses" ? filteredLicenses : filteredGroups;
   const licensedUserPercent = office365Summary.users ? Math.round((office365Summary.licensedUsers / office365Summary.users) * 100) : 0;
+  const unlicensedUsersCount = Math.max(0, office365Summary.users - office365Summary.licensedUsers);
+  const fullLicensesCount = office365Details.licenses.filter((license) => license.enabledUnits > 0 && license.availableUnits === 0).length;
 
-  function changeTab(nextTab: "users" | "licenses" | "groups") {
+  function changeTab(nextTab: "users" | "licenses" | "groups", nextOperationFilter = "") {
     setTab(nextTab);
     setSearch("");
     setPage(1);
+    setOperationFilter(nextOperationFilter);
+  }
+
+  function applyOperationFilter(nextTab: "users" | "licenses" | "groups", nextOperationFilter: string) {
+    changeTab(nextTab, nextOperationFilter);
   }
 
   function openLicenseModal(user: Office365User) {
@@ -3316,6 +3337,15 @@ function Office365Dashboard({
             <button className={tab === "groups" ? "active" : ""} type="button" onClick={() => changeTab("groups")}>Grupos</button>
           </div>
 
+          {operationFilter ? (
+            <div className="office365-filter-chip">
+              <span>{office365OperationLabel(operationFilter)}</span>
+              <button type="button" onClick={() => changeTab(tab)}>
+                Limpar
+              </button>
+            </div>
+          ) : null}
+
           <DirectoryTools
             value={search}
             onChange={(value) => {
@@ -3339,11 +3369,52 @@ function Office365Dashboard({
 
         <article className="panel office365-side-panel">
           <PanelHeader icon={CircleGauge} title="Operacao" meta="Licencas e identidade" />
-          <div className="compliance-stack">
-            <ComplianceBar label="Usuarios ativos" current={office365Summary.enabledUsers} expected={Math.max(office365Summary.users, 1)} status="OK" />
-            <ComplianceBar label="Usuarios licenciados" current={office365Summary.licensedUsers} expected={Math.max(office365Summary.users, 1)} status="Revisar" />
-            <ComplianceBar label="Licencas usadas" current={office365Summary.consumedLicenseUnits} expected={Math.max(office365Summary.enabledLicenseUnits, 1)} status="Uso" />
-            <ComplianceBar label="Grupos com licenca" current={office365Summary.licensedGroups} expected={Math.max(office365Summary.groups, 1)} status="Grupos" />
+          <div className="office365-operation-stack">
+            <Office365OperationCard
+              active={operationFilter === "unlicensed-users"}
+              current={unlicensedUsersCount}
+              expected={office365Summary.users}
+              label="Usuarios sem licenca"
+              status="Revisar"
+              tone="warn"
+              onClick={() => applyOperationFilter("users", "unlicensed-users")}
+            />
+            <Office365OperationCard
+              active={operationFilter === "licensed-users"}
+              current={office365Summary.licensedUsers}
+              expected={office365Summary.users}
+              label="Usuarios licenciados"
+              status="Ver"
+              tone="good"
+              onClick={() => applyOperationFilter("users", "licensed-users")}
+            />
+            <Office365OperationCard
+              active={operationFilter === "license-full"}
+              current={fullLicensesCount}
+              expected={office365Summary.licenses}
+              label="Licencas sem saldo"
+              status="Revisar"
+              tone="danger"
+              onClick={() => applyOperationFilter("licenses", "license-full")}
+            />
+            <Office365OperationCard
+              active={operationFilter === "license-usage"}
+              current={office365Summary.consumedLicenseUnits}
+              expected={Math.max(office365Summary.enabledLicenseUnits, 1)}
+              label="Licencas usadas"
+              status="Uso"
+              tone="calm"
+              onClick={() => applyOperationFilter("licenses", "license-usage")}
+            />
+            <Office365OperationCard
+              active={operationFilter === "licensed-groups"}
+              current={office365Summary.licensedGroups}
+              expected={office365Summary.groups}
+              label="Grupos com licenca"
+              status="Grupos"
+              tone="calm"
+              onClick={() => applyOperationFilter("groups", "licensed-groups")}
+            />
           </div>
 
           <div className="office365-license-stack">
@@ -3372,6 +3443,39 @@ function Office365Dashboard({
         />
       ) : null}
     </>
+  );
+}
+
+function Office365OperationCard({
+  active,
+  label,
+  current,
+  expected,
+  status,
+  tone,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  current: number;
+  expected: number;
+  status: string;
+  tone: "good" | "warn" | "danger" | "calm";
+  onClick: () => void;
+}) {
+  const percent = expected > 0 ? Math.min(100, Math.round((current / expected) * 100)) : 0;
+
+  return (
+    <button className={`office365-operation-card ${tone} ${active ? "active" : ""}`} type="button" onClick={onClick}>
+      <div>
+        <strong>{label}</strong>
+        <span>{status}</span>
+      </div>
+      <div className="office365-operation-meter">
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <small>{current} de {expected}</small>
+    </button>
   );
 }
 
@@ -8824,6 +8928,15 @@ function formatSkuName(value: string) {
   };
   const normalized = String(value || "").trim();
   return known[normalized] || normalized.replace(/_/g, " ") || "Nao informado";
+}
+
+function office365OperationLabel(value: string) {
+  if (value === "unlicensed-users") return "Revisando usuarios sem licenca";
+  if (value === "licensed-users") return "Visualizando usuarios licenciados";
+  if (value === "license-full") return "Revisando licencas sem saldo";
+  if (value === "license-usage") return "Visualizando licencas em uso";
+  if (value === "licensed-groups") return "Visualizando grupos com licenca";
+  return "Filtro ativo";
 }
 
 function extractOu(distinguishedName: string) {

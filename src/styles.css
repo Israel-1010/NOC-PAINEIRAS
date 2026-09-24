@@ -1911,6 +1911,8 @@ h1 {
 
 .office365-side-panel {
   grid-column: span 4;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .office365-tabs {
@@ -1935,6 +1937,39 @@ h1 {
   color: #ffffff;
   background: #1f7a62;
   border-color: #1f7a62;
+}
+
+.office365-filter-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  color: #1f6b55;
+  background: #e2f6ee;
+  border: 1px solid #cceadd;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.office365-filter-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office365-filter-chip button {
+  flex: 0 0 auto;
+  color: #1f6b55;
+  background: #ffffff;
+  border: 1px solid #cceadd;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
 }
 
 .office365-table {
@@ -1996,6 +2031,98 @@ h1 {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.office365-operation-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.office365-operation-card {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  text-align: left;
+  background: #ffffff;
+  border: 1px solid #dfe6df;
+  border-left: 4px solid #277da1;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.office365-operation-card.active {
+  border-color: #1f7a62;
+  box-shadow: 0 0 0 3px rgb(31 122 98 / 12%);
+}
+
+.office365-operation-card.good {
+  border-left-color: #16a085;
+}
+
+.office365-operation-card.warn {
+  border-left-color: #d9902f;
+}
+
+.office365-operation-card.danger {
+  border-left-color: #c0392b;
+}
+
+.office365-operation-card > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.office365-operation-card strong,
+.office365-operation-card span,
+.office365-operation-card small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office365-operation-card strong {
+  color: #07110d;
+  font-size: 13px;
+}
+
+.office365-operation-card div:first-child span {
+  flex: 0 0 auto;
+  color: #657166;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.office365-operation-card small {
+  color: #657166;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.office365-operation-meter {
+  height: 9px;
+  overflow: hidden;
+  background: #e7ece7;
+  border-radius: 999px;
+}
+
+.office365-operation-meter span {
+  display: block;
+  height: 100%;
+  background: #2fbf7a;
+}
+
+.office365-operation-card.warn .office365-operation-meter span {
+  background: #d9902f;
+}
+
+.office365-operation-card.danger .office365-operation-meter span {
+  background: #c0392b;
 }
 
 .office365-license-stack {
