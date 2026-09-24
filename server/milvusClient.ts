@@ -285,7 +285,10 @@ async function milvusFetch<T>(path: string, init: RequestInit = {}) {
   }
 
   const baseUrl = milvusConfig.baseUrl!.replace(/\/$/, "");
-  const nextPath = path.startsWith("/") ? path : `/${path}`;
+  const rawPath = path.startsWith("/") ? path : `/${path}`;
+  const nextPath = /\/api$/i.test(baseUrl) && /^\/api(\/|$)/i.test(rawPath)
+    ? rawPath.replace(/^\/api/i, "")
+    : rawPath;
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
 
