@@ -1885,6 +1885,10 @@ function App() {
             office365Status={office365Status}
             office365Summary={office365Summary}
             office365Details={office365Details}
+            snmpSummary={snmpSummary}
+            snmpDetails={snmpDetails}
+            topology={topology}
+            ipDetails={ipDetails}
             onRefreshAd={loadAd}
           />
         ) : activeView === "topology" ? (
@@ -2031,6 +2035,10 @@ function TvDashboard({
   office365Status,
   office365Summary,
   office365Details,
+  snmpSummary,
+  snmpDetails,
+  topology,
+  ipDetails,
   onRefreshAd,
 }: {
   adSummary: AdSummary;
@@ -2042,6 +2050,10 @@ function TvDashboard({
   office365Status: Office365Status;
   office365Summary: Office365Summary;
   office365Details: Office365Details;
+  snmpSummary: SnmpSummary;
+  snmpDetails: SnmpDetails;
+  topology: TopologyState;
+  ipDetails: IpDetails;
   onRefreshAd: () => Promise<void>;
 }) {
   const activeUsers = adDetails.users.filter((user) => user.enabled);
@@ -2059,6 +2071,10 @@ function TvDashboard({
   const adAttention = adSummary.users.locked + standardIssues.length + adSummary.computers.inactive30d;
   const mdmAttention = intuneSummary.nonCompliant + intuneSummary.staleSync + intuneRiskDevices.length;
   const officeAttention = officeUnlicensedUsers + fullLicenses.length;
+  const topologySwitches = topology.nodes.filter((node) => node.type === "switch").length;
+  const topologyFirewalls = topology.nodes.filter((node) => node.type === "firewall").length;
+  const topologyLinks = topology.links.length + ipDetails.links.length;
+  const networkAttention = snmpSummary.offline + Math.max(0, snmpSummary.enabled - snmpSummary.online - snmpSummary.offline);
   const tvAlerts = [
     {
       icon: LockKeyhole,
@@ -2147,6 +2163,20 @@ function TvDashboard({
             { label: "Sem saldo", value: fullLicenses.length, tone: fullLicenses.length ? "danger" : "good" },
           ]}
         />
+        <TvDomainCard
+          icon={Router}
+          title="Rede / Links"
+          status={snmpSummary.enabled ? `${snmpSummary.online}/${snmpSummary.enabled} online` : "Aguardando SNMP"}
+          tone={networkAttention ? "warn" : "calm"}
+          primaryLabel="Equipamentos"
+          primaryValue={String(snmpSummary.total || topology.nodes.length)}
+          meta={`${topologyLinks} links mapeados`}
+          stats={[
+            { label: "Switches", value: topologySwitches, tone: "calm" },
+            { label: "Firewalls", value: topologyFirewalls, tone: "calm" },
+            { label: "Offline", value: snmpSummary.offline, tone: snmpSummary.offline ? "danger" : "good" },
+          ]}
+        />
       </section>
 
       <section className="tv-priority-grid">
@@ -2169,6 +2199,11 @@ function TvDashboard({
       </section>
 
       <section className="tv-board">
+        <article className="panel tv-network-panel">
+          <PanelHeader icon={Router} title="Rede / Links" meta={`${topologyLinks} links`} />
+          <TvNetworkPanel snmpSummary={snmpSummary} snmpDetails={snmpDetails} topology={topology} ipDetails={ipDetails} />
+        </article>
+
         <article className="panel tv-lockout-panel">
           <PanelHeader icon={KeyRound} title="Bloqueios de senha" meta="AD Security" />
           <LockoutPanel adSummary={adSummary} lockouts={adDetails.lockouts} events={adDetails.lockoutEvents} eventErrors={adDetails.lockoutEventErrors} onRefreshAd={onRefreshAd} />
@@ -5977,6 +6012,72 @@ function TvOffice365Panel({ summary, details }: { summary: Office365Summary; det
           </div>
         ))}
         {!unlicensedUsers.length ? <EmptyState title="Office 365 em ordem" detail="Todos os usuarios listados possuem licenca." /> : null}
+      </div>
+    </div>
+  );
+}
+
+function TvNetworkPanel({
+  snmpSummary,
+  snmpDetails,
+  topology,
+  ipDetails,
+}: {
+  snmpSummary: SnmpSummary;
+  snmpDetails: SnmpDetails;
+  topology: TopologyState;
+  ipDetails: IpDetails;
+}) {
+  const switches = topology.nodes.filter((node) => node.type === "switch").length;
+  const firewalls = topology.nodes.filter((node) => node.type === "firewall").length;
+  const links = topology.links.length + ipDetails.links.length;
+  const metricByDevice = new Map(snmpDetails.metrics.map((metric) => [metric.deviceId, metric]));
+  const monitoredDevices = snmpDetails.devices.map((device) => {
+    const metric = metricByDevice.get(device.id);
+    const status = metric ? (metric.ok ? "online" : "offline") : "sem coleta";
+    return { device, metric, status };
+  });
+  const offlineDevices = monitoredDevices.filter((item) => item.status === "offline").slice(0, 3);
+  const visibleDevices = offlineDevices.length ? offlineDevices : monitoredDevices.slice(0, 3);
+
+  return (
+    <div className="tv-service-panel">
+      <div className="tv-service-grid">
+        <div>
+          <span>SNMP ativos</span>
+          <strong>{snmpSummary.enabled}</strong>
+        </div>
+        <div className={snmpSummary.offline ? "danger" : ""}>
+          <span>Offline</span>
+          <strong>{snmpSummary.offline}</strong>
+        </div>
+        <div>
+          <span>Switches</span>
+          <strong>{switches}</strong>
+        </div>
+        <div>
+          <span>Firewalls</span>
+          <strong>{firewalls}</strong>
+        </div>
+      </div>
+
+      <div className="tv-mini-split">
+        <span>{links} links</span>
+        <span>{topology.nodes.length} equipamentos no mapa</span>
+        <span>{ipDetails.links.length} links internet</span>
+      </div>
+
+      <div className="tv-compact-list">
+        {visibleDevices.map(({ device, metric, status }) => (
+          <div className={`tv-compact-row ${status === "offline" ? "danger" : status === "online" ? "" : "warn"}`} key={device.id}>
+            <div>
+              <strong>{device.name}</strong>
+              <span>{device.host}:{device.port} - {device.type}</span>
+            </div>
+            <small>{metric?.latencyMs != null ? `${metric.latencyMs.toFixed(metric.latencyMs < 10 ? 1 : 0)} ms` : status}</small>
+          </div>
+        ))}
+        {!visibleDevices.length ? <EmptyState title="Rede aguardando SNMP" detail="Cadastre switches, firewall e links para monitoramento." /> : null}
       </div>
     </div>
   );
