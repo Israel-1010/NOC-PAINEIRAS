@@ -208,7 +208,15 @@ function extractItems(payload: unknown) {
 
 function payloadTotal(payload: unknown) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  return firstNumber(payload as Record<string, unknown>, ["total", "total_registros", "totalRegistros", "count", "quantidade", "qtd"]);
+  const record = payload as Record<string, unknown>;
+  const directTotal = firstNumber(record, ["total", "total_registros", "totalRegistros", "count", "quantidade", "qtd"]);
+  if (directTotal !== null) return directTotal;
+
+  const meta = record.meta;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const paginate = (meta as Record<string, unknown>).paginate;
+  if (!paginate || typeof paginate !== "object" || Array.isArray(paginate)) return null;
+  return firstNumber(paginate as Record<string, unknown>, ["total", "total_registros", "totalRegistros", "count", "quantidade", "qtd"]);
 }
 
 function normalizeAssetKind(raw: Record<string, unknown>) {
@@ -224,10 +232,27 @@ function normalizeAssetKind(raw: Record<string, unknown>) {
     "asset_type",
     "nome_tipo",
     "equipamento_tipo",
+    "tipo_dispositivo_text",
+    "tipo_dispositivo",
   ]);
   const haystack = [
     value,
-    pick(raw, ["nome", "name", "hostname", "patrimonio", "descricao", "description", "modelo", "model", "fabricante", "manufacturer"]),
+    pick(raw, [
+      "nome",
+      "name",
+      "hostname",
+      "patrimonio",
+      "descricao",
+      "description",
+      "modelo",
+      "model",
+      "modelo_notebook",
+      "fabricante",
+      "manufacturer",
+      "marca",
+      "sistema_operacional",
+      "usuario_logado",
+    ]),
   ].join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
   if (/(celular|smartphone|mobile|android|iphone|ipad|tablet)/.test(haystack)) return "mobile";
@@ -358,7 +383,7 @@ export async function getMilvusAssetsSummary(): Promise<MilvusAssetsSummary> {
       computers: 0,
       mobile: 0,
       unknown: 0,
-      message: milvusConfig.assetsPath ? "Milvus em modo mock." : "Configure MILVUS_ASSETS_PATH para consultar maquinas do Milvus.",
+      message: "Milvus em modo mock.",
     };
   }
 
@@ -370,7 +395,7 @@ export async function getMilvusAssetsSummary(): Promise<MilvusAssetsSummary> {
       computers: 0,
       mobile: 0,
       unknown: 0,
-      message: "Configure MILVUS_ASSETS_PATH para consultar maquinas do Milvus.",
+      message: "Milvus nao configurado para consultar dispositivos.",
     };
   }
 
