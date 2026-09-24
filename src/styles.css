@@ -1823,7 +1823,39 @@ h1 {
 .pop-toolbar {
   display: grid;
   grid-template-columns: minmax(320px, 760px);
-  margin: 4px 0 16px;
+  margin: 4px 0 10px;
+}
+
+.pop-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  margin: 0 0 14px;
+  color: #657166;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.pop-breadcrumb button {
+  min-height: 30px;
+  padding: 0 12px;
+  color: #006b57;
+  background: #ddf5ed;
+  border: 1px solid #c6eadf;
+  border-radius: 999px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.pop-breadcrumb button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.pop-breadcrumb strong {
+  color: #07110d;
 }
 
 .pop-grid {
@@ -1923,6 +1955,7 @@ h1 {
   min-width: 0;
   justify-content: center;
   text-decoration: none;
+  cursor: pointer;
 }
 
 @media (max-width: 900px) {

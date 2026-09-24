@@ -3182,6 +3182,7 @@ function PopDashboard() {
     items: [],
   });
   const [search, setSearch] = useState("");
+  const [currentFolder, setCurrentFolder] = useState<PopDocument | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -3200,6 +3201,7 @@ function PopDashboard() {
       }
 
       setPayload(nextPayload);
+      setCurrentFolder((current) => current && nextPayload.items.some((item) => item.id === current.id) ? current : null);
       if (!nextPayload.ok && nextPayload.message) {
         setError(nextPayload.message);
       }
@@ -3218,6 +3220,18 @@ function PopDashboard() {
   const folders = payload.items.filter((item) => item.kind === "folder").length;
   const files = payload.items.filter((item) => item.kind === "file").length;
   const recent = payload.items[0];
+  const folderItems = payload.items.filter((item) => item.kind === "folder");
+  const folderDepths = folderItems.map((item) => popPathDepth(item.path));
+  const rootDepth = folderDepths.length ? Math.min(...folderDepths) : 0;
+  const rootFolders = folderItems.filter((item) => popPathDepth(item.path) === rootDepth);
+  const visibleItems = search.trim()
+    ? payload.items
+    : currentFolder
+      ? payload.items.filter((item) => isPopChildOfFolder(item, currentFolder))
+      : rootFolders.length
+        ? rootFolders
+        : payload.items;
+  const visibleTitle = search.trim() ? "Resultados da pesquisa" : currentFolder?.name || "Pastas do POP";
 
   return (
     <>
@@ -3231,8 +3245,8 @@ function PopDashboard() {
       <section className="panel pop-panel">
         <PanelHeader
           icon={BookOpen}
-          title="Procedimentos operacionais"
-          meta={loading ? "Sincronizando..." : `${payload.total} itens`}
+          title={visibleTitle}
+          meta={loading ? "Sincronizando..." : `${visibleItems.length} de ${payload.total} itens`}
           action={
             <button className="secondary-action" type="button" onClick={loadPop} disabled={loading}>
               <RefreshCw size={15} />
@@ -3246,16 +3260,37 @@ function PopDashboard() {
             <Search size={17} />
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setCurrentFolder(null);
+              }}
               placeholder="Pesquisar procedimento, categoria, arquivo ou responsavel"
             />
           </label>
         </div>
 
+        <div className="pop-breadcrumb">
+          <button type="button" onClick={() => setCurrentFolder(null)} disabled={!currentFolder && !search.trim()}>
+            POP
+          </button>
+          {currentFolder ? (
+            <>
+              <span>/</span>
+              <strong>{currentFolder.name}</strong>
+            </>
+          ) : null}
+          {search.trim() ? (
+            <>
+              <span>/</span>
+              <strong>Pesquisa</strong>
+            </>
+          ) : null}
+        </div>
+
         {error ? <div className={payload.configured ? "form-error" : "form-success"}>{error}</div> : null}
 
         <div className="pop-grid">
-          {payload.items.map((item) => (
+          {visibleItems.map((item) => (
             <article className={`pop-card ${item.kind}`} key={item.id}>
               <div className="pop-card-icon">
                 {item.kind === "folder" ? <FolderOpen size={24} /> : <FileText size={24} />}
@@ -3272,17 +3307,24 @@ function PopDashboard() {
                   {item.kind === "file" ? <span>{formatBytes(item.size)}</span> : null}
                 </div>
               </div>
-              <a className="secondary-action pop-open" href={item.webUrl} target="_blank" rel="noreferrer">
-                <ExternalLink size={15} />
-                Abrir
-              </a>
+              {item.kind === "folder" ? (
+                <button className="secondary-action pop-open" type="button" onClick={() => setCurrentFolder(item)}>
+                  <FolderOpen size={15} />
+                  Entrar
+                </button>
+              ) : (
+                <a className="secondary-action pop-open" href={item.webUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink size={15} />
+                  Abrir
+                </a>
+              )}
             </article>
           ))}
 
-          {!payload.items.length ? (
+          {!visibleItems.length ? (
             <EmptyState
-              title={payload.configured ? "Nenhum POP encontrado" : "SharePoint aguardando configuracao"}
-              detail={payload.configured ? "Ajuste a pesquisa ou confira a pasta do SharePoint." : "Configure Microsoft Graph e a pasta do SharePoint no ambiente do servidor."}
+              title={payload.configured ? "Nenhum item encontrado" : "SharePoint aguardando configuracao"}
+              detail={payload.configured ? "Volte uma pasta, ajuste a pesquisa ou confira a estrutura no SharePoint." : "Configure Microsoft Graph e a pasta do SharePoint no ambiente do servidor."}
             />
           ) : null}
         </div>
@@ -7846,6 +7888,27 @@ function formatBytes(value: number) {
   }
 
   return `${size.toFixed(unitIndex ? 1 : 0)} ${units[unitIndex]}`;
+}
+
+function normalizePopPath(value: string) {
+  return decodeURIComponent(value || "")
+    .replace(/\\/g, "/")
+    .replace(/\/$/, "")
+    .toLowerCase();
+}
+
+function popPathDepth(value: string) {
+  return normalizePopPath(value)
+    .split("/")
+    .filter(Boolean)
+    .length;
+}
+
+function isPopChildOfFolder(item: PopDocument, folder: PopDocument) {
+  if (item.id === folder.id) return false;
+  const parentPath = normalizePopPath(item.path);
+  const folderName = normalizePopPath(folder.name);
+  return parentPath.endsWith(`/${folderName}`) || parentPath.endsWith(`:${folderName}`);
 }
 
 function formatIntuneOs(device: IntuneDevice) {
