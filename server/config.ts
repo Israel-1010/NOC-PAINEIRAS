@@ -85,10 +85,10 @@ export function isAdConfigured(config: AdConfig = adConfig) {
 }
 
 export const intuneConfig: IntuneConfig = {
-  useMock: process.env.INTUNE_USE_MOCK !== "false",
-  tenantId: process.env.INTUNE_TENANT_ID,
-  clientId: process.env.INTUNE_CLIENT_ID,
-  clientSecret: process.env.INTUNE_CLIENT_SECRET,
+  useMock: process.env.INTUNE_USE_MOCK === "true",
+  tenantId: process.env.INTUNE_TENANT_ID || process.env.SHAREPOINT_TENANT_ID,
+  clientId: process.env.INTUNE_CLIENT_ID || process.env.SHAREPOINT_CLIENT_ID,
+  clientSecret: process.env.INTUNE_CLIENT_SECRET || process.env.SHAREPOINT_CLIENT_SECRET,
 };
 
 export function isIntuneConfigured(config: IntuneConfig = intuneConfig) {

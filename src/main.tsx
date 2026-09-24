@@ -1409,18 +1409,38 @@ function App() {
 
       if (summaryResponse.ok) {
         setIntuneSummary(await summaryResponse.json());
+      } else {
+        const payload = await parseApiPayload<{ message?: string }>(summaryResponse, {});
+        setIntuneSummary(fallbackIntuneSummary);
+        setIntuneStatus({
+          ok: false,
+          source: "graph",
+          configured: statusPayload.configured ?? true,
+          message: payload.message || `Resumo Intune retornou erro ${summaryResponse.status}.`,
+        });
       }
 
       if (devicesResponse.ok) {
         const payload = await devicesResponse.json();
         setIntuneDetails({ devices: payload.items || [] });
+      } else {
+        const payload = await parseApiPayload<{ message?: string }>(devicesResponse, {});
+        setIntuneDetails(fallbackIntuneDetails);
+        setIntuneStatus({
+          ok: false,
+          source: "graph",
+          configured: statusPayload.configured ?? true,
+          message: payload.message || `Dispositivos Intune retornaram erro ${devicesResponse.status}.`,
+        });
       }
-    } catch {
+    } catch (error) {
+      setIntuneSummary(fallbackIntuneSummary);
+      setIntuneDetails(fallbackIntuneDetails);
       setIntuneStatus({
         ok: false,
         source: "offline",
         configured: false,
-        message: "API Intune offline. Exibindo dados locais.",
+        message: error instanceof Error ? error.message : "API Intune offline.",
       });
     }
   }, [clearSession, session]);

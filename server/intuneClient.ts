@@ -146,7 +146,7 @@ function cached<T>(key: string, ttlMs: number, loader: () => Promise<T>) {
 }
 
 function isMockMode() {
-  return intuneConfig.useMock || !isIntuneConfigured();
+  return intuneConfig.useMock;
 }
 
 function normalizeDevice(raw: Record<string, unknown>): IntuneDevice {
@@ -294,6 +294,15 @@ export async function getIntuneStatus() {
       source: "mock",
       configured: isIntuneConfigured(),
       message: "Intune em modo mock. Configure Microsoft Graph para dados reais.",
+    };
+  }
+
+  if (!isIntuneConfigured()) {
+    return {
+      ok: false,
+      source: "graph",
+      configured: false,
+      message: "Intune sem credenciais do Microsoft Graph. Configure INTUNE_TENANT_ID, INTUNE_CLIENT_ID e INTUNE_CLIENT_SECRET ou use as credenciais SHAREPOINT_*.",
     };
   }
 
