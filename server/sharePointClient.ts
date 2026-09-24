@@ -63,6 +63,11 @@ export type PopDocument = {
   modifiedBy: string;
 };
 
+type FolderReadError = {
+  folder: string;
+  message: string;
+};
+
 let tokenCache: { token: string; expiresAt: number } | null = null;
 let driveCache: { siteId?: string; driveId: string; siteName: string; driveName: string; expiresAt: number } | null = null;
 
@@ -72,6 +77,26 @@ function encodePath(path: string) {
     .map((segment) => encodeURIComponent(segment.trim()))
     .filter(Boolean)
     .join("/");
+}
+
+function folderPathCandidates(path: string) {
+  const normalized = decodeURIComponent(path).replace(/^\/+/, "").trim();
+  const candidates = new Set<string>([normalized]);
+  const libraryPrefixes = ["Documentos Compartilhados/", "Shared Documents/", "Documents/"];
+
+  for (const prefix of libraryPrefixes) {
+    if (normalized.toLowerCase().startsWith(prefix.toLowerCase())) {
+      candidates.add(normalized.slice(prefix.length));
+    }
+
+    const marker = `/${prefix}`;
+    const markerIndex = normalized.toLowerCase().indexOf(marker.toLowerCase());
+    if (markerIndex >= 0) {
+      candidates.add(normalized.slice(markerIndex + marker.length));
+    }
+  }
+
+  return Array.from(candidates).filter(Boolean);
 }
 
 function fileExtension(name: string) {
@@ -190,35 +215,67 @@ async function resolveDrive() {
 async function listFolderChildren(driveId: string, depth = 0, folderItemId?: string, folderPath?: string): Promise<PopDocument[]> {
   const select = "$select=id,name,webUrl,size,createdDateTime,lastModifiedDateTime,folder,file,createdBy,lastModifiedBy,parentReference";
   const top = "$top=200";
-  let path = "";
+  const readErrors: FolderReadError[] = [];
+  const documents = await listFolderChildrenSafe(driveId, depth, readErrors, folderItemId, folderPath);
+  (documents as Array<PopDocument> & { readErrors?: FolderReadError[] }).readErrors = readErrors;
+  return documents;
+}
+
+async function listFolderChildrenSafe(
+  driveId: string,
+  depth: number,
+  readErrors: FolderReadError[],
+  folderItemId?: string,
+  folderPath?: string,
+): Promise<PopDocument[]> {
+  const select = "$select=id,name,webUrl,size,createdDateTime,lastModifiedDateTime,folder,file,createdBy,lastModifiedBy,parentReference";
+  const top = "$top=200";
+  const paths: string[] = [];
 
   if (folderItemId) {
-    path = `/drives/${driveId}/items/${encodeURIComponent(folderItemId)}/children?${select}&${top}`;
+    paths.push(`/drives/${driveId}/items/${encodeURIComponent(folderItemId)}/children?${select}&${top}`);
   } else if (folderPath) {
-    path = `/drives/${driveId}/root:/${encodePath(folderPath)}:/children?${select}&${top}`;
+    paths.push(...folderPathCandidates(folderPath).map((candidate) => `/drives/${driveId}/root:/${encodePath(candidate)}:/children?${select}&${top}`));
   } else {
     throw new Error("Pasta do SharePoint nao informada.");
   }
 
   const documents: PopDocument[] = [];
-  let next: string | undefined = path;
+  let lastError: unknown = null;
 
-  while (next) {
-    const currentPage = next;
-    const page: GraphCollection<GraphDriveItem> = await graphGet<GraphCollection<GraphDriveItem>>(currentPage);
-    for (const item of page.value || []) {
-      const normalized = normalizeItem(item);
-      documents.push(normalized);
+  for (const startPath of paths) {
+    try {
+      let next: string | undefined = startPath;
 
-      if (item.folder && depth < 2) {
-        const children = await listFolderChildren(driveId, depth + 1, item.id);
-        documents.push(...children);
+      while (next) {
+        const currentPage = next;
+        const page: GraphCollection<GraphDriveItem> = await graphGet<GraphCollection<GraphDriveItem>>(currentPage);
+        for (const item of page.value || []) {
+          const normalized = normalizeItem(item);
+          documents.push(normalized);
+
+          if (item.folder && depth < 2) {
+            try {
+              const children = await listFolderChildrenSafe(driveId, depth + 1, readErrors, item.id);
+              documents.push(...children);
+            } catch (error) {
+              readErrors.push({
+                folder: item.name,
+                message: error instanceof Error ? error.message : "Falha ao abrir subpasta.",
+              });
+            }
+          }
+        }
+        next = page["@odata.nextLink"];
       }
+
+      return documents;
+    } catch (error) {
+      lastError = error;
     }
-    next = page["@odata.nextLink"];
   }
 
-  return documents;
+  throw new Error(lastError instanceof Error ? lastError.message : "Falha ao abrir pasta do SharePoint.");
 }
 
 export async function listPopDocuments(search = "") {
@@ -236,7 +293,8 @@ export async function listPopDocuments(search = "") {
   }
 
   const drive = await resolveDrive();
-  const items = await listFolderChildren(drive.driveId, 0, sharePointConfig.folderItemId, sharePointConfig.folderPath);
+  const items = await listFolderChildren(drive.driveId, 0, sharePointConfig.folderItemId, sharePointConfig.folderPath) as Array<PopDocument> & { readErrors?: FolderReadError[] };
+  const readErrors = items.readErrors || [];
   const normalizedSearch = search.trim().toLowerCase();
   const filtered = normalizedSearch
     ? items.filter((item) => `${item.name} ${item.category} ${item.extension} ${item.modifiedBy}`.toLowerCase().includes(normalizedSearch))
@@ -246,7 +304,10 @@ export async function listPopDocuments(search = "") {
     ok: true,
     configured: true,
     source: "sharepoint",
-    message: "POP sincronizado com SharePoint.",
+    message: readErrors.length
+      ? `POP carregado, mas ${readErrors.length} subpasta(s) nao abriram.`
+      : "POP sincronizado com SharePoint.",
+    warnings: readErrors,
     siteName: drive.siteName,
     driveName: drive.driveName,
     total: filtered.length,
