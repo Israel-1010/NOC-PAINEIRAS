@@ -2195,39 +2195,14 @@ function TvDashboard({
       </section>
 
       <section className="tv-board">
-        <article className="panel tv-network-panel">
-          <PanelHeader icon={Router} title="Infraestrutura de rede" meta={`${topologyLinks} conexoes mapeadas`} />
-          <TvNetworkPanel snmpSummary={snmpSummary} snmpDetails={snmpDetails} topology={topology} ipDetails={ipDetails} />
-        </article>
-
         <article className="panel tv-milvus-panel">
           <PanelHeader icon={Server} title="Inventario Milvus" meta={milvusAssetsSummary.configured ? milvusAssetsSummary.source : "Configurar API"} />
           <TvMilvusInventoryPanel summary={milvusAssetsSummary} />
         </article>
 
-        <article className="panel tv-lockout-panel">
-          <PanelHeader icon={KeyRound} title="Bloqueios de senha" meta="AD Security" />
-          <LockoutPanel adSummary={adSummary} lockouts={adDetails.lockouts} events={adDetails.lockoutEvents} eventErrors={adDetails.lockoutEventErrors} onRefreshAd={onRefreshAd} />
-        </article>
-
-        <article className="panel tv-wan-panel">
-          <PanelHeader icon={ShieldCheck} title="MDM / Intune" meta={`${mdmManagedDevices} dispositivos`} />
-          <TvIntunePanel summary={intuneSummary} devices={intuneDetails.devices} />
-        </article>
-
-        <article className="panel tv-ad-panel">
-          <PanelHeader icon={Users} title="AD e cadastro" meta="RH x Inventario" />
-          <AdCompliancePanel adSummary={adSummary} />
-        </article>
-
         <article className="panel tv-tickets-panel">
           <PanelHeader icon={TableIcon} title="Office 365" meta={`${office365Summary.users} usuarios`} />
           <TvOffice365Panel summary={office365Summary} details={office365Details} />
-        </article>
-
-        <article className="panel tv-events-panel">
-          <PanelHeader icon={AlertTriangle} title="Eventos recentes" meta="Agora" />
-          <TvEventFeed adSummary={adSummary} adDetails={adDetails} />
         </article>
       </section>
     </>
