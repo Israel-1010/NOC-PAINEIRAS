@@ -624,9 +624,9 @@ h1 {
   gap: 14px;
 }
 
-.tv-hero {
+.tv-command-center {
   display: grid;
-  grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 0.9fr) repeat(3, minmax(220px, 1fr));
   gap: 14px;
   margin-bottom: 14px;
 }
@@ -673,6 +673,301 @@ h1 {
   font-weight: 800;
   line-height: 1.35;
   opacity: 0.86;
+}
+
+.tv-domain-card {
+  display: grid;
+  min-width: 0;
+  min-height: 184px;
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid #dfe6df;
+  border-top: 4px solid #16a085;
+  border-radius: 8px;
+  box-shadow: 0 16px 45px rgba(37, 47, 40, 0.06);
+}
+
+.tv-domain-card.warn {
+  border-top-color: #d9902f;
+}
+
+.tv-domain-card.danger {
+  border-top-color: #c0392b;
+}
+
+.tv-domain-card.calm {
+  border-top-color: #277da1;
+}
+
+.tv-domain-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tv-domain-card header div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tv-domain-card svg {
+  flex: 0 0 auto;
+  color: #1f7a62;
+}
+
+.tv-domain-card.warn svg {
+  color: #d9902f;
+}
+
+.tv-domain-card.danger svg {
+  color: #c0392b;
+}
+
+.tv-domain-card header span,
+.tv-domain-card header strong,
+.tv-domain-main span,
+.tv-domain-main small,
+.tv-domain-stats span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-domain-card header span {
+  color: #657166;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.tv-domain-card header strong {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  color: #146651;
+  background: #e2f6ee;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.tv-domain-card.warn header strong {
+  color: #855615;
+  background: #fff1d8;
+}
+
+.tv-domain-card.danger header strong {
+  color: #8f1d16;
+  background: #ffe7e4;
+}
+
+.tv-domain-main {
+  align-self: center;
+  min-width: 0;
+}
+
+.tv-domain-main span,
+.tv-domain-main small {
+  display: block;
+  color: #657166;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tv-domain-main strong {
+  display: block;
+  margin-top: 5px;
+  color: #07110d;
+  font-size: 42px;
+  line-height: 1;
+}
+
+.tv-domain-main small {
+  margin-top: 7px;
+}
+
+.tv-domain-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tv-domain-stats div {
+  min-width: 0;
+  padding: 8px;
+  background: #f8faf8;
+  border: 1px solid #e3e9e3;
+  border-radius: 8px;
+}
+
+.tv-domain-stats div.warn {
+  background: #fff8f0;
+  border-color: #f1d4ad;
+}
+
+.tv-domain-stats div.danger {
+  background: #fff4f2;
+  border-color: #f2c4bd;
+}
+
+.tv-domain-stats span,
+.tv-domain-stats strong {
+  display: block;
+}
+
+.tv-domain-stats span {
+  color: #657166;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.tv-domain-stats strong {
+  margin-top: 3px;
+  color: #07110d;
+  font-size: 19px;
+}
+
+.tv-priority-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.tv-attention-panel {
+  grid-column: span 8;
+}
+
+.tv-now-panel {
+  grid-column: span 4;
+}
+
+.tv-alert-queue {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tv-alert-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 4px 8px;
+  min-width: 0;
+  min-height: 92px;
+  padding: 10px;
+  background: #f8faf8;
+  border: 1px solid #e3e9e3;
+  border-left: 4px solid #16a085;
+  border-radius: 8px;
+}
+
+.tv-alert-item.warn {
+  background: #fff8f0;
+  border-left-color: #d9902f;
+}
+
+.tv-alert-item.danger {
+  background: #fff4f2;
+  border-left-color: #c0392b;
+}
+
+.tv-alert-item.calm {
+  border-left-color: #277da1;
+}
+
+.tv-alert-item svg {
+  grid-row: span 2;
+  color: #1f7a62;
+}
+
+.tv-alert-item.warn svg {
+  color: #d9902f;
+}
+
+.tv-alert-item.danger svg {
+  color: #c0392b;
+}
+
+.tv-alert-item strong,
+.tv-alert-item span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tv-alert-item strong {
+  color: #07110d;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tv-alert-item span {
+  color: #657166;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.tv-alert-item b {
+  grid-column: 2;
+  color: #07110d;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.tv-collection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tv-collection-grid div {
+  min-width: 0;
+  min-height: 76px;
+  padding: 10px;
+  background: #f8faf8;
+  border: 1px solid #e3e9e3;
+  border-left: 4px solid #16a085;
+  border-radius: 8px;
+}
+
+.tv-collection-grid div.warn {
+  border-left-color: #d9902f;
+}
+
+.tv-collection-grid div.danger {
+  border-left-color: #c0392b;
+}
+
+.tv-collection-grid div.calm {
+  border-left-color: #277da1;
+}
+
+.tv-collection-grid span,
+.tv-collection-grid strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-collection-grid span {
+  color: #657166;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.tv-collection-grid strong {
+  margin-top: 8px;
+  color: #07110d;
+  font-size: 16px;
 }
 
 .tv-health-strip {
@@ -825,15 +1120,10 @@ h1 {
   align-items: start;
 }
 
-.tv-main-panel,
-.tv-ad-panel,
-.tv-assets-panel {
-  grid-column: span 8;
-}
-
 .tv-lockout-panel,
 .tv-sites-panel,
 .tv-wan-panel,
+.tv-ad-panel,
 .tv-tickets-panel,
 .tv-events-panel {
   grid-column: span 4;
@@ -4983,12 +5273,13 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .tv-hero {
+  .tv-command-center {
     grid-template-columns: 1fr;
   }
 
-  .tv-health-strip,
-  .tv-metric-grid,
+  .tv-priority-grid,
+  .tv-alert-queue,
+  .tv-collection-grid,
   .tv-ad-live-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -5007,9 +5298,9 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .tv-main-panel,
+  .tv-attention-panel,
+  .tv-now-panel,
   .tv-ad-panel,
-  .tv-assets-panel,
   .tv-lockout-panel,
   .tv-sites-panel,
   .tv-wan-panel,
@@ -5204,8 +5495,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
-  .tv-health-strip,
-  .tv-metric-grid,
+  .tv-command-center,
+  .tv-priority-grid,
+  .tv-alert-queue,
+  .tv-collection-grid,
   .tv-ad-live-grid,
   .tv-board,
   .ticket-status-board,
@@ -5215,9 +5508,9 @@ h1 {
     grid-template-columns: 1fr;
   }
 
-  .tv-main-panel,
+  .tv-attention-panel,
+  .tv-now-panel,
   .tv-ad-panel,
-  .tv-assets-panel,
   .tv-lockout-panel,
   .tv-sites-panel,
   .tv-wan-panel,

@@ -2056,40 +2056,119 @@ function TvDashboard({
   const cloudServicesOk = intuneStatus.ok && office365Status.ok;
   const overallTone = !adStatus.ok || !cloudServicesOk || adSummary.users.locked ? "danger" : standardIssues.length || adSummary.computers.inactive30d || intuneSummary.nonCompliant || officeUnlicensedUsers ? "warn" : "good";
   const sourceLabel = adSummary.source === "ldap" ? "AD real" : "Modo mock";
+  const adAttention = adSummary.users.locked + standardIssues.length + adSummary.computers.inactive30d;
+  const mdmAttention = intuneSummary.nonCompliant + intuneSummary.staleSync + intuneRiskDevices.length;
+  const officeAttention = officeUnlicensedUsers + fullLicenses.length;
+  const tvAlerts = [
+    {
+      icon: LockKeyhole,
+      title: "Bloqueios no AD",
+      value: adSummary.users.locked,
+      detail: adSummary.users.locked ? `${adDetails.lockouts.length} contas em destaque` : "Nenhuma conta bloqueada agora",
+      tone: adSummary.users.locked ? "danger" : "good",
+    },
+    {
+      icon: Users,
+      title: "Cadastro AD incompleto",
+      value: standardIssues.length,
+      detail: standardIssues.length ? "usuarios ativos fora do padrao" : "campos obrigatorios em ordem",
+      tone: standardIssues.length ? "warn" : "good",
+    },
+    {
+      icon: ShieldCheck,
+      title: "Intune nao conforme",
+      value: intuneSummary.nonCompliant,
+      detail: `${intuneSummary.staleSync} sem sincronizar em 7 dias`,
+      tone: intuneSummary.nonCompliant || intuneSummary.staleSync ? "warn" : "good",
+    },
+    {
+      icon: TableIcon,
+      title: "Office 365 sem licenca",
+      value: officeUnlicensedUsers,
+      detail: fullLicenses.length ? `${fullLicenses.length} SKU(s) sem saldo` : "licencas com saldo",
+      tone: officeUnlicensedUsers || fullLicenses.length ? "warn" : "good",
+    },
+    {
+      icon: KeyRound,
+      title: "Eventos 4740",
+      value: lockoutEventsTotal,
+      detail: adDetails.lockoutEventErrors.length ? "coleta parcial nos DCs" : "ultimas 24 horas",
+      tone: adDetails.lockoutEventErrors.length ? "warn" : "calm",
+    },
+  ] satisfies TvAlertItem[];
 
   return (
     <>
-      <section className="tv-hero" aria-label="Resumo operacional da TV">
+      <section className="tv-command-center" aria-label="Resumo operacional da TV">
         <div className={`tv-overall ${overallTone}`}>
-          <span>Saude da identidade e dispositivos</span>
+          <span>Operacao agora</span>
           <strong>{overallTone === "danger" ? "Atencao" : overallTone === "warn" ? "Observando" : "Estavel"}</strong>
           <small>{adStatus.ok && cloudServicesOk ? `${sourceLabel} / Graph conectado` : [adStatus.ok ? "" : adStatus.message, intuneStatus.ok ? "" : "Intune com falha", office365Status.ok ? "" : "Office 365 com falha"].filter(Boolean).join(" | ")}</small>
         </div>
-        <div className="tv-health-strip">
-          <HealthTile icon={Users} label="AD" value={adStatus.ok ? "Online" : "Falha"} tone={adStatus.ok ? "good" : "danger"} />
-          <HealthTile icon={ShieldCheck} label="Intune" value={intuneStatus.ok ? "Online" : "Falha"} tone={intuneStatus.ok ? "good" : "danger"} />
-          <HealthTile icon={TableIcon} label="Office 365" value={office365Status.ok ? "Online" : "Falha"} tone={office365Status.ok ? "good" : "danger"} />
-          <HealthTile icon={UserCheck} label="Usuarios AD" value={`${adSummary.users.enabled}/${adSummary.users.total}`} tone="good" />
-          <HealthTile icon={Monitor} label="MDM" value={String(mdmManagedDevices)} tone={intuneSummary.nonCompliant ? "warn" : "good"} />
-          <HealthTile icon={KeyRound} label="Eventos 4740" value={String(lockoutEventsTotal)} tone={adDetails.lockoutEventErrors.length ? "warn" : "good"} />
-        </div>
+        <TvDomainCard
+          icon={Users}
+          title="Active Directory"
+          status={adStatus.ok ? "Online" : "Falha"}
+          tone={adAttention ? "warn" : "good"}
+          primaryLabel="Usuarios ativos"
+          primaryValue={String(adSummary.users.enabled)}
+          meta={`${adSummary.users.total} totais`}
+          stats={[
+            { label: "Bloqueios", value: adSummary.users.locked, tone: adSummary.users.locked ? "danger" : "good" },
+            { label: "Fora padrao", value: standardIssues.length, tone: standardIssues.length ? "warn" : "good" },
+            { label: "Maquinas", value: adSummary.computers.total, tone: adSummary.computers.inactive30d ? "warn" : "good" },
+          ]}
+        />
+        <TvDomainCard
+          icon={ShieldCheck}
+          title="MDM / Intune"
+          status={intuneStatus.ok ? "Online" : "Falha"}
+          tone={!intuneStatus.ok ? "danger" : mdmAttention ? "warn" : "good"}
+          primaryLabel="Dispositivos"
+          primaryValue={String(mdmManagedDevices)}
+          meta={`${intuneSummary.compliant} conformes`}
+          stats={[
+            { label: "Nao conformes", value: intuneSummary.nonCompliant, tone: intuneSummary.nonCompliant ? "danger" : "good" },
+            { label: "Sem sync", value: intuneSummary.staleSync, tone: intuneSummary.staleSync ? "warn" : "good" },
+            { label: "Risco", value: intuneRiskDevices.length, tone: intuneRiskDevices.length ? "warn" : "good" },
+          ]}
+        />
+        <TvDomainCard
+          icon={TableIcon}
+          title="Office 365"
+          status={office365Status.ok ? "Online" : "Falha"}
+          tone={!office365Status.ok ? "danger" : officeAttention ? "warn" : "good"}
+          primaryLabel="Usuarios"
+          primaryValue={String(office365Summary.users)}
+          meta={`${office365Summary.licensedUsers} licenciados`}
+          stats={[
+            { label: "Sem licenca", value: officeUnlicensedUsers, tone: officeUnlicensedUsers ? "warn" : "good" },
+            { label: "SKUs", value: office365Summary.licenses, tone: "calm" },
+            { label: "Sem saldo", value: fullLicenses.length, tone: fullLicenses.length ? "danger" : "good" },
+          ]}
+        />
       </section>
 
-      <section className="tv-metric-grid" aria-label="Indicadores principais">
-        <TvMetric icon={LockKeyhole} label="Bloqueios agora" value={String(adSummary.users.locked)} detail={`${adDetails.lockouts.length} em destaque`} tone={adSummary.users.locked ? "danger" : "good"} />
-        <TvMetric icon={Users} label="Usuarios AD" value={String(adSummary.users.enabled)} detail={`${standardIssues.length} fora do padrao`} tone={standardIssues.length ? "warn" : "good"} />
-        <TvMetric icon={TableIcon} label="Usuarios Office 365" value={String(office365Summary.users)} detail={`${office365Summary.licensedUsers} licenciados`} tone={officeUnlicensedUsers ? "warn" : "good"} />
-        <TvMetric icon={Monitor} label="Dispositivos MDM" value={String(mdmManagedDevices)} detail={`${intuneSummary.compliant} conformes`} tone={intuneSummary.nonCompliant ? "danger" : "good"} />
-        <TvMetric icon={AlertTriangle} label="Risco Intune" value={String(intuneRiskDevices.length)} detail={`${intuneSummary.staleSync} sem sync 7d`} tone={intuneRiskDevices.length ? "warn" : "good"} />
-        <TvMetric icon={ShieldCheck} label="Licencas O365" value={String(office365Summary.licenses)} detail={`${fullLicenses.length} sem saldo`} tone={fullLicenses.length ? "danger" : "calm"} />
+      <section className="tv-priority-grid">
+        <article className="panel tv-attention-panel">
+          <PanelHeader icon={AlertTriangle} title="Fila de atencao" meta="Prioridade operacional" />
+          <TvAlertQueue items={tvAlerts} />
+        </article>
+
+        <article className="panel tv-now-panel">
+          <PanelHeader icon={Activity} title="Coleta agora" meta="Status" />
+          <TvCollectionPanel
+            items={[
+              { label: "AD", value: adStatus.ok ? sourceLabel : "Falha", tone: adStatus.ok ? "good" : "danger" },
+              { label: "Intune", value: intuneStatus.source === "graph" ? "Graph" : intuneStatus.source, tone: intuneStatus.ok ? "good" : "danger" },
+              { label: "Office 365", value: office365Status.source === "graph" ? "Graph" : office365Status.source, tone: office365Status.ok ? "good" : "danger" },
+              { label: "Eventos 4740", value: String(lockoutEventsTotal), tone: adDetails.lockoutEventErrors.length ? "warn" : "good" },
+            ]}
+          />
+        </article>
       </section>
 
       <section className="tv-board">
-        <article className="panel tv-main-panel">
-          <PanelHeader icon={Activity} title="Resumo AD em tempo real" meta={sourceLabel} />
-          <TvAdOverviewPanel adSummary={adSummary} adDetails={adDetails} standardIssues={standardIssues.length} />
-        </article>
-
         <article className="panel tv-lockout-panel">
           <PanelHeader icon={KeyRound} title="Bloqueios de senha" meta="AD Security" />
           <LockoutPanel adSummary={adSummary} lockouts={adDetails.lockouts} events={adDetails.lockoutEvents} eventErrors={adDetails.lockoutEventErrors} onRefreshAd={onRefreshAd} />
@@ -2119,13 +2198,96 @@ function TvDashboard({
           <PanelHeader icon={AlertTriangle} title="Eventos recentes" meta="Agora" />
           <TvEventFeed adSummary={adSummary} adDetails={adDetails} />
         </article>
-
-        <article className="panel tv-assets-panel">
-          <PanelHeader icon={KeyRound} title="Eventos 4740" meta="Ultimas 24h" />
-          <TvLockoutEventsPanel events={adDetails.lockoutEvents} errors={adDetails.lockoutEventErrors} />
-        </article>
       </section>
     </>
+  );
+}
+
+type TvTone = "good" | "warn" | "danger" | "calm";
+
+type TvAlertItem = {
+  icon: LucideIcon;
+  title: string;
+  value: number;
+  detail: string;
+  tone: TvTone;
+};
+
+function TvDomainCard({
+  icon: Icon,
+  title,
+  status,
+  tone,
+  primaryLabel,
+  primaryValue,
+  meta,
+  stats,
+}: {
+  icon: LucideIcon;
+  title: string;
+  status: string;
+  tone: TvTone;
+  primaryLabel: string;
+  primaryValue: string;
+  meta: string;
+  stats: Array<{ label: string; value: number; tone: TvTone }>;
+}) {
+  return (
+    <article className={`tv-domain-card ${tone}`}>
+      <header>
+        <div>
+          <Icon size={20} />
+          <span>{title}</span>
+        </div>
+        <strong>{status}</strong>
+      </header>
+      <div className="tv-domain-main">
+        <span>{primaryLabel}</span>
+        <strong>{primaryValue}</strong>
+        <small>{meta}</small>
+      </div>
+      <div className="tv-domain-stats">
+        {stats.map((stat) => (
+          <div className={stat.tone} key={stat.label}>
+            <span>{stat.label}</span>
+            <strong>{stat.value}</strong>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function TvAlertQueue({ items }: { items: TvAlertItem[] }) {
+  return (
+    <div className="tv-alert-queue">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <div className={`tv-alert-item ${item.tone}`} key={item.title}>
+            <Icon size={18} />
+            <div>
+              <strong>{item.title}</strong>
+              <span>{item.detail}</span>
+            </div>
+            <b>{item.value}</b>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TvCollectionPanel({ items }: { items: Array<{ label: string; value: string; tone: TvTone }> }) {
+  return (
+    <div className="tv-collection-grid">
+      {items.map((item) => (
+        <div className={item.tone} key={item.label}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+        </div>
+      ))}
+    </div>
   );
 }
 
