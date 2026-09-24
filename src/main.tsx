@@ -2071,10 +2071,8 @@ function TvDashboard({
   const adAttention = adSummary.users.locked + standardIssues.length + adSummary.computers.inactive30d;
   const mdmAttention = intuneSummary.nonCompliant + intuneSummary.staleSync + intuneRiskDevices.length;
   const officeAttention = officeUnlicensedUsers + fullLicenses.length;
-  const topologySwitches = topology.nodes.filter((node) => node.type === "switch").length;
-  const topologyFirewalls = topology.nodes.filter((node) => node.type === "firewall").length;
-  const topologyLinks = topology.links.length + ipDetails.links.length;
-  const networkAttention = snmpSummary.offline + Math.max(0, snmpSummary.enabled - snmpSummary.online - snmpSummary.offline);
+  const topologyLinks = topology.links.length + ipDetails.links.filter((link) => link.type === "Circuito").length;
+  const internetLinkGroups = buildInternetLinkGroups(ipDetails.links).filter((group) => group.circuit.type === "Circuito").slice(0, 3);
   const tvAlerts = [
     {
       icon: LockKeyhole,
@@ -2163,20 +2161,6 @@ function TvDashboard({
             { label: "Sem saldo", value: fullLicenses.length, tone: fullLicenses.length ? "danger" : "good" },
           ]}
         />
-        <TvDomainCard
-          icon={Router}
-          title="Rede / Links"
-          status={snmpSummary.enabled ? `${snmpSummary.online}/${snmpSummary.enabled} online` : "Aguardando SNMP"}
-          tone={networkAttention ? "warn" : "calm"}
-          primaryLabel="Equipamentos"
-          primaryValue={String(snmpSummary.total || topology.nodes.length)}
-          meta={`${topologyLinks} links mapeados`}
-          stats={[
-            { label: "Switches", value: topologySwitches, tone: "calm" },
-            { label: "Firewalls", value: topologyFirewalls, tone: "calm" },
-            { label: "Offline", value: snmpSummary.offline, tone: snmpSummary.offline ? "danger" : "good" },
-          ]}
-        />
       </section>
 
       <section className="tv-priority-grid">
@@ -2185,22 +2169,15 @@ function TvDashboard({
           <TvAlertQueue items={tvAlerts} />
         </article>
 
-        <article className="panel tv-now-panel">
-          <PanelHeader icon={Activity} title="Coleta agora" meta="Status" />
-          <TvCollectionPanel
-            items={[
-              { label: "AD", value: adStatus.ok ? sourceLabel : "Falha", tone: adStatus.ok ? "good" : "danger" },
-              { label: "Intune", value: intuneStatus.source === "graph" ? "Graph" : intuneStatus.source, tone: intuneStatus.ok ? "good" : "danger" },
-              { label: "Office 365", value: office365Status.source === "graph" ? "Graph" : office365Status.source, tone: office365Status.ok ? "good" : "danger" },
-              { label: "Eventos 4740", value: String(lockoutEventsTotal), tone: adDetails.lockoutEventErrors.length ? "warn" : "good" },
-            ]}
-          />
+        <article className="panel tv-links-panel">
+          <PanelHeader icon={CircleGauge} title="Links de internet" meta={`${internetLinkGroups.length} circuitos`} />
+          <TvLinkGauges groups={internetLinkGroups} />
         </article>
       </section>
 
       <section className="tv-board">
         <article className="panel tv-network-panel">
-          <PanelHeader icon={Router} title="Rede / Links" meta={`${topologyLinks} links`} />
+          <PanelHeader icon={Router} title="Infraestrutura de rede" meta={`${topologyLinks} conexoes mapeadas`} />
           <TvNetworkPanel snmpSummary={snmpSummary} snmpDetails={snmpDetails} topology={topology} ipDetails={ipDetails} />
         </article>
 
@@ -2267,6 +2244,9 @@ function TvDomainCard({
   meta: string;
   stats: Array<{ label: string; value: number; tone: TvTone }>;
 }) {
+  const normalizedStatus = status.toLowerCase();
+  const statusTone = normalizedStatus.includes("falha") ? "danger" : normalizedStatus.includes("online") || normalizedStatus.includes("ok") ? "online" : "neutral";
+
   return (
     <article className={`tv-domain-card ${tone}`}>
       <header>
@@ -2274,7 +2254,7 @@ function TvDomainCard({
           <Icon size={20} />
           <span>{title}</span>
         </div>
-        <strong>{status}</strong>
+        <strong className={`tv-status-pill ${statusTone}`}>{status}</strong>
       </header>
       <div className="tv-domain-main">
         <span>{primaryLabel}</span>
@@ -2313,6 +2293,43 @@ function TvAlertQueue({ items }: { items: TvAlertItem[] }) {
   );
 }
 
+function TvLinkGauges({ groups }: { groups: InternetLinkGroup[] }) {
+  if (!groups.length) {
+    return <EmptyState title="Links nao cadastrados" detail="Cadastre os circuitos em IPS > Links para a TV montar os velocimetros." />;
+  }
+
+  const speeds = groups.map((group) => parseLinkSpeedMbps(group.circuit.speed));
+  const maxSpeed = Math.max(...speeds, 1);
+
+  return (
+    <div className="tv-link-gauges">
+      {groups.map((group, index) => {
+        const speedMbps = speeds[index] || 0;
+        const gaugeFill = Math.min(100, Math.max(12, (speedMbps / maxSpeed) * 100));
+        const isDown = group.circuit.status === "Inativo";
+        const isWarn = group.circuit.status === "Atencao";
+        return (
+          <div
+            className={`tv-link-gauge ${isDown ? "danger critical" : isWarn ? "warn" : ""}`}
+            key={group.circuit.id}
+            style={{ "--gauge-fill": `${gaugeFill}%`, "--gauge-angle": `${-70 + gaugeFill * 1.4}deg` } as React.CSSProperties}
+          >
+            <div className="tv-gauge-dial" aria-hidden="true">
+              <span />
+            </div>
+            <div className="tv-gauge-copy">
+              <strong>{group.circuit.provider || group.circuit.name}</strong>
+              <b>{group.circuit.speed || "Sem velocidade"}</b>
+              <span>{group.circuit.gateway || group.circuit.usedIp || group.circuit.fortinetIp || "Sem IP"}</span>
+              <small>{group.services.length} servicos publicados</small>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TvCollectionPanel({ items }: { items: Array<{ label: string; value: string; tone: TvTone }> }) {
   return (
     <div className="tv-collection-grid">
@@ -2324,6 +2341,15 @@ function TvCollectionPanel({ items }: { items: Array<{ label: string; value: str
       ))}
     </div>
   );
+}
+
+function parseLinkSpeedMbps(value: string) {
+  const normalized = value.trim().replace(",", ".").toUpperCase();
+  const amount = Number(normalized.match(/[\d.]+/)?.[0] || 0);
+  if (!amount) return 0;
+  if (normalized.includes("GB") || normalized.includes("G")) return amount * 1000;
+  if (normalized.includes("KB") || normalized.includes("K")) return amount / 1000;
+  return amount;
 }
 
 function TopologyDashboard({
@@ -6028,48 +6054,54 @@ function TvNetworkPanel({
   topology: TopologyState;
   ipDetails: IpDetails;
 }) {
-  const switches = topology.nodes.filter((node) => node.type === "switch").length;
-  const firewalls = topology.nodes.filter((node) => node.type === "firewall").length;
-  const links = topology.links.length + ipDetails.links.length;
   const metricByDevice = new Map(snmpDetails.metrics.map((metric) => [metric.deviceId, metric]));
   const monitoredDevices = snmpDetails.devices.map((device) => {
     const metric = metricByDevice.get(device.id);
     const status = metric ? (metric.ok ? "online" : "offline") : "sem coleta";
     return { device, metric, status };
   });
-  const offlineDevices = monitoredDevices.filter((item) => item.status === "offline").slice(0, 3);
-  const visibleDevices = offlineDevices.length ? offlineDevices : monitoredDevices.slice(0, 3);
+  const topologySwitches = topology.nodes.filter((node) => node.type === "switch").length;
+  const topologyFirewalls = topology.nodes.filter((node) => node.type === "firewall").length;
+  const snmpSwitches = snmpDetails.devices.filter((device) => /switch/i.test(device.type) || /switch/i.test(device.name)).length;
+  const fortinetDevices = Math.max(
+    topologyFirewalls,
+    snmpDetails.devices.filter((device) => /fortinet|fortigate/i.test(`${device.type} ${device.name} ${device.notes}`)).length,
+  );
+  const unifiDevices = snmpDetails.devices.filter((device) => /unifi|uap|anten|radio/i.test(`${device.type} ${device.name} ${device.notes}`)).length;
+  const unifiAntennas = snmpDetails.devices.filter((device) => /uap|ap|anten|radio/i.test(`${device.name} ${device.notes}`)).length;
+  const links = topology.links.length + ipDetails.links.filter((link) => link.type === "Circuito").length;
+  const pending = Math.max(0, snmpSummary.enabled - snmpSummary.online - snmpSummary.offline);
+  const offlineDevices = monitoredDevices.filter((item) => item.status === "offline");
+  const visibleDevices = (offlineDevices.length ? offlineDevices : monitoredDevices).slice(0, 4);
+  const fallbackNodes = !visibleDevices.length ? topology.nodes.filter((node) => node.type !== "internet").slice(0, 4) : [];
+  const tiles = [
+    { icon: Shield, label: "Fortinet", value: fortinetDevices, detail: fortinetDevices ? "firewall monitorado" : "cadastre no SNMP", tone: snmpSummary.offline && fortinetDevices ? "warn" : "good" },
+    { icon: Network, label: "Switches", value: Math.max(topologySwitches, snmpSwitches), detail: `${topologySwitches} no mapa`, tone: snmpSummary.offline ? "warn" : "good" },
+    { icon: RadioTower, label: "Antenas UniFi", value: unifiAntennas || unifiDevices, detail: unifiDevices ? "UniFi encontrado" : "sem cadastro SNMP", tone: "calm" },
+    { icon: Zap, label: "Links", value: links, detail: `${ipDetails.links.filter((link) => link.type === "Circuito").length} internet`, tone: "calm" },
+    { icon: CheckCircle2, label: "Online", value: snmpSummary.online, detail: snmpSummary.enabled ? `${snmpSummary.enabled} habilitados` : "aguardando SNMP", tone: "good" },
+    { icon: XCircle, label: "Offline", value: snmpSummary.offline, detail: pending ? `${pending} sem coleta` : "queda monitorada", tone: snmpSummary.offline ? "danger" : "good" },
+  ] satisfies Array<{ icon: LucideIcon; label: string; value: number; detail: string; tone: TvTone }>;
 
   return (
-    <div className="tv-service-panel">
-      <div className="tv-service-grid">
-        <div>
-          <span>SNMP ativos</span>
-          <strong>{snmpSummary.enabled}</strong>
-        </div>
-        <div className={snmpSummary.offline ? "danger" : ""}>
-          <span>Offline</span>
-          <strong>{snmpSummary.offline}</strong>
-        </div>
-        <div>
-          <span>Switches</span>
-          <strong>{switches}</strong>
-        </div>
-        <div>
-          <span>Firewalls</span>
-          <strong>{firewalls}</strong>
-        </div>
+    <div className="tv-service-panel tv-infra-panel">
+      <div className="tv-infra-grid">
+        {tiles.map((tile) => {
+          const Icon = tile.icon;
+          return (
+            <div className={`tv-infra-tile ${tile.tone} ${tile.tone === "danger" ? "critical" : ""}`} key={tile.label}>
+              <Icon size={18} />
+              <span>{tile.label}</span>
+              <strong>{tile.value}</strong>
+              <small>{tile.detail}</small>
+            </div>
+          );
+        })}
       </div>
 
-      <div className="tv-mini-split">
-        <span>{links} links</span>
-        <span>{topology.nodes.length} equipamentos no mapa</span>
-        <span>{ipDetails.links.length} links internet</span>
-      </div>
-
-      <div className="tv-compact-list">
+      <div className="tv-compact-list tv-network-watch-list">
         {visibleDevices.map(({ device, metric, status }) => (
-          <div className={`tv-compact-row ${status === "offline" ? "danger" : status === "online" ? "" : "warn"}`} key={device.id}>
+          <div className={`tv-compact-row ${status === "offline" ? "danger critical" : status === "online" ? "" : "warn"}`} key={device.id}>
             <div>
               <strong>{device.name}</strong>
               <span>{device.host}:{device.port} - {device.type}</span>
@@ -6077,7 +6109,15 @@ function TvNetworkPanel({
             <small>{metric?.latencyMs != null ? `${metric.latencyMs.toFixed(metric.latencyMs < 10 ? 1 : 0)} ms` : status}</small>
           </div>
         ))}
-        {!visibleDevices.length ? <EmptyState title="Rede aguardando SNMP" detail="Cadastre switches, firewall e links para monitoramento." /> : null}
+        {fallbackNodes.map((node) => (
+          <div className="tv-compact-row warn" key={node.id}>
+            <div>
+              <strong>{node.name}</strong>
+              <span>{node.ip || node.vendor || node.network || "Sem IP monitorado"}</span>
+            </div>
+            <small>sem SNMP</small>
+          </div>
+        ))}
       </div>
     </div>
   );
