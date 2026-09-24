@@ -227,7 +227,7 @@ async function getAccessToken() {
   return tokenCache.value;
 }
 
-async function graphGet<T>(path: string) {
+async function graphGet<T>(path: string, retryOnAuthFailure = true): Promise<T> {
   const token = await getAccessToken();
   const response = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
     headers: {
@@ -241,7 +241,13 @@ async function graphGet<T>(path: string) {
   const payload = (await response.json().catch(() => ({}))) as T & { error?: { message?: string } };
 
   if (!response.ok) {
-    throw new Error(payload.error?.message || `Microsoft Graph retornou erro ${response.status}.`);
+    const message = payload.error?.message || `Microsoft Graph retornou erro ${response.status}.`;
+    if (retryOnAuthFailure && response.status === 403 && /authorize|required permissions|privileges|permission/i.test(message)) {
+      tokenCache = null;
+      return graphGet<T>(path, false);
+    }
+
+    throw new Error(message);
   }
 
   return payload;
