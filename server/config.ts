@@ -56,6 +56,7 @@ export type SharePointConfig = {
   driveId?: string;
   folderItemId?: string;
   folderPath?: string;
+  folderUrl?: string;
 };
 
 export const port = Number(process.env.PORT || 3333);
@@ -136,6 +137,7 @@ export const sharePointConfig: SharePointConfig = {
   driveId: process.env.SHAREPOINT_DRIVE_ID,
   folderItemId: process.env.SHAREPOINT_FOLDER_ITEM_ID,
   folderPath: process.env.SHAREPOINT_FOLDER_PATH,
+  folderUrl: process.env.SHAREPOINT_FOLDER_URL,
 };
 
 export function isSharePointConfigured(config: SharePointConfig = sharePointConfig) {
@@ -144,6 +146,6 @@ export function isSharePointConfigured(config: SharePointConfig = sharePointConf
     config.clientId &&
     config.clientSecret &&
     (config.driveId || (config.hostname && config.sitePath)) &&
-    (config.folderItemId || config.folderPath),
+    (config.folderItemId || config.folderPath || config.folderUrl),
   );
 }

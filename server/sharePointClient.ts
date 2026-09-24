@@ -113,6 +113,24 @@ function folderPathCandidates(path: string) {
   return Array.from(candidates).filter(Boolean);
 }
 
+function folderPathFromUrl(url?: string) {
+  if (!url) return "";
+
+  try {
+    const parsed = new URL(url);
+    const id = parsed.searchParams.get("id");
+    const sourcePath = decodeURIComponent(id || parsed.pathname);
+    const sitePath = sharePointConfig.sitePath || "";
+    const withoutSite = sitePath && sourcePath.toLowerCase().startsWith(sitePath.toLowerCase())
+      ? sourcePath.slice(sitePath.length)
+      : sourcePath;
+
+    return withoutSite.replace(/^\/+/, "");
+  } catch {
+    return "";
+  }
+}
+
 function fileExtension(name: string) {
   const match = /\.([^.]+)$/.exec(name);
   return match ? match[1].toUpperCase() : "";
@@ -322,19 +340,24 @@ export async function listPopDocuments(search = "") {
     const drive = await resolveDrive();
     let selectedDrive = { id: drive.driveId, name: drive.driveName };
     let items = [] as Array<PopDocument> & { readErrors?: FolderReadError[] };
+    let loaded = false;
     let lastError: unknown = null;
+    const folderPath = sharePointConfig.folderUrl
+      ? folderPathFromUrl(sharePointConfig.folderUrl) || sharePointConfig.folderPath
+      : sharePointConfig.folderPath;
 
     for (const candidateDrive of drive.drives.length ? drive.drives : [{ id: drive.driveId, name: drive.driveName }]) {
       try {
-        items = await listFolderChildren(candidateDrive.id, 0, sharePointConfig.folderItemId, sharePointConfig.folderPath) as Array<PopDocument> & { readErrors?: FolderReadError[] };
+        items = await listFolderChildren(candidateDrive.id, 0, sharePointConfig.folderItemId, folderPath) as Array<PopDocument> & { readErrors?: FolderReadError[] };
         selectedDrive = { id: candidateDrive.id, name: candidateDrive.name || "Documentos" };
+        loaded = true;
         break;
       } catch (error) {
         lastError = error;
       }
     }
 
-    if (!items.length && lastError) {
+    if (!loaded && lastError) {
       throw lastError;
     }
 
