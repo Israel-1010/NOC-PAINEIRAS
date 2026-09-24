@@ -10,6 +10,9 @@ import {
   ClipboardList,
   Clock3,
   BookOpen,
+  Copy,
+  Eye,
+  EyeOff,
   ExternalLink,
   FileText,
   FolderOpen,
@@ -239,6 +242,17 @@ type IntuneDevice = {
 
 type IntuneDetails = {
   devices: IntuneDevice[];
+};
+
+type IntuneLapsCredential = {
+  deviceId: string;
+  deviceName: string;
+  lastBackupDateTime: string;
+  refreshDateTime: string;
+  accountName: string;
+  accountSid: string;
+  backupDateTime: string;
+  password: string;
 };
 
 type SnmpVersion = "1" | "2c" | "3";
@@ -6342,6 +6356,20 @@ function IntuneDeviceModal({
   error: string;
   onClose: () => void;
 }) {
+  const [lapsCredential, setLapsCredential] = useState<IntuneLapsCredential | null>(null);
+  const [lapsLoading, setLapsLoading] = useState(false);
+  const [lapsError, setLapsError] = useState("");
+  const [lapsVisible, setLapsVisible] = useState(false);
+  const [lapsCopied, setLapsCopied] = useState(false);
+
+  useEffect(() => {
+    setLapsCredential(null);
+    setLapsLoading(false);
+    setLapsError("");
+    setLapsVisible(false);
+    setLapsCopied(false);
+  }, [device.id]);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -6352,6 +6380,36 @@ function IntuneDeviceModal({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  async function loadLapsCredential() {
+    setLapsLoading(true);
+    setLapsError("");
+    setLapsCopied(false);
+    setLapsVisible(false);
+
+    try {
+      const response = await authFetch(`/api/intune/devices/${encodeURIComponent(device.id)}/laps`);
+      const payload = await parseApiPayload<{ credential?: IntuneLapsCredential; message?: string }>(response, {});
+
+      if (!response.ok || !payload.credential) {
+        throw new Error(payload.message || "Nao foi possivel carregar a senha LAPS.");
+      }
+
+      setLapsCredential(payload.credential);
+    } catch (nextError) {
+      setLapsCredential(null);
+      setLapsError(nextError instanceof Error ? nextError.message : "Nao foi possivel carregar a senha LAPS.");
+    } finally {
+      setLapsLoading(false);
+    }
+  }
+
+  async function copyLapsPassword() {
+    if (!lapsCredential?.password) return;
+    await navigator.clipboard?.writeText(lapsCredential.password);
+    setLapsCopied(true);
+    window.setTimeout(() => setLapsCopied(false), 2500);
+  }
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -6404,6 +6462,45 @@ function IntuneDeviceModal({
               <DetailItem label="Jailbreak" value={device.jailBroken || "Nao informado"} />
               <DetailItem label="Ameaca reportada" value={device.partnerReportedThreatState || "Nao informado"} />
             </div>
+          </section>
+
+          <section className="modal-section intune-laps-section">
+            <div className="section-heading-row">
+              <h3>LAPS</h3>
+              <button className="secondary-action" type="button" onClick={loadLapsCredential} disabled={lapsLoading || !device.azureADDeviceId}>
+                <KeyRound size={15} />
+                {lapsLoading ? "Buscando" : "Buscar senha"}
+              </button>
+            </div>
+            {!device.azureADDeviceId ? <div className="form-error">Dispositivo sem Azure AD Device ID.</div> : null}
+            {lapsError ? <div className="form-error">{lapsError}</div> : null}
+            {lapsCredential ? (
+              <div className="laps-card">
+                <div className="detail-grid">
+                  <DetailItem label="Conta local" value={lapsCredential.accountName} />
+                  <DetailItem label="Backup" value={formatDateTime(lapsCredential.backupDateTime || lapsCredential.lastBackupDateTime)} />
+                  <DetailItem label="Proxima rotacao" value={formatDateTime(lapsCredential.refreshDateTime)} />
+                  <DetailItem label="Device ID" value={lapsCredential.deviceId} />
+                </div>
+                <div className="laps-secret-row">
+                  <div>
+                    <span>Senha atual</span>
+                    <strong>{lapsVisible ? lapsCredential.password : "••••••••••••••••"}</strong>
+                  </div>
+                  <button className="icon-button" type="button" onClick={() => setLapsVisible((value) => !value)} aria-label={lapsVisible ? "Ocultar senha LAPS" : "Revelar senha LAPS"}>
+                    {lapsVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                  <button className="secondary-action" type="button" onClick={copyLapsPassword}>
+                    <Copy size={15} />
+                    {lapsCopied ? "Copiado" : "Copiar"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="laps-empty">
+                Clique em buscar para consultar a senha LAPS deste dispositivo no Microsoft Graph.
+              </div>
+            )}
           </section>
 
           <section className="modal-section">

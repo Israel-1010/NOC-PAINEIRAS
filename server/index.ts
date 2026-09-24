@@ -33,6 +33,7 @@ import { createSessionToken, requireAuth, verifySessionToken } from "./auth";
 import { listLockoutEvents } from "./eventLogs";
 import {
   getIntuneDeviceDetails,
+  getIntuneDeviceLapsCredential,
   getIntuneStatus,
   getIntuneSummary,
   listIntuneDevices,
@@ -323,6 +324,7 @@ app.use("/api/intune", requireAuth);
 app.get("/api/intune/status", asyncRoute(() => getIntuneStatus()));
 app.get("/api/intune/summary", asyncRoute(() => getIntuneSummary()));
 app.get("/api/intune/devices", asyncRoute((req) => listIntuneDevices(String(req.query.search || ""), String(req.query.limit || ""))));
+app.get("/api/intune/devices/:id/laps", asyncRoute((req) => getIntuneDeviceLapsCredential(String(req.params.id))));
 app.get("/api/intune/devices/:id", asyncRoute((req) => getIntuneDeviceDetails(String(req.params.id))));
 
 app.use("/api/wifi", requireAuth);

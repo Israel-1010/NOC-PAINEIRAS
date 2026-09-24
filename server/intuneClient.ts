@@ -40,6 +40,17 @@ export type IntuneDevice = {
   partnerReportedThreatState: string;
 };
 
+export type IntuneLapsCredential = {
+  deviceId: string;
+  deviceName: string;
+  lastBackupDateTime: string;
+  refreshDateTime: string;
+  accountName: string;
+  accountSid: string;
+  backupDateTime: string;
+  password: string;
+};
+
 let tokenCache: CacheEntry<string> | null = null;
 const responseCache = new Map<string, CacheEntry<unknown>>();
 
@@ -222,6 +233,9 @@ async function graphGet<T>(path: string) {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
+      "User-Agent": "Rede Clube Portal/1.0",
+      "ocp-client-name": "Rede Clube Portal",
+      "ocp-client-version": "1.0",
     },
   });
   const payload = (await response.json().catch(() => ({}))) as T & { error?: { message?: string } };
@@ -231,6 +245,13 @@ async function graphGet<T>(path: string) {
   }
 
   return payload;
+}
+
+function decodeGraphLapsPassword(value: unknown) {
+  const encoded = String(value || "");
+  if (!encoded) return "";
+
+  return Buffer.from(encoded, "base64").toString("utf16le").replace(/\u0000/g, "");
 }
 
 async function listGraphDevices() {
@@ -388,4 +409,51 @@ export async function getIntuneDeviceDetails(id: string) {
   ].join(",");
   const payload = await graphGet<Record<string, unknown>>(`/deviceManagement/managedDevices/${encodeURIComponent(id)}?$select=${select}`);
   return { source: "graph", device: normalizeDevice(payload) };
+}
+
+export async function getIntuneDeviceLapsCredential(id: string) {
+  if (isMockMode()) {
+    throw new Error("LAPS nao esta disponivel em modo mock.");
+  }
+
+  const details = await getIntuneDeviceDetails(id);
+  const deviceId = details.device.azureADDeviceId || id;
+
+  if (!deviceId) {
+    throw new Error("Dispositivo sem Azure AD Device ID para consulta do LAPS.");
+  }
+
+  let payload: Record<string, unknown> & { value?: Record<string, unknown> };
+  try {
+    payload = await graphGet<Record<string, unknown> & { value?: Record<string, unknown> }>(
+      `/directory/deviceLocalCredentials/${encodeURIComponent(deviceId)}?$select=credentials,lastBackupDateTime,refreshDateTime,deviceName`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.toLowerCase().includes("required permissions") || message.toLowerCase().includes("authorize")) {
+      throw new Error("Microsoft Graph sem permissao para LAPS. Adicione DeviceLocalCredential.Read.All no App Registration e aplique Admin consent.");
+    }
+    throw error;
+  }
+  const info = (payload.value && typeof payload.value === "object" ? payload.value : payload) as Record<string, unknown>;
+  const credentials = Array.isArray(info.credentials) ? info.credentials as Array<Record<string, unknown>> : [];
+  const credential = credentials[0];
+
+  if (!credential) {
+    throw new Error("Nenhuma senha LAPS encontrada para este dispositivo.");
+  }
+
+  return {
+    source: "graph",
+    credential: {
+      deviceId,
+      deviceName: String(info.deviceName || details.device.deviceName || ""),
+      lastBackupDateTime: String(info.lastBackupDateTime || ""),
+      refreshDateTime: String(info.refreshDateTime || ""),
+      accountName: String(credential.accountName || ""),
+      accountSid: String(credential.accountSid || ""),
+      backupDateTime: String(credential.backupDateTime || ""),
+      password: decodeGraphLapsPassword(credential.passwordBase64),
+    } satisfies IntuneLapsCredential,
+  };
 }

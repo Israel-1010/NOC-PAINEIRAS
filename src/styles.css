@@ -3795,6 +3795,18 @@ h1 {
   font-size: 14px;
 }
 
+.section-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.section-heading-row h3 {
+  margin: 0;
+}
+
 .profile-form {
   display: grid;
   gap: 12px;
@@ -4104,6 +4116,61 @@ h1 {
   font-size: 13px;
   line-height: 1.35;
   white-space: nowrap;
+}
+
+.intune-laps-section {
+  grid-column: 1 / -1;
+}
+
+.laps-card {
+  display: grid;
+  gap: 12px;
+}
+
+.laps-secret-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  background: #ffffff;
+  border: 1px solid #d9ebe4;
+  border-radius: 8px;
+}
+
+.laps-secret-row > div {
+  min-width: 0;
+}
+
+.laps-secret-row span,
+.laps-secret-row strong {
+  display: block;
+}
+
+.laps-secret-row span {
+  color: #718075;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.laps-secret-row strong {
+  overflow: auto;
+  margin-top: 4px;
+  color: #0f6f59;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.laps-empty {
+  padding: 12px;
+  color: #657166;
+  background: #ffffff;
+  border: 1px dashed #cfdacf;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .group-chip-list {
