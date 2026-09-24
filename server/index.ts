@@ -50,6 +50,7 @@ import {
   getOffice365Details,
   getOffice365Status,
   getOffice365Summary,
+  updateOffice365UserLicenses,
 } from "./office365Client";
 import {
   collectAllSnmpDevices,
@@ -337,6 +338,7 @@ app.use("/api/office365", requireAuth);
 app.get("/api/office365/status", asyncRoute(() => getOffice365Status()));
 app.get("/api/office365/summary", asyncRoute(() => getOffice365Summary()));
 app.get("/api/office365/details", asyncRoute(() => getOffice365Details()));
+app.patch("/api/office365/users/:id/licenses", asyncRoute((req) => updateOffice365UserLicenses(String(req.params.id), req.body?.skuIds)));
 
 app.use("/api/wifi", requireAuth);
 

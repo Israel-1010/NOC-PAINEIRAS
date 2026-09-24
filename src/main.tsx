@@ -274,6 +274,7 @@ type Office365User = {
   jobTitle: string;
   createdDateTime: string;
   assignedLicenses: string[];
+  assignedLicenseSkuIds: string[];
 };
 
 type Office365License = {
@@ -3195,6 +3196,11 @@ function Office365Dashboard({
   const [tab, setTab] = useState<"users" | "licenses" | "groups">("users");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [licenseUser, setLicenseUser] = useState<Office365User | null>(null);
+  const [licenseSelection, setLicenseSelection] = useState<string[]>([]);
+  const [licenseSaving, setLicenseSaving] = useState(false);
+  const [licenseError, setLicenseError] = useState("");
+  const [licenseMessage, setLicenseMessage] = useState("");
 
   const currentItems = tab === "users" ? office365Details.users : tab === "licenses" ? office365Details.licenses : office365Details.groups;
   const filteredUsers = filterItems(office365Details.users, search, (user) => [
@@ -3225,6 +3231,50 @@ function Office365Dashboard({
     setTab(nextTab);
     setSearch("");
     setPage(1);
+  }
+
+  function openLicenseModal(user: Office365User) {
+    setLicenseUser(user);
+    setLicenseSelection(user.assignedLicenseSkuIds || []);
+    setLicenseError("");
+    setLicenseMessage("");
+  }
+
+  function closeLicenseModal() {
+    if (licenseSaving) return;
+    setLicenseUser(null);
+    setLicenseSelection([]);
+    setLicenseError("");
+    setLicenseMessage("");
+  }
+
+  async function saveUserLicenses() {
+    if (!licenseUser) return;
+
+    setLicenseSaving(true);
+    setLicenseError("");
+    setLicenseMessage("");
+
+    try {
+      const response = await authFetch(`/api/office365/users/${encodeURIComponent(licenseUser.id)}/licenses`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skuIds: licenseSelection }),
+      });
+      const payload = await parseApiPayload<{ message?: string }>(response, {});
+
+      if (!response.ok) {
+        throw new Error(payload.message || "Nao foi possivel aplicar as licencas.");
+      }
+
+      setLicenseMessage(payload.message || "Licencas atualizadas com sucesso.");
+      await onRefreshOffice365();
+      window.setTimeout(() => closeLicenseModal(), 900);
+    } catch (error) {
+      setLicenseError(error instanceof Error ? error.message : "Nao foi possivel aplicar as licencas.");
+    } finally {
+      setLicenseSaving(false);
+    }
   }
 
   return (
@@ -3279,7 +3329,7 @@ function Office365Dashboard({
           />
 
           {tab === "users" ? (
-            <Office365UsersList users={paginate(filteredUsers, page)} />
+            <Office365UsersList users={paginate(filteredUsers, page)} onEditLicenses={openLicenseModal} />
           ) : tab === "licenses" ? (
             <Office365LicensesList licenses={paginate(filteredLicenses, page)} />
           ) : (
@@ -3307,6 +3357,20 @@ function Office365Dashboard({
           </div>
         </article>
       </section>
+
+      {licenseUser ? (
+        <Office365LicenseModal
+          user={licenseUser}
+          licenses={office365Details.licenses}
+          selectedSkuIds={licenseSelection}
+          saving={licenseSaving}
+          error={licenseError}
+          message={licenseMessage}
+          onChange={setLicenseSelection}
+          onSave={saveUserLicenses}
+          onClose={closeLicenseModal}
+        />
+      ) : null}
     </>
   );
 }
@@ -5835,7 +5899,7 @@ function IntuneDevicesList({ devices, onSelect }: { devices: IntuneDevice[]; onS
   );
 }
 
-function Office365UsersList({ users }: { users: Office365User[] }) {
+function Office365UsersList({ users, onEditLicenses }: { users: Office365User[]; onEditLicenses: (user: Office365User) => void }) {
   if (!users.length) {
     return <EmptyState title="Usuarios nao carregados" detail="O Microsoft Graph nao retornou usuarios nesta coleta." />;
   }
@@ -5846,7 +5910,7 @@ function Office365UsersList({ users }: { users: Office365User[] }) {
         <span>Usuario</span>
         <span>Setor</span>
         <span>Licencas</span>
-        <span>Status</span>
+        <span>Acoes</span>
       </div>
       {users.map((user) => (
         <div className="office365-table-row" key={user.id || user.userPrincipalName} role="row">
@@ -5862,7 +5926,12 @@ function Office365UsersList({ users }: { users: Office365User[] }) {
             <strong>{user.assignedLicenses.length ? `${user.assignedLicenses.length} licenca(s)` : "Sem licenca"}</strong>
             <span>{user.assignedLicenses.map(formatSkuName).join(", ") || "Nao atribuido"}</span>
           </div>
-          <StatusPill label={user.accountEnabled ? "Ativo" : "Desativado"} />
+          <div className="office365-actions-cell">
+            <StatusPill label={user.accountEnabled ? "Ativo" : "Desativado"} />
+            <button className="small-action" type="button" onClick={() => onEditLicenses(user)}>
+              Licencas
+            </button>
+          </div>
         </div>
       ))}
     </div>
@@ -6752,6 +6821,107 @@ function CreateTicketModal({
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  );
+}
+
+function Office365LicenseModal({
+  user,
+  licenses,
+  selectedSkuIds,
+  saving,
+  error,
+  message,
+  onChange,
+  onSave,
+  onClose,
+}: {
+  user: Office365User;
+  licenses: Office365License[];
+  selectedSkuIds: string[];
+  saving: boolean;
+  error: string;
+  message: string;
+  onChange: (skuIds: string[]) => void;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const selected = new Set(selectedSkuIds.map((skuId) => skuId.toLowerCase()));
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  function toggleLicense(skuId: string) {
+    const normalized = skuId.toLowerCase();
+    const nextSelection = selected.has(normalized)
+      ? selectedSkuIds.filter((item) => item.toLowerCase() !== normalized)
+      : [...selectedSkuIds, skuId];
+    onChange(nextSelection);
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="user-modal office365-license-modal" role="dialog" aria-modal="true" aria-labelledby="office365-license-title">
+        <header className="modal-header">
+          <div>
+            <span>OFFICE 365</span>
+            <h2 id="office365-license-title">Alterar licencas</h2>
+            <span>{user.displayName || user.userPrincipalName}</span>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Fechar" disabled={saving}>
+            <X size={20} />
+          </button>
+        </header>
+
+        <div className="office365-license-modal-body">
+          {error ? <div className="form-error">{error}</div> : null}
+          {message ? <div className="form-success">{message}</div> : null}
+
+          <div className="license-user-summary">
+            <DetailItem label="Usuario" value={user.userPrincipalName} />
+            <DetailItem label="Status" value={user.accountEnabled ? "Ativo" : "Desativado"} />
+            <DetailItem label="Licencas selecionadas" value={selectedSkuIds.length} />
+          </div>
+
+          <div className="license-checkbox-list">
+            {licenses.map((license) => {
+              const checked = selected.has(license.skuId.toLowerCase());
+              return (
+                <label className={`license-checkbox ${checked ? "checked" : ""}`} key={license.skuId}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleLicense(license.skuId)}
+                    disabled={saving}
+                  />
+                  <div>
+                    <strong>{formatSkuName(license.skuPartNumber)}</strong>
+                    <span>{license.consumedUnits}/{license.enabledUnits} usadas - {license.availableUnits} disponiveis</span>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="modal-footer-actions">
+          <button className="secondary-action" type="button" onClick={onClose} disabled={saving}>
+            Cancelar
+          </button>
+          <button className="primary-action" type="button" onClick={onSave} disabled={saving}>
+            <Save size={16} />
+            {saving ? "Aplicando" : "Aplicar licencas"}
+          </button>
+        </div>
       </section>
     </div>
   );

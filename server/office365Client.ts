@@ -20,6 +20,7 @@ export type Office365User = {
   jobTitle: string;
   createdDateTime: string;
   assignedLicenses: string[];
+  assignedLicenseSkuIds: string[];
 };
 
 export type Office365License = {
@@ -125,6 +126,35 @@ async function graphGet<T>(path: string, retryOnAuthFailure = true): Promise<T> 
   return payload;
 }
 
+async function graphPost<T>(path: string, body: unknown, retryOnAuthFailure = true): Promise<T> {
+  const token = await getAccessToken();
+  const response = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "User-Agent": "Rede Clube Portal/1.0",
+      "ocp-client-name": "Rede Clube Portal",
+      "ocp-client-version": "1.0",
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json().catch(() => ({}))) as T & { error?: { message?: string } };
+
+  if (!response.ok) {
+    const message = payload.error?.message || `Microsoft Graph retornou erro ${response.status}.`;
+    if (retryOnAuthFailure && response.status === 403 && /authorize|required permissions|privileges|permission/i.test(message)) {
+      tokenCache = null;
+      return graphPost<T>(path, body, false);
+    }
+
+    throw new Error(message);
+  }
+
+  return payload;
+}
+
 async function graphList<T>(path: string, limit = 500) {
   const items: T[] = [];
   let nextPath = path;
@@ -165,6 +195,12 @@ function normalizeAssignedLicenses(raw: unknown, licenseNames: Map<string, strin
     : [];
 }
 
+function normalizeAssignedLicenseSkuIds(raw: unknown) {
+  return Array.isArray(raw)
+    ? raw.map((item) => String((item as Record<string, unknown>)?.skuId || "")).filter(Boolean)
+    : [];
+}
+
 function normalizeUser(raw: Record<string, unknown>, licenseNames: Map<string, string>): Office365User {
   return {
     id: String(raw.id || ""),
@@ -176,6 +212,7 @@ function normalizeUser(raw: Record<string, unknown>, licenseNames: Map<string, s
     jobTitle: String(raw.jobTitle || ""),
     createdDateTime: String(raw.createdDateTime || ""),
     assignedLicenses: normalizeAssignedLicenses(raw.assignedLicenses, licenseNames),
+    assignedLicenseSkuIds: normalizeAssignedLicenseSkuIds(raw.assignedLicenses),
   };
 }
 
@@ -266,4 +303,61 @@ export async function getOffice365Summary() {
 export async function getOffice365Details() {
   const data = await cached("office365-data", 60000, loadOffice365Data);
   return { source: "graph", ...data };
+}
+
+export async function updateOffice365UserLicenses(userId: string, skuIds: unknown) {
+  const desiredSkuIds = Array.isArray(skuIds)
+    ? skuIds.map(String).map((item) => item.trim()).filter(Boolean)
+    : [];
+  const data = await cached("office365-data", 60000, loadOffice365Data);
+  const validSkuIds = new Set(data.licenses.map((license) => license.skuId.toLowerCase()));
+  const invalidSkuIds = desiredSkuIds.filter((skuId) => !validSkuIds.has(skuId.toLowerCase()));
+
+  if (invalidSkuIds.length) {
+    throw new Error(`Licenca invalida ou indisponivel no tenant: ${invalidSkuIds.join(", ")}`);
+  }
+
+  const currentUser = data.users.find((user) => user.id === userId || user.userPrincipalName.toLowerCase() === userId.toLowerCase());
+  if (!currentUser) {
+    throw new Error("Usuario Office 365 nao encontrado.");
+  }
+
+  const currentSkuIds = new Set(currentUser.assignedLicenseSkuIds.map((skuId) => skuId.toLowerCase()));
+  const desiredSkuIdSet = new Set(desiredSkuIds.map((skuId) => skuId.toLowerCase()));
+  const addLicenses = desiredSkuIds
+    .filter((skuId) => !currentSkuIds.has(skuId.toLowerCase()))
+    .map((skuId) => ({ skuId, disabledPlans: [] }));
+  const removeLicenses = currentUser.assignedLicenseSkuIds
+    .filter((skuId) => !desiredSkuIdSet.has(skuId.toLowerCase()));
+
+  if (!addLicenses.length && !removeLicenses.length) {
+    return {
+      source: "graph",
+      message: "Nenhuma alteracao de licenca para aplicar.",
+      addLicenses: 0,
+      removeLicenses: 0,
+    };
+  }
+
+  try {
+    await graphPost(`/users/${encodeURIComponent(currentUser.id)}/assignLicense`, {
+      addLicenses,
+      removeLicenses,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/authorize|required permissions|privileges|permission/i.test(message)) {
+      throw new Error("Microsoft Graph sem permissao para alterar licencas. Adicione LicenseAssignment.ReadWrite.All no App Registration e aplique Admin consent.");
+    }
+    throw error;
+  }
+
+  responseCache.delete("office365-data");
+
+  return {
+    source: "graph",
+    message: "Licencas atualizadas com sucesso.",
+    addLicenses: addLicenses.length,
+    removeLicenses: removeLicenses.length,
+  };
 }
