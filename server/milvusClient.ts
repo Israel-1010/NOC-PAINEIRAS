@@ -27,6 +27,16 @@ export type MilvusTicket = {
   updatedAt: string;
 };
 
+export type MilvusAssetsSummary = {
+  source: string;
+  configured: boolean;
+  total: number;
+  computers: number;
+  mobile: number;
+  unknown: number;
+  message: string;
+};
+
 const responseCache = new Map<string, CacheEntry<unknown>>();
 
 const mockTickets: MilvusTicket[] = [
@@ -168,6 +178,21 @@ function normalizeTicket(raw: Record<string, unknown>): MilvusTicket {
   };
 }
 
+function numericValue(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function firstNumber(raw: Record<string, unknown>, names: string[]) {
+  const lowerMap = new Map(Object.keys(raw).map((key) => [key.toLowerCase(), key]));
+  for (const name of names) {
+    const key = lowerMap.get(name.toLowerCase());
+    const value = key ? numericValue(raw[key]) : null;
+    if (value !== null) return value;
+  }
+  return null;
+}
+
 function extractItems(payload: unknown) {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== "object") return [];
@@ -179,6 +204,35 @@ function extractItems(payload: unknown) {
   }
 
   return [];
+}
+
+function payloadTotal(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  return firstNumber(payload as Record<string, unknown>, ["total", "total_registros", "totalRegistros", "count", "quantidade", "qtd"]);
+}
+
+function normalizeAssetKind(raw: Record<string, unknown>) {
+  const value = pick(raw, [
+    "tipo",
+    "type",
+    "categoria",
+    "category",
+    "classe",
+    "class",
+    "grupo",
+    "device_type",
+    "asset_type",
+    "nome_tipo",
+    "equipamento_tipo",
+  ]);
+  const haystack = [
+    value,
+    pick(raw, ["nome", "name", "hostname", "patrimonio", "descricao", "description", "modelo", "model", "fabricante", "manufacturer"]),
+  ].join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+  if (/(celular|smartphone|mobile|android|iphone|ipad|tablet)/.test(haystack)) return "mobile";
+  if (/(notebook|desktop|computador|micro|workstation|estacao|pc|windows|macbook|servidor|server)/.test(haystack)) return "computer";
+  return "unknown";
 }
 
 function buildPath(template: string, params: Record<string, string>) {
@@ -255,6 +309,19 @@ async function listRemoteTickets() {
     .map(normalizeTicket);
 }
 
+async function listRemoteAssets() {
+  if (!milvusConfig.assetsPath) {
+    throw new Error("Configure MILVUS_ASSETS_PATH para consultar o inventario do Milvus.");
+  }
+
+  const payload = await milvusFetch<unknown>(milvusConfig.assetsPath, {
+    method: "POST",
+    body: JSON.stringify({ filtro_body: {} }),
+  });
+  const items = extractItems(payload).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"));
+  return { payload, items };
+}
+
 export async function getMilvusStatus() {
   if (isMockMode()) {
     return {
@@ -280,6 +347,49 @@ export async function getMilvusSummary() {
   }
 
   return cached("milvus-summary", 30000, async () => summarizeTickets(await listRemoteTickets(), "milvus"));
+}
+
+export async function getMilvusAssetsSummary(): Promise<MilvusAssetsSummary> {
+  if (isMockMode()) {
+    return {
+      source: "mock",
+      configured: Boolean(milvusConfig.assetsPath),
+      total: 0,
+      computers: 0,
+      mobile: 0,
+      unknown: 0,
+      message: milvusConfig.assetsPath ? "Milvus em modo mock." : "Configure MILVUS_ASSETS_PATH para consultar maquinas do Milvus.",
+    };
+  }
+
+  if (!milvusConfig.assetsPath) {
+    return {
+      source: "milvus",
+      configured: false,
+      total: 0,
+      computers: 0,
+      mobile: 0,
+      unknown: 0,
+      message: "Configure MILVUS_ASSETS_PATH para consultar maquinas do Milvus.",
+    };
+  }
+
+  return cached("milvus-assets-summary", 30000, async () => {
+    const { payload, items } = await listRemoteAssets();
+    const totalFromPayload = payloadTotal(payload);
+    const computers = items.filter((item) => normalizeAssetKind(item) === "computer").length;
+    const mobile = items.filter((item) => normalizeAssetKind(item) === "mobile").length;
+    const unknown = Math.max(0, items.length - computers - mobile);
+    return {
+      source: "milvus",
+      configured: true,
+      total: totalFromPayload ?? items.length,
+      computers,
+      mobile,
+      unknown,
+      message: "Inventario Milvus conectado.",
+    };
+  });
 }
 
 export async function listMilvusTickets(query = "", limit?: string | number) {

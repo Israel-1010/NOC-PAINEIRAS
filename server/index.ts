@@ -41,6 +41,7 @@ import {
 import {
   closeMilvusTicket,
   createMilvusTicket,
+  getMilvusAssetsSummary,
   getMilvusStatus,
   getMilvusSummary,
   getMilvusTicketDetails,
@@ -384,6 +385,7 @@ app.use("/api/tickets", requireAuth);
 
 app.get("/api/tickets/status", asyncRoute(() => getMilvusStatus()));
 app.get("/api/tickets/summary", asyncRoute(() => getMilvusSummary()));
+app.get("/api/tickets/assets-summary", asyncRoute(() => getMilvusAssetsSummary()));
 app.get("/api/tickets", asyncRoute((req) => listMilvusTickets(String(req.query.search || ""), String(req.query.limit || ""))));
 app.post("/api/tickets", asyncRoute((req) => createMilvusTicket(req.body || {})));
 app.post("/api/tickets/:id/close", asyncRoute((req) => closeMilvusTicket(String(req.params.id), req.body || {})));

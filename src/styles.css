@@ -1131,7 +1131,8 @@ h1 {
 .tv-ad-panel,
 .tv-tickets-panel,
 .tv-events-panel,
-.tv-network-panel {
+.tv-network-panel,
+.tv-milvus-panel {
   grid-column: span 4;
 }
 
@@ -5513,6 +5514,7 @@ h1 {
   .tv-sites-panel,
   .tv-wan-panel,
   .tv-network-panel,
+  .tv-milvus-panel,
   .tv-tickets-panel,
   .tv-events-panel,
   .topology-map-panel,
@@ -5726,6 +5728,7 @@ h1 {
   .tv-sites-panel,
   .tv-wan-panel,
   .tv-network-panel,
+  .tv-milvus-panel,
   .tv-tickets-panel,
   .tv-events-panel {
     grid-column: auto;

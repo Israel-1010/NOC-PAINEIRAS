@@ -29,6 +29,7 @@ export type MilvusConfig = {
   authHeader: string;
   authScheme: string;
   ticketsPath: string;
+  assetsPath: string;
   ticketDetailsPath: string;
   createTicketPath: string;
   closeTicketPath: string;
@@ -102,6 +103,7 @@ export const milvusConfig: MilvusConfig = {
   authHeader: process.env.MILVUS_AUTH_HEADER || "Authorization",
   authScheme: process.env.MILVUS_AUTH_SCHEME ?? "",
   ticketsPath: process.env.MILVUS_TICKETS_PATH || "/chamado/listagem?total_registros=1000",
+  assetsPath: process.env.MILVUS_ASSETS_PATH || "",
   ticketDetailsPath: process.env.MILVUS_TICKET_DETAILS_PATH || "/chamado/listagem?total_registros=1000",
   createTicketPath: process.env.MILVUS_CREATE_TICKET_PATH || "/chamado/criar",
   closeTicketPath: process.env.MILVUS_CLOSE_TICKET_PATH || "",

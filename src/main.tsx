@@ -442,6 +442,16 @@ type TicketsSummary = {
   highPriority: number;
 };
 
+type MilvusAssetsSummary = {
+  source: string;
+  configured: boolean;
+  total: number;
+  computers: number;
+  mobile: number;
+  unknown: number;
+  message: string;
+};
+
 type TicketFilter = "open" | "closed" | "all";
 
 type ServiceTicket = {
@@ -1119,6 +1129,16 @@ const fallbackTicketsDetails: TicketsDetails = {
   tickets: [],
 };
 
+const fallbackMilvusAssetsSummary: MilvusAssetsSummary = {
+  source: "mock",
+  configured: false,
+  total: 0,
+  computers: 0,
+  mobile: 0,
+  unknown: 0,
+  message: "Inventario Milvus aguardando configuracao",
+};
+
 const fallbackIpSummary: IpSummary = {
   total: 0,
   used: 0,
@@ -1268,6 +1288,7 @@ function App() {
   const [ticketsStatus, setTicketsStatus] = useState<TicketsStatus>(fallbackTicketsStatus);
   const [ticketsSummary, setTicketsSummary] = useState<TicketsSummary>(fallbackTicketsSummary);
   const [ticketsDetails, setTicketsDetails] = useState<TicketsDetails>(fallbackTicketsDetails);
+  const [milvusAssetsSummary, setMilvusAssetsSummary] = useState<MilvusAssetsSummary>(fallbackMilvusAssetsSummary);
   const [ipSummary, setIpSummary] = useState<IpSummary>(fallbackIpSummary);
   const [ipDetails, setIpDetails] = useState<IpDetails>(fallbackIpDetails);
   const [topology, setTopology] = useState<TopologyState>(fallbackTopology);
@@ -1465,9 +1486,10 @@ function App() {
             },
       );
 
-      const [summaryResponse, ticketsResponse] = await Promise.all([
+      const [summaryResponse, ticketsResponse, assetsResponse] = await Promise.all([
         authFetch("/api/tickets/summary"),
         authFetch("/api/tickets?limit=500"),
+        authFetch("/api/tickets/assets-summary"),
       ]);
 
       if (summaryResponse.ok) {
@@ -1477,6 +1499,10 @@ function App() {
       if (ticketsResponse.ok) {
         const payload = await ticketsResponse.json();
         setTicketsDetails({ tickets: payload.items || [] });
+      }
+
+      if (assetsResponse.ok) {
+        setMilvusAssetsSummary(await assetsResponse.json());
       }
     } catch {
       setTicketsStatus({
@@ -1885,6 +1911,7 @@ function App() {
             office365Status={office365Status}
             office365Summary={office365Summary}
             office365Details={office365Details}
+            milvusAssetsSummary={milvusAssetsSummary}
             snmpSummary={snmpSummary}
             snmpDetails={snmpDetails}
             topology={topology}
@@ -2035,6 +2062,7 @@ function TvDashboard({
   office365Status,
   office365Summary,
   office365Details,
+  milvusAssetsSummary,
   snmpSummary,
   snmpDetails,
   topology,
@@ -2050,25 +2078,23 @@ function TvDashboard({
   office365Status: Office365Status;
   office365Summary: Office365Summary;
   office365Details: Office365Details;
+  milvusAssetsSummary: MilvusAssetsSummary;
   snmpSummary: SnmpSummary;
   snmpDetails: SnmpDetails;
   topology: TopologyState;
   ipDetails: IpDetails;
   onRefreshAd: () => Promise<void>;
 }) {
-  const activeUsers = adDetails.users.filter((user) => user.enabled);
-  const standardIssues = activeUsers
-    .map((user) => ({ user, missingFields: missingRequiredUserFields(user) }))
-    .filter((item) => item.missingFields.length);
   const lockoutEventsTotal = adDetails.lockoutEvents.length;
   const intuneRiskDevices = intuneDetails.devices.filter((device) => intuneDeviceRiskReasons(device).length);
+  const mobileDevices = intuneDetails.devices.filter((device) => !intuneDeviceIsWindows(device));
   const officeUnlicensedUsers = Math.max(0, office365Summary.users - office365Summary.licensedUsers);
   const fullLicenses = office365Details.licenses.filter((license) => license.enabledUnits > 0 && license.availableUnits === 0);
   const mdmManagedDevices = intuneSummary.total || intuneDetails.devices.length;
   const cloudServicesOk = intuneStatus.ok && office365Status.ok;
-  const overallTone = !adStatus.ok || !cloudServicesOk || adSummary.users.locked ? "danger" : standardIssues.length || adSummary.computers.inactive30d || intuneSummary.nonCompliant || officeUnlicensedUsers ? "warn" : "good";
+  const overallTone = !adStatus.ok || !cloudServicesOk || adSummary.users.locked ? "danger" : adSummary.computers.inactive30d || intuneSummary.nonCompliant || officeUnlicensedUsers ? "warn" : "good";
   const sourceLabel = adSummary.source === "ldap" ? "AD real" : "Modo mock";
-  const adAttention = adSummary.users.locked + standardIssues.length + adSummary.computers.inactive30d;
+  const adAttention = adSummary.users.locked + adSummary.computers.inactive30d;
   const mdmAttention = intuneSummary.nonCompliant + intuneSummary.staleSync + intuneRiskDevices.length;
   const officeAttention = officeUnlicensedUsers + fullLicenses.length;
   const topologyLinks = topology.links.length + ipDetails.links.filter((link) => link.type === "Circuito").length;
@@ -2080,13 +2106,6 @@ function TvDashboard({
       value: adSummary.users.locked,
       detail: adSummary.users.locked ? `${adDetails.lockouts.length} contas em destaque` : "Nenhuma conta bloqueada agora",
       tone: adSummary.users.locked ? "danger" : "good",
-    },
-    {
-      icon: Users,
-      title: "Cadastro AD incompleto",
-      value: standardIssues.length,
-      detail: standardIssues.length ? "usuarios ativos fora do padrao" : "campos obrigatorios em ordem",
-      tone: standardIssues.length ? "warn" : "good",
     },
     {
       icon: ShieldCheck,
@@ -2129,8 +2148,8 @@ function TvDashboard({
           meta={`${adSummary.users.total} totais`}
           stats={[
             { label: "Bloqueios", value: adSummary.users.locked, tone: adSummary.users.locked ? "danger" : "good" },
-            { label: "Fora padrao", value: standardIssues.length, tone: standardIssues.length ? "warn" : "good" },
             { label: "Maquinas", value: adSummary.computers.total, tone: adSummary.computers.inactive30d ? "warn" : "good" },
+            { label: "Grupos", value: adSummary.groups.total, tone: "calm" },
           ]}
         />
         <TvDomainCard
@@ -2144,7 +2163,7 @@ function TvDashboard({
           stats={[
             { label: "Nao conformes", value: intuneSummary.nonCompliant, tone: intuneSummary.nonCompliant ? "danger" : "good" },
             { label: "Sem sync", value: intuneSummary.staleSync, tone: intuneSummary.staleSync ? "warn" : "good" },
-            { label: "Risco", value: intuneRiskDevices.length, tone: intuneRiskDevices.length ? "warn" : "good" },
+            { label: "Celulares", value: mobileDevices.length, tone: "calm" },
           ]}
         />
         <TvDomainCard
@@ -2181,14 +2200,14 @@ function TvDashboard({
           <TvNetworkPanel snmpSummary={snmpSummary} snmpDetails={snmpDetails} topology={topology} ipDetails={ipDetails} />
         </article>
 
+        <article className="panel tv-milvus-panel">
+          <PanelHeader icon={Server} title="Inventario Milvus" meta={milvusAssetsSummary.configured ? milvusAssetsSummary.source : "Configurar API"} />
+          <TvMilvusInventoryPanel summary={milvusAssetsSummary} />
+        </article>
+
         <article className="panel tv-lockout-panel">
           <PanelHeader icon={KeyRound} title="Bloqueios de senha" meta="AD Security" />
           <LockoutPanel adSummary={adSummary} lockouts={adDetails.lockouts} events={adDetails.lockoutEvents} eventErrors={adDetails.lockoutEventErrors} onRefreshAd={onRefreshAd} />
-        </article>
-
-        <article className="panel tv-sites-panel">
-          <PanelHeader icon={AlertTriangle} title="Usuarios fora do padrao" meta={`${standardIssues.length} ativos`} />
-          <TvStandardUsersPanel items={standardIssues} />
         </article>
 
         <article className="panel tv-wan-panel">
@@ -6118,6 +6137,35 @@ function TvNetworkPanel({
             <small>sem SNMP</small>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function TvMilvusInventoryPanel({ summary }: { summary: MilvusAssetsSummary }) {
+  return (
+    <div className="tv-service-panel">
+      <div className="tv-service-grid">
+        <div className={summary.configured ? "" : "warn"}>
+          <span>Maquinas Milvus</span>
+          <strong>{summary.total}</strong>
+        </div>
+        <div>
+          <span>Computadores</span>
+          <strong>{summary.computers}</strong>
+        </div>
+        <div>
+          <span>Celulares</span>
+          <strong>{summary.mobile}</strong>
+        </div>
+        <div className={summary.unknown ? "warn" : ""}>
+          <span>Sem tipo</span>
+          <strong>{summary.unknown}</strong>
+        </div>
+      </div>
+      <div className="tv-mini-split">
+        <span>{summary.configured ? "Milvus API" : "Aguardando path"}</span>
+        <span>{summary.message}</span>
       </div>
     </div>
   );
