@@ -941,6 +941,78 @@ h1 {
   text-align: right;
 }
 
+.tv-service-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.tv-service-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tv-service-grid div {
+  min-width: 0;
+  padding: 10px;
+  background: #f8faf8;
+  border: 1px solid #e3e9e3;
+  border-left: 4px solid #16a085;
+  border-radius: 8px;
+}
+
+.tv-service-grid div.warn {
+  border-left-color: #d9902f;
+}
+
+.tv-service-grid div.danger {
+  border-left-color: #c0392b;
+}
+
+.tv-service-grid span,
+.tv-service-grid strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-service-grid span {
+  color: #718075;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.tv-service-grid strong {
+  margin-top: 6px;
+  color: #171a18;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.tv-mini-split,
+.tv-license-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tv-mini-split span,
+.tv-license-strip span {
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 9px;
+  color: #1f6b55;
+  background: #e2f6ee;
+  border: 1px solid #cceadd;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tv-event-feed {
   display: grid;
   gap: 10px;

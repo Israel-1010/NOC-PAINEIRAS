@@ -1875,7 +1875,18 @@ function App() {
         </header>
 
         {activeView === "tv" ? (
-          <TvDashboard adSummary={adSummaryState} adStatus={adStatus} adDetails={adDetails} onRefreshAd={loadAd} />
+          <TvDashboard
+            adSummary={adSummaryState}
+            adStatus={adStatus}
+            adDetails={adDetails}
+            intuneStatus={intuneStatus}
+            intuneSummary={intuneSummary}
+            intuneDetails={intuneDetails}
+            office365Status={office365Status}
+            office365Summary={office365Summary}
+            office365Details={office365Details}
+            onRefreshAd={loadAd}
+          />
         ) : activeView === "topology" ? (
           <TopologyDashboard topology={topology} onChange={setTopology} ipDetails={ipDetails} onRefreshIps={loadIps} saveStatus={topologySaveStatus} />
         ) : activeView === "intune" ? (
@@ -2014,47 +2025,63 @@ function TvDashboard({
   adSummary,
   adStatus,
   adDetails,
+  intuneStatus,
+  intuneSummary,
+  intuneDetails,
+  office365Status,
+  office365Summary,
+  office365Details,
   onRefreshAd,
 }: {
   adSummary: AdSummary;
   adStatus: AdStatus;
   adDetails: AdDetails;
+  intuneStatus: IntuneStatus;
+  intuneSummary: IntuneSummary;
+  intuneDetails: IntuneDetails;
+  office365Status: Office365Status;
+  office365Summary: Office365Summary;
+  office365Details: Office365Details;
   onRefreshAd: () => Promise<void>;
 }) {
   const activeUsers = adDetails.users.filter((user) => user.enabled);
   const standardIssues = activeUsers
     .map((user) => ({ user, missingFields: missingRequiredUserFields(user) }))
     .filter((item) => item.missingFields.length);
-  const standardOk = Math.max(activeUsers.length - standardIssues.length, 0);
-  const groupsTotal = adSummary.groups.total || adDetails.groups.length;
   const lockoutEventsTotal = adDetails.lockoutEvents.length;
-  const overallTone = !adStatus.ok || adSummary.users.locked ? "danger" : standardIssues.length || adSummary.computers.inactive30d ? "warn" : "good";
+  const intuneRiskDevices = intuneDetails.devices.filter((device) => intuneDeviceRiskReasons(device).length);
+  const officeUnlicensedUsers = Math.max(0, office365Summary.users - office365Summary.licensedUsers);
+  const fullLicenses = office365Details.licenses.filter((license) => license.enabledUnits > 0 && license.availableUnits === 0);
+  const mdmManagedDevices = intuneSummary.total || intuneDetails.devices.length;
+  const cloudServicesOk = intuneStatus.ok && office365Status.ok;
+  const overallTone = !adStatus.ok || !cloudServicesOk || adSummary.users.locked ? "danger" : standardIssues.length || adSummary.computers.inactive30d || intuneSummary.nonCompliant || officeUnlicensedUsers ? "warn" : "good";
   const sourceLabel = adSummary.source === "ldap" ? "AD real" : "Modo mock";
 
   return (
     <>
       <section className="tv-hero" aria-label="Resumo operacional da TV">
         <div className={`tv-overall ${overallTone}`}>
-          <span>Saude do Active Directory</span>
+          <span>Saude da identidade e dispositivos</span>
           <strong>{overallTone === "danger" ? "Atencao" : overallTone === "warn" ? "Observando" : "Estavel"}</strong>
-          <small>{adStatus.ok ? `${sourceLabel} conectado` : adStatus.message}</small>
+          <small>{adStatus.ok && cloudServicesOk ? `${sourceLabel} / Graph conectado` : [adStatus.ok ? "" : adStatus.message, intuneStatus.ok ? "" : "Intune com falha", office365Status.ok ? "" : "Office 365 com falha"].filter(Boolean).join(" | ")}</small>
         </div>
         <div className="tv-health-strip">
           <HealthTile icon={Users} label="AD" value={adStatus.ok ? "Online" : "Falha"} tone={adStatus.ok ? "good" : "danger"} />
-          <HealthTile icon={UserCheck} label="Usuarios" value={`${adSummary.users.enabled}/${adSummary.users.total}`} tone="good" />
-          <HealthTile icon={Monitor} label="Maquinas" value={String(adSummary.computers.total)} tone={adSummary.computers.inactive30d ? "warn" : "good"} />
-          <HealthTile icon={Users} label="Grupos" value={String(groupsTotal)} tone="good" />
+          <HealthTile icon={ShieldCheck} label="Intune" value={intuneStatus.ok ? "Online" : "Falha"} tone={intuneStatus.ok ? "good" : "danger"} />
+          <HealthTile icon={TableIcon} label="Office 365" value={office365Status.ok ? "Online" : "Falha"} tone={office365Status.ok ? "good" : "danger"} />
+          <HealthTile icon={UserCheck} label="Usuarios AD" value={`${adSummary.users.enabled}/${adSummary.users.total}`} tone="good" />
+          <HealthTile icon={Monitor} label="MDM" value={String(mdmManagedDevices)} tone={intuneSummary.nonCompliant ? "warn" : "good"} />
           <HealthTile icon={KeyRound} label="Eventos 4740" value={String(lockoutEventsTotal)} tone={adDetails.lockoutEventErrors.length ? "warn" : "good"} />
         </div>
       </section>
 
       <section className="tv-metric-grid" aria-label="Indicadores principais">
         <TvMetric icon={LockKeyhole} label="Bloqueios agora" value={String(adSummary.users.locked)} detail={`${adDetails.lockouts.length} em destaque`} tone={adSummary.users.locked ? "danger" : "good"} />
-        <TvMetric icon={Monitor} label="Maquinas AD" value={String(adSummary.computers.total)} detail={`${adSummary.computers.domainJoined} no dominio`} tone="good" />
-        <TvMetric icon={Users} label="Usuarios ativos" value={String(adSummary.users.enabled)} detail={`${adSummary.users.disabled} desativados`} tone="calm" />
-        <TvMetric icon={AlertTriangle} label="Fora do padrao" value={String(standardIssues.length)} detail={`${standardOk} usuarios OK`} tone={standardIssues.length ? "warn" : "good"} />
-        <TvMetric icon={Users} label="Grupos AD" value={String(groupsTotal)} detail={`${adSummary.groups.sensitive} sensiveis`} tone={adSummary.groups.sensitive ? "warn" : "good"} />
-        <TvMetric icon={KeyRound} label="Eventos 4740" value={String(lockoutEventsTotal)} detail={adDetails.lockoutEventErrors.length ? "coleta parcial" : "ultimas 24h"} tone={adDetails.lockoutEventErrors.length ? "warn" : "calm"} />
+        <TvMetric icon={Users} label="Usuarios AD" value={String(adSummary.users.enabled)} detail={`${standardIssues.length} fora do padrao`} tone={standardIssues.length ? "warn" : "good"} />
+        <TvMetric icon={TableIcon} label="Usuarios Office 365" value={String(office365Summary.users)} detail={`${office365Summary.licensedUsers} licenciados`} tone={officeUnlicensedUsers ? "warn" : "good"} />
+        <TvMetric icon={Monitor} label="Dispositivos MDM" value={String(mdmManagedDevices)} detail={`${intuneSummary.compliant} conformes`} tone={intuneSummary.nonCompliant ? "danger" : "good"} />
+        <TvMetric icon={AlertTriangle} label="Risco Intune" value={String(intuneRiskDevices.length)} detail={`${intuneSummary.staleSync} sem sync 7d`} tone={intuneRiskDevices.length ? "warn" : "good"} />
+        <TvMetric icon={ShieldCheck} label="Licencas O365" value={String(office365Summary.licenses)} detail={`${fullLicenses.length} sem saldo`} tone={fullLicenses.length ? "danger" : "calm"} />
       </section>
 
       <section className="tv-board">
@@ -2074,8 +2101,8 @@ function TvDashboard({
         </article>
 
         <article className="panel tv-wan-panel">
-          <PanelHeader icon={Monitor} title="Maquinas do dominio" meta={`${adDetails.computers.length} carregadas`} />
-          <TvComputersPanel computers={adDetails.computers} />
+          <PanelHeader icon={ShieldCheck} title="MDM / Intune" meta={`${mdmManagedDevices} dispositivos`} />
+          <TvIntunePanel summary={intuneSummary} devices={intuneDetails.devices} />
         </article>
 
         <article className="panel tv-ad-panel">
@@ -2084,8 +2111,8 @@ function TvDashboard({
         </article>
 
         <article className="panel tv-tickets-panel">
-          <PanelHeader icon={Users} title="Grupos do AD" meta={`${adDetails.groups.length} carregados`} />
-          <TvGroupsPanel groups={adDetails.groups} />
+          <PanelHeader icon={TableIcon} title="Office 365" meta={`${office365Summary.users} usuarios`} />
+          <TvOffice365Panel summary={office365Summary} details={office365Details} />
         </article>
 
         <article className="panel tv-events-panel">
@@ -5669,6 +5696,55 @@ function TvComputersPanel({ computers }: { computers: AdComputer[] }) {
   );
 }
 
+function TvIntunePanel({ summary, devices }: { summary: IntuneSummary; devices: IntuneDevice[] }) {
+  const riskDevices = devices.filter((device) => intuneDeviceRiskReasons(device).length);
+  const staleDevices = devices.filter((device) => intuneDeviceIsStale(device));
+  const windowsDevices = devices.filter((device) => intuneDeviceIsWindows(device));
+  const mobileDevices = devices.filter((device) => !intuneDeviceIsWindows(device));
+  const attentionDevices = riskDevices.slice(0, 4);
+
+  return (
+    <div className="tv-service-panel">
+      <div className="tv-service-grid">
+        <div>
+          <span>Total MDM</span>
+          <strong>{summary.total || devices.length}</strong>
+        </div>
+        <div>
+          <span>Conformes</span>
+          <strong>{summary.compliant}</strong>
+        </div>
+        <div className={summary.nonCompliant ? "warn" : ""}>
+          <span>Nao conformes</span>
+          <strong>{summary.nonCompliant}</strong>
+        </div>
+        <div className={summary.staleSync ? "warn" : ""}>
+          <span>Sem sync 7d</span>
+          <strong>{summary.staleSync}</strong>
+        </div>
+      </div>
+
+      <div className="tv-mini-split">
+        <span>{windowsDevices.length} Windows</span>
+        <span>{mobileDevices.length} Mobile</span>
+      </div>
+
+      <div className="tv-compact-list">
+        {attentionDevices.map((device) => (
+          <div className="tv-compact-row warn" key={device.id || device.deviceName}>
+            <div>
+              <strong>{device.deviceName || "Sem nome"}</strong>
+              <span>{device.userDisplayName || device.userPrincipalName || "Sem usuario"}</span>
+            </div>
+            <small>{intuneDeviceRiskReasons(device).join(", ")}</small>
+          </div>
+        ))}
+        {!attentionDevices.length ? <EmptyState title="MDM em ordem" detail="Nenhum dispositivo Intune com alerta nesta coleta." /> : null}
+      </div>
+    </div>
+  );
+}
+
 function TvGroupsPanel({ groups }: { groups: ApiAdGroup[] }) {
   const visibleGroups = [...groups]
     .sort((first, second) => second.memberCount - first.memberCount)
@@ -5689,6 +5765,57 @@ function TvGroupsPanel({ groups }: { groups: ApiAdGroup[] }) {
           <small>{group.memberCount} membros</small>
         </div>
       ))}
+    </div>
+  );
+}
+
+function TvOffice365Panel({ summary, details }: { summary: Office365Summary; details: Office365Details }) {
+  const unlicensedUsers = details.users.filter((user) => !user.assignedLicenses.length).slice(0, 4);
+  const fullLicenses = details.licenses.filter((license) => license.enabledUnits > 0 && license.availableUnits === 0);
+  const topLicenses = [...details.licenses]
+    .filter((license) => license.consumedUnits > 0)
+    .sort((first, second) => second.consumedUnits - first.consumedUnits)
+    .slice(0, 3);
+
+  return (
+    <div className="tv-service-panel">
+      <div className="tv-service-grid">
+        <div>
+          <span>Usuarios 365</span>
+          <strong>{summary.users}</strong>
+        </div>
+        <div>
+          <span>Licenciados</span>
+          <strong>{summary.licensedUsers}</strong>
+        </div>
+        <div className={summary.users - summary.licensedUsers ? "warn" : ""}>
+          <span>Sem licenca</span>
+          <strong>{Math.max(0, summary.users - summary.licensedUsers)}</strong>
+        </div>
+        <div className={fullLicenses.length ? "danger" : ""}>
+          <span>SKUs lotadas</span>
+          <strong>{fullLicenses.length}</strong>
+        </div>
+      </div>
+
+      <div className="tv-license-strip">
+        {topLicenses.map((license) => (
+          <span key={license.skuId}>{formatSkuName(license.skuPartNumber)}: {license.consumedUnits}/{license.enabledUnits}</span>
+        ))}
+      </div>
+
+      <div className="tv-compact-list">
+        {unlicensedUsers.map((user) => (
+          <div className="tv-compact-row warn" key={user.id || user.userPrincipalName}>
+            <div>
+              <strong>{user.displayName || user.userPrincipalName}</strong>
+              <span>{user.department || "Sem departamento"}</span>
+            </div>
+            <small>Sem licenca</small>
+          </div>
+        ))}
+        {!unlicensedUsers.length ? <EmptyState title="Office 365 em ordem" detail="Todos os usuarios listados possuem licenca." /> : null}
+      </div>
     </div>
   );
 }
