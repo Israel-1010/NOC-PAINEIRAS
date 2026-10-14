@@ -354,10 +354,38 @@ function ensureMember(store: ProjectStore, spaceId: string, login: string, name:
   if (space && !isMember(space, login)) space.members.push({ login, name: name || login });
 }
 
+function isTaskManager(store: ProjectStore, task: ProjectTask, access: ProjectAccess) {
+  const space = store.spaces.find((item) => item.id === task.spaceId);
+  return access.isAdmin || Boolean(space && canManageSpace(space, access));
+}
+
+// Gestor ve tudo. Analista ve so as proprias horas/sessoes: quem mais trabalhou,
+// quanto tempo e quem esta com cronometro rodando ficam restritos ao gestor.
+export function viewTask(store: ProjectStore, task: ProjectTask, access: ProjectAccess): ProjectTask {
+  if (isTaskManager(store, task, access)) return task;
+  const me = access.user.login;
+  return {
+    ...task,
+    checklist: task.checklist.map((item) => {
+      const mine = item.sessions.filter((session) => sameLogin(session.login, me));
+      const runningMine = item.state === "em_andamento" && sameLogin(item.runningBy, me);
+      return {
+        ...item,
+        sessions: mine,
+        elapsedMs: mine.reduce((sum, session) => sum + session.ms, 0),
+        runningSince: runningMine ? item.runningSince : "",
+        runningBy: runningMine ? item.runningBy : "",
+        runningByName: runningMine ? item.runningByName : "",
+        completedBy: sameLogin(item.completedBy, me) ? item.completedBy : "",
+      };
+    }),
+  };
+}
+
 export function getProjects(access: ProjectAccess) {
   const task = writeQueue.then(async () => {
     const store = await readStore();
-    const tasks = store.tasks.filter((item) => canSeeTask(store, item, access));
+    const tasks = store.tasks.filter((item) => canSeeTask(store, item, access)).map((item) => viewTask(store, item, access));
     const spaceIds = new Set(tasks.map((item) => item.spaceId));
     const spaces = store.spaces.filter((space) => canSeeSpace(space, access) || spaceIds.has(space.id));
     return {
@@ -433,7 +461,7 @@ export function createTask(input: unknown, access: ProjectAccess) {
     });
     ensureMember(store, task.spaceId, task.assignee, task.assigneeName);
     store.tasks.push(task);
-    return task;
+    return viewTask(store, task, access);
   });
 }
 
@@ -453,7 +481,18 @@ export function updateTask(id: string, input: unknown, access: ProjectAccess) {
     // Valor invalido em campo de lista fechada e ignorado (mantem o atual).
     if ("status" in patch && !taskStatuses.includes(patch.status as TaskStatus)) delete patch.status;
     if ("priority" in patch && !taskPriorities.includes(patch.priority as TaskPriority)) delete patch.priority;
-    if ("checklist" in patch) patch.checklist = mergeClientChecklist(current.checklist, patch.checklist);
+    if ("checklist" in patch) {
+      patch.checklist = mergeClientChecklist(current.checklist, patch.checklist);
+      if (!isTaskManager(store, current, access)) {
+        const kept = new Set(patch.checklist.map((item) => item.id));
+        const me = access.user.login;
+        const removesOthersWork = current.checklist.some((item) => !kept.has(item.id) && (
+          item.sessions.some((session) => !sameLogin(session.login, me)) ||
+          (item.state === "em_andamento" && !sameLogin(item.runningBy, me))
+        ));
+        if (removesOthersWork) throw new ProjectAccessError("Este item tem horas de outra pessoa; somente o gestor pode remove-lo.");
+      }
+    }
     if (patch.spaceId && patch.spaceId !== current.spaceId) {
       const target = store.spaces.find((space) => space.id === patch.spaceId);
       if (!target || !canSeeSpace(target, access)) throw new ProjectAccessError("Voce nao participa do projeto de destino.");
@@ -470,7 +509,7 @@ export function updateTask(id: string, input: unknown, access: ProjectAccess) {
     });
     ensureMember(store, next.spaceId, next.assignee, next.assigneeName);
     store.tasks = store.tasks.map((task) => (task.id === id ? next : task));
-    return next;
+    return viewTask(store, next, access);
   });
 }
 
@@ -493,7 +532,7 @@ export function addTaskComment(id: string, input: unknown, access: ProjectAccess
     const comment: TaskComment = { id: makeId("com"), author: access.user.login, authorName: access.user.name, text: body, at: new Date().toISOString() };
     task.comments.push(comment);
     task.updatedAt = comment.at;
-    return task;
+    return viewTask(store, task, access);
   });
 }
 
@@ -529,7 +568,7 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
 
     if (action === "start") {
       if (item.state === "concluido") throw new Error("Item ja finalizado. Reabra antes de iniciar.");
-      if (item.state === "em_andamento") return { task, pausedElsewhere };
+      if (item.state === "em_andamento") return { task: viewTask(store, task, access), pausedElsewhere };
 
       // Um cronometro por pessoa: pausa o que esta rodando em outro item.
       for (const other of store.tasks) {
@@ -554,12 +593,18 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
     }
 
     if (action === "pause") {
-      if (item.state !== "em_andamento") return { task, pausedElsewhere };
+      if (item.state !== "em_andamento") return { task: viewTask(store, task, access), pausedElsewhere };
+      if (!sameLogin(item.runningBy, access.user.login) && !isTaskManager(store, task, access)) {
+        throw new ProjectAccessError("Este item esta em andamento com outra pessoa.");
+      }
       closeRunning(item, now);
       item.state = "pausado";
     }
 
     if (action === "finish") {
+      if (item.state === "em_andamento" && !sameLogin(item.runningBy, access.user.login) && !isTaskManager(store, task, access)) {
+        throw new ProjectAccessError("Este item esta em andamento com outra pessoa.");
+      }
       closeRunning(item, now);
       item.state = "concluido";
       item.done = true;
@@ -575,7 +620,7 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
     }
 
     if (action === "reopen") {
-      if (item.state !== "concluido") return { task, pausedElsewhere };
+      if (item.state !== "concluido") return { task: viewTask(store, task, access), pausedElsewhere };
       item.state = item.elapsedMs > 0 ? "pausado" : "pendente";
       item.done = false;
       item.completedAt = "";
@@ -587,6 +632,6 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
     }
 
     touchTask(task, now);
-    return { task, pausedElsewhere };
+    return { task: viewTask(store, task, access), pausedElsewhere };
   });
 }

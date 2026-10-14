@@ -214,8 +214,9 @@ function taskMs(task: ProjectTask, now: number) {
   return task.checklist.reduce((sum, item) => sum + itemMs(item, now), 0);
 }
 
+// So conta cronometro visivel (o servidor esconde o de colegas para quem nao e gestor).
 function isRunning(task: ProjectTask) {
-  return task.checklist.some((item) => item.state === "em_andamento");
+  return task.checklist.some((item) => item.state === "em_andamento" && Boolean(item.runningSince));
 }
 
 // Progresso da tarefa: itens finalizados do checklist; sem checklist, vale o status.
@@ -392,15 +393,23 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
   const anyRunning = data.tasks.some(isRunning);
   const now = useNow(anyRunning);
 
+  // Gestor ve os numeros da equipe; analista ve so as tarefas atribuidas a ele.
+  const teamView = Boolean(data.me?.isAdmin || activeSpace?.canManage);
+  const statTasks = useMemo(
+    () => (teamView ? scopedTasks : scopedTasks.filter((task) => sameUser(task.assignee, currentUser.login))),
+    [currentUser.login, scopedTasks, teamView],
+  );
+
   const stats = useMemo(() => {
     const weekAgo = Date.now() - 7 * 86400000;
     return {
-      open: scopedTasks.filter((task) => task.status !== "concluido").length,
-      doing: scopedTasks.filter((task) => task.status === "em_andamento").length,
-      overdue: scopedTasks.filter(isOverdue).length,
-      doneWeek: scopedTasks.filter((task) => task.completedAt && new Date(task.completedAt).getTime() >= weekAgo).length,
+      open: statTasks.filter((task) => task.status !== "concluido").length,
+      doing: statTasks.filter((task) => task.status === "em_andamento").length,
+      overdue: statTasks.filter(isOverdue).length,
+      doneWeek: statTasks.filter((task) => task.completedAt && new Date(task.completedAt).getTime() >= weekAgo).length,
     };
-  }, [scopedTasks]);
+  }, [statTasks]);
+  // Para o analista o servidor ja manda so as horas dele.
   const workedMs = scopedTasks.reduce((sum, task) => sum + taskMs(task, now), 0);
 
   const openTask = data.tasks.find((task) => task.id === openTaskId) || null;
@@ -659,12 +668,13 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
           </button>
         </div>
 
+        <p className="pm-stats-scope">{teamView ? "Visão geral da equipe" : "Seus números"}</p>
         <div className="pm-stats">
           <div><span>Abertas</span><strong>{stats.open}</strong></div>
           <div><span>Em andamento</span><strong>{stats.doing}</strong></div>
           <div className={stats.overdue ? "alert" : ""}><span>Atrasadas</span><strong>{stats.overdue}</strong></div>
           <div className="good"><span>Concluídas em 7 dias</span><strong>{stats.doneWeek}</strong></div>
-          <div className={`hours ${anyRunning ? "live" : ""}`}><span>Horas trabalhadas</span><strong>{formatHours(workedMs)}</strong></div>
+          <div className={`hours ${anyRunning ? "live" : ""}`}><span>{teamView ? "Horas trabalhadas" : "Minhas horas"}</span><strong>{formatHours(workedMs)}</strong></div>
         </div>
 
         {error ? (
@@ -676,10 +686,10 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
         ) : null}
 
         {!loading && spaceFilter === "all" && data.spaces.length ? (
-          <ProjectCards spaces={data.spaces} tasks={data.tasks} now={now} onOpen={setSpaceFilter} />
+          <ProjectCards spaces={data.spaces} tasks={data.tasks} now={now} onOpen={setSpaceFilter} onOpenTask={setOpenTaskId} />
         ) : null}
         {!loading && activeSpace ? (
-          <ProjectCards spaces={[activeSpace]} tasks={data.tasks} now={now} single />
+          <ProjectCards spaces={[activeSpace]} tasks={data.tasks} now={now} onOpenTask={setOpenTaskId} single />
         ) : null}
 
         {loading ? (
@@ -732,6 +742,7 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
           onPatch={(patch) => patchTask(openTask.id, patch)}
           onChecklistAction={(itemId, action) => runChecklistAction(openTask.id, itemId, action)}
           now={now}
+          canManage={Boolean(data.me?.isAdmin || spaceById.get(openTask.spaceId)?.canManage)}
           onDelete={() => removeTask(openTask)}
           onCommented={replaceTask}
           onError={setError}
@@ -872,19 +883,32 @@ function firstName(name: string) {
   return parts[0] ? parts[0][0].toUpperCase() + parts[0].slice(1).toLowerCase() : name;
 }
 
+type WorkingPerson = {
+  login: string;
+  name: string;
+  live: boolean;
+  // Itens com cronometro rodando agora e tarefas em andamento atribuidas a pessoa.
+  liveItems: { taskId: string; taskTitle: string; itemText: string; ms: number }[];
+  tasks: { id: string; title: string; status: TaskStatus }[];
+};
+
 function ProjectCards({
   spaces,
   tasks,
   now,
   onOpen,
+  onOpenTask,
   single = false,
 }: {
   spaces: ProjectSpace[];
   tasks: ProjectTask[];
   now: number;
   onOpen?: (id: string) => void;
+  onOpenTask?: (id: string) => void;
   single?: boolean;
 }) {
+  const [selected, setSelected] = useState("");
+
   const cards = spaces
     .filter((space) => single || !space.archived)
     .map((space) => {
@@ -898,27 +922,32 @@ function ProjectCards({
       const workedMs = own.reduce((sum, task) => sum + taskMs(task, now), 0);
       const period = workPeriod(own);
 
-      // Status do projeto: inicia quando alguem comeca o primeiro item ou tarefa.
       const started = workedMs > 0 || own.some((task) => task.status !== "a_fazer");
       const status = own.length && tasksDone === own.length
         ? { label: "Concluído", tone: "done" }
         : started ? { label: "Em andamento", tone: "doing" } : { label: "Não iniciado", tone: "todo" };
 
-      // Trabalhando agora: cronometro rodando primeiro, depois quem tem tarefa em andamento.
-      const people = new Map<string, { login: string; name: string; live: boolean }>();
+      // Trabalhando agora (so o gestor recebe esses dados do servidor).
+      const people = new Map<string, WorkingPerson>();
+      const person = (login: string, name: string) => {
+        const key = login.toLowerCase();
+        const entry = people.get(key) || { login, name: name || login, live: false, liveItems: [], tasks: [] };
+        people.set(key, entry);
+        return entry;
+      };
       for (const task of own) {
         for (const item of task.checklist) {
-          if (item.state === "em_andamento" && item.runningBy) {
-            people.set(item.runningBy.toLowerCase(), { login: item.runningBy, name: item.runningByName || item.runningBy, live: true });
+          if (item.state === "em_andamento" && item.runningBy && item.runningSince) {
+            const entry = person(item.runningBy, item.runningByName);
+            entry.live = true;
+            entry.liveItems.push({ taskId: task.id, taskTitle: task.title, itemText: item.text, ms: itemMs(item, now) });
           }
         }
+        if (task.assignee && (task.status === "em_andamento" || task.status === "revisao")) {
+          person(task.assignee, task.assigneeName).tasks.push({ id: task.id, title: task.title, status: task.status });
+        }
       }
-      for (const task of own) {
-        if (!task.assignee || (task.status !== "em_andamento" && task.status !== "revisao")) continue;
-        const key = task.assignee.toLowerCase();
-        if (!people.has(key)) people.set(key, { login: task.assignee, name: task.assigneeName || task.assignee, live: false });
-      }
-      const working = Array.from(people.values()).sort((a, b) => Number(b.live) - Number(a.live));
+      const working = Array.from(people.values()).sort((a, b) => Number(b.live) - Number(a.live) || a.name.localeCompare(b.name, "pt-BR"));
 
       const nextDue = own
         .filter((task) => task.dueDate && task.status !== "concluido")
@@ -931,21 +960,29 @@ function ProjectCards({
   return (
     <div className={single ? "pm-cards-grid single" : "pm-cards-grid"}>
       {cards.map((card) => {
-        const Tag = single ? "div" : "button";
+        const manage = card.space.canManage;
         const live = card.working.some((person) => person.live);
         const caption = card.items.length
           ? `${card.itemsDone} de ${card.items.length} itens finalizados · ${card.tasksDone}/${card.own.length} tarefas`
           : card.own.length ? `${card.tasksDone} de ${card.own.length} tarefas concluídas` : "Nenhuma tarefa ainda";
+        const selectedPerson = card.working.find((person) => `${card.space.id}:${person.login}` === selected);
+
         return (
-          <Tag
-            className={`pm-project-card ${single ? "single" : ""}`}
+          <div
+            className={`pm-project-card ${single ? "single" : "clickable"}`}
             key={card.space.id}
-            {...(single ? {} : { type: "button" as const, onClick: () => onOpen?.(card.space.id) })}
+            onClick={single ? undefined : () => onOpen?.(card.space.id)}
             style={{ "--project-color": card.space.color } as React.CSSProperties}
           >
             <header>
               <i className="pm-space-dot large" style={{ background: card.space.color }} />
-              <strong title={card.space.name}>{card.space.name}</strong>
+              {single ? (
+                <strong title={card.space.name}>{card.space.name}</strong>
+              ) : (
+                <button className="pm-card-title" type="button" title={`Abrir ${card.space.name}`} onClick={(event) => { event.stopPropagation(); onOpen?.(card.space.id); }}>
+                  {card.space.name}
+                </button>
+              )}
             </header>
             <span className={`pm-project-status tone-${card.status.tone}`}>{card.status.label}</span>
 
@@ -957,51 +994,83 @@ function ProjectCards({
             </div>
             <p className="pm-card-caption">{caption}</p>
 
-            <div className="pm-card-hours">
-              <div>
-                <small>Horas</small>
-                <strong className={live ? "live" : ""}>
-                  <Clock size={15} /> {formatHours(card.workedMs)}
-                </strong>
-              </div>
-              <div>
-                <small>Período</small>
-                <span>
-                  {card.period.first
-                    ? `${shortDate(card.period.first)} → ${card.status.tone === "done" && card.period.last ? shortDate(card.period.last) : "hoje"}`
-                    : "—"}
-                </span>
-              </div>
-            </div>
-
-            <div className="pm-card-working">
-              <small>Trabalhando agora</small>
-              {card.working.length ? (
-                <div className="pm-card-people">
-                  <div className="pm-avatar-stack">
-                    {card.working.slice(0, 4).map((person) => (
-                      <span
-                        className={`pm-avatar ${person.live ? "live" : ""}`}
-                        key={person.login}
-                        title={`${person.name}${person.live ? " · cronômetro ativo" : " · tarefa em andamento"}`}
-                        style={avatarStyle(person.login)}
-                      >
-                        {initials(person.name)}
-                      </span>
-                    ))}
-                    {card.working.length > 4 ? <span className="pm-avatar more">+{card.working.length - 4}</span> : null}
+            {manage ? (
+              <>
+                <div className="pm-card-hours">
+                  <div>
+                    <small>Horas</small>
+                    <strong className={live ? "live" : ""}>
+                      <Clock size={15} /> {formatHours(card.workedMs)}
+                    </strong>
                   </div>
-                  <span className="pm-card-names">
-                    {card.working.slice(0, 2).map((person) => firstName(person.name)).join(", ")}
-                    {card.working.length > 2 ? ` e mais ${card.working.length - 2}` : ""}
-                  </span>
+                  <div>
+                    <small>Período</small>
+                    <span>
+                      {card.period.first
+                        ? `${shortDate(card.period.first)} → ${card.status.tone === "done" && card.period.last ? shortDate(card.period.last) : "hoje"}`
+                        : "—"}
+                    </span>
+                  </div>
                 </div>
-              ) : (
-                <span className="pm-card-idle">Ninguém trabalhando agora</span>
-              )}
-            </div>
 
-            {single ? <PeopleHours tasks={card.own} now={now} /> : null}
+                <div className="pm-card-working" onClick={(event) => event.stopPropagation()}>
+                  <small>Trabalhando agora {card.working.length ? "· clique para ver a tarefa" : ""}</small>
+                  {card.working.length ? (
+                    <div className="pm-person-chips">
+                      {card.working.map((person) => {
+                        const key = `${card.space.id}:${person.login}`;
+                        const active = selected === key;
+                        return (
+                          <button
+                            className={`pm-person-chip ${active ? "active" : ""}`}
+                            key={person.login}
+                            type="button"
+                            aria-expanded={active}
+                            onClick={() => setSelected(active ? "" : key)}
+                            title={person.live ? "Cronômetro ativo" : "Tarefa em andamento"}
+                          >
+                            <span className={`pm-avatar ${person.live ? "live" : ""}`} style={avatarStyle(person.login)}>{initials(person.name)}</span>
+                            <span>{firstName(person.name)}</span>
+                            {person.live ? <span className="pm-live-dot" /> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <span className="pm-card-idle">Ninguém trabalhando agora</span>
+                  )}
+
+                  {selectedPerson ? (
+                    <div className="pm-person-detail">
+                      <strong>{selectedPerson.name}</strong>
+                      {selectedPerson.liveItems.map((entry) => (
+                        <button key={`${entry.taskId}-${entry.itemText}`} type="button" className="pm-person-task live" onClick={() => onOpenTask?.(entry.taskId)}>
+                          <span className="pm-live-dot" />
+                          <span>
+                            <b>{entry.taskTitle}</b>
+                            <small>Agora em: {entry.itemText}</small>
+                          </span>
+                          <em>{formatClock(entry.ms)}</em>
+                        </button>
+                      ))}
+                      {selectedPerson.tasks
+                        .filter((task) => !selectedPerson.liveItems.some((entry) => entry.taskId === task.id))
+                        .map((task) => (
+                          <button key={task.id} type="button" className="pm-person-task" onClick={() => onOpenTask?.(task.id)}>
+                            <Circle size={10} />
+                            <span>
+                              <b>{task.title}</b>
+                              <small>{STATUSES.find((status) => status.id === task.status)?.label} · sem cronômetro ativo</small>
+                            </span>
+                          </button>
+                        ))}
+                    </div>
+                  ) : null}
+                </div>
+
+                {single ? <PeopleHours tasks={card.own} now={now} /> : null}
+              </>
+            ) : null}
 
             <footer>
               <span className="pm-meta" title="Membros do projeto"><Users size={13} /> {card.space.members.length}</span>
@@ -1011,7 +1080,7 @@ function ProjectCards({
                 <span className="pm-due" title={card.nextDue.title}><CalendarDays size={13} /> Próx. prazo {formatDue(card.nextDue.dueDate)}</span>
               ) : null}
             </footer>
-          </Tag>
+          </div>
         );
       })}
     </div>
@@ -1065,7 +1134,7 @@ function DueDate({ task }: { task: ProjectTask }) {
 
 function TaskMeta({ task, now }: { task: ProjectTask; now: number }) {
   const done = task.checklist.filter((item) => item.state === "concluido").length;
-  const running = task.checklist.find((item) => item.state === "em_andamento");
+  const running = task.checklist.find((item) => item.state === "em_andamento" && Boolean(item.runningSince));
   const worked = taskMs(task, now);
   return (
     <>
@@ -1295,6 +1364,7 @@ function TaskDrawer({
   canDelete,
   onChecklistAction,
   now,
+  canManage,
 }: {
   task: ProjectTask;
   spaces: ProjectSpace[];
@@ -1308,6 +1378,7 @@ function TaskDrawer({
   canDelete: boolean;
   onChecklistAction: (itemId: string, action: ChecklistAction) => void;
   now: number;
+  canManage: boolean;
 }) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
@@ -1563,6 +1634,8 @@ function TaskDrawer({
                 const running = item.state === "em_andamento";
                 const elapsed = itemMs(item, now);
                 const mineRunning = running && sameUser(item.runningBy, currentUser.login);
+                // Analista nao recebe o cronometro de colegas: so sabe que esta em andamento com outra pessoa.
+                const runningByOther = running && !mineRunning && (!item.runningSince || !canManage);
                 return (
                   <li key={item.id} className={`state-${item.state}`}>
                     <span className="pm-item-state" title={CHECKLIST_LABEL[item.state]}>
@@ -1573,18 +1646,21 @@ function TaskDrawer({
                       <small>
                         {CHECKLIST_LABEL[item.state]}
                         {running && item.runningByName ? ` por ${firstName(item.runningByName)}` : ""}
+                        {running && !item.runningByName ? " com outra pessoa" : ""}
                         {itemStartedAt(item) ? ` · início ${dateTime(itemStartedAt(item))}` : ""}
                         {item.state === "concluido" && item.completedAt ? ` · fim ${dateTime(item.completedAt)}` : ""}
                       </small>
                     </div>
                     <span className={`pm-item-clock ${running ? "running" : ""}`} title="Tempo trabalhado neste item">
-                      {elapsed > 0 || running ? formatClock(elapsed) : "--:--:--"}
+                      {runningByOther ? "—" : elapsed > 0 || running ? formatClock(elapsed) : "--:--:--"}
                     </span>
                     <div className="pm-item-actions">
                       {item.state === "concluido" ? (
                         <button type="button" className="pm-timer-btn ghost" onClick={() => onChecklistAction(item.id, "reopen")} title="Reabrir item">
                           <RotateCcw size={14} /> Reabrir
                         </button>
+                      ) : runningByOther ? (
+                        <span className="pm-item-locked">Em uso por outra pessoa</span>
                       ) : (
                         <>
                           {running ? (
@@ -1606,7 +1682,7 @@ function TaskDrawer({
                           </button>
                         </>
                       )}
-                      <button
+                      {runningByOther ? null : <button
                         type="button"
                         className="pm-icon-btn"
                         aria-label="Remover item"
@@ -1617,7 +1693,7 @@ function TaskDrawer({
                         }}
                       >
                         <X size={13} />
-                      </button>
+                      </button>}
                     </div>
                   </li>
                 );
@@ -1631,7 +1707,7 @@ function TaskDrawer({
               placeholder="+ Adicionar item e Enter"
               maxLength={300}
             />
-            {hoursByPerson([task], now).length ? (
+            {canManage && hoursByPerson([task], now).length ? (
               <div className="pm-task-people-hours">
                 <small>Horas por analista nesta tarefa</small>
                 <PeopleHours tasks={[task]} now={now} />

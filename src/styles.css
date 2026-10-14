@@ -7961,3 +7961,156 @@ h1 {
 .pm-deadline-result.late {
   color: var(--danger);
 }
+/* Visao do gestor: pessoas trabalhando (clicaveis) */
+.pm-project-card.clickable {
+  cursor: pointer;
+}
+
+.pm-card-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  color: var(--heading);
+  background: transparent;
+  border: 0;
+  font-size: 16px;
+  font-weight: 800;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-card-title:hover {
+  color: var(--accent);
+}
+
+.pm-card-working {
+  cursor: default;
+}
+
+.pm-person-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pm-person-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 3px;
+  color: var(--heading);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pm-person-chip .pm-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.pm-person-chip:hover,
+.pm-person-chip.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(224, 23, 131, 0.15);
+}
+
+.pm-person-detail {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.pm-person-detail > strong {
+  color: var(--heading);
+  font-size: 13px;
+}
+
+.pm-person-task {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.pm-person-task:hover {
+  border-color: var(--accent);
+}
+
+.pm-person-task.live {
+  background: var(--success-soft);
+  border-color: var(--success-border);
+}
+
+.pm-person-task > span:not(.pm-live-dot) {
+  display: grid;
+  min-width: 0;
+}
+
+.pm-person-task b {
+  overflow: hidden;
+  color: var(--heading);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-person-task small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-person-task em {
+  color: var(--success-ink);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-person-task svg {
+  color: var(--muted-3);
+}
+
+.pm-stats-scope {
+  margin: 0 0 -6px;
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pm-item-locked {
+  padding: 4px 10px;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pm-card-working .pm-person-task small {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
