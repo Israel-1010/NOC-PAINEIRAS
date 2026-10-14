@@ -15,6 +15,8 @@ import {
   EyeOff,
   ExternalLink,
   FileText,
+  Flower2,
+  FolderKanban,
   FolderOpen,
   KeyRound,
   LockKeyhole,
@@ -59,6 +61,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { ProjectsDashboard } from "./projects";
 import "./styles.css";
 
 type Status = "online" | "warning" | "offline";
@@ -778,7 +781,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1201,25 +1204,46 @@ const requiredCreateUserFields: Array<{ field: keyof CreateUserForm; label: stri
   { field: "description", label: "Descricao" },
 ];
 
-const navItems = [
-  { label: "TV Geral", icon: Tv, view: "tv" },
-  { label: "Topologia", icon: Network, view: "topology" },
-  { label: "Ativos", icon: Server },
-  { label: "AD", icon: Users, view: "ad" },
-  { label: "IPs", icon: Network, view: "ips" },
-  { label: "SNMP", icon: Signal, view: "snmp" },
-  { label: "Intune", icon: ShieldCheck, view: "intune" },
-  { label: "Office 365", icon: TableIcon, view: "office365" },
-  { label: "Bloqueios", icon: LockKeyhole },
-  { label: "Chamado Milvus", icon: ClipboardList, view: "milvusPortal" },
-  { label: "WiFi", icon: Wifi, view: "wifi" },
-  { label: "POP", icon: BookOpen, view: "pop" },
-  { label: "Fortinet", icon: Shield },
-  { label: "Alertas", icon: Bell },
-  { label: "Ajustes", icon: Settings },
+const navSections: { title: string; items: { label: string; icon: LucideIcon; view: View }[] }[] = [
+  {
+    title: "Monitoramento",
+    items: [
+      { label: "Visão geral (TV)", icon: Tv, view: "tv" },
+      { label: "Topologia", icon: Network, view: "topology" },
+      { label: "SNMP", icon: Signal, view: "snmp" },
+    ],
+  },
+  {
+    title: "Gestão",
+    items: [
+      { label: "Projetos", icon: FolderKanban, view: "projects" },
+    ],
+  },
+  {
+    title: "Identidade e acesso",
+    items: [
+      { label: "Active Directory", icon: Users, view: "ad" },
+      { label: "Intune", icon: ShieldCheck, view: "intune" },
+      { label: "Office 365", icon: TableIcon, view: "office365" },
+    ],
+  },
+  {
+    title: "Rede",
+    items: [
+      { label: "IPs e VLANs", icon: Router, view: "ips" },
+      { label: "WiFi", icon: Wifi, view: "wifi" },
+    ],
+  },
+  {
+    title: "Atendimento",
+    items: [
+      { label: "Chamados Milvus", icon: ClipboardList, view: "milvusPortal" },
+      { label: "Procedimentos (POP)", icon: BookOpen, view: "pop" },
+    ],
+  },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop";
+type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects";
 
 function statusLabel(status: Status) {
   return {
@@ -1239,6 +1263,7 @@ function viewEyebrow(view: View) {
   if (view === "snmp") return "Monitoramento de equipamentos";
   if (view === "wifi") return "Portal WiFi";
   if (view === "pop") return "Procedimento operacional padrao";
+  if (view === "projects") return "Gestão de projetos da TI";
   if (view === "topology") return "Mapa e monitoramento";
   return "Administracao de identidade";
 }
@@ -1253,6 +1278,7 @@ function viewTitle(view: View) {
   if (view === "snmp") return "SNMP";
   if (view === "wifi") return "WiFi";
   if (view === "pop") return "POP";
+  if (view === "projects") return "Projetos";
   if (view === "topology") return "Topologia";
   return "Active Directory";
 }
@@ -1320,10 +1346,44 @@ function App() {
     setTopologySaveStatus("Aguardando arquivo");
   }, []);
 
+  const [myOpenTasks, setMyOpenTasks] = useState(0);
+  const freshLoginRef = useRef(false);
+
   const handleLogin = useCallback((nextSession: AuthSession) => {
+    freshLoginRef.current = true;
     saveSession(nextSession);
     setSession(nextSession);
   }, []);
+
+  // Tarefas abertas do usuario (contador no menu). Analista (nao gestor) cai direto em Projetos ao logar.
+  useEffect(() => {
+    if (!session) return undefined;
+    let cancelled = false;
+
+    async function loadMyTasks() {
+      try {
+        const response = await authFetch("/api/projects");
+        if (!response.ok) return;
+        const payload = await parseApiPayload<{ tasks?: { assignee: string; status: string }[]; me?: { isAdmin: boolean } }>(response, {});
+        if (cancelled) return;
+        const login = session!.user.login.toLowerCase();
+        setMyOpenTasks((payload.tasks || []).filter((task) => task.assignee?.toLowerCase() === login && task.status !== "concluido").length);
+        if (freshLoginRef.current) {
+          freshLoginRef.current = false;
+          if (payload.me && !payload.me.isAdmin) setActiveView("projects");
+        }
+      } catch {
+        /* contador e opcional */
+      }
+    }
+
+    loadMyTasks();
+    const timer = window.setInterval(loadMyTasks, 60000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [session, activeView]);
 
   const loadAd = useCallback(async () => {
     if (!session) {
@@ -1821,11 +1881,11 @@ function App() {
         <div className="sidebar-head">
           <div className="brand">
             <div className="brand-mark">
-              <Network size={24} strokeWidth={2.2} />
+              <Flower2 size={24} strokeWidth={2} />
             </div>
             <div>
-              <strong>Rede Clube</strong>
-              <span>NOC interno</span>
+              <strong>Paineiras NOC</strong>
+              <span>Central de TI</span>
             </div>
           </div>
           <button
@@ -1839,23 +1899,32 @@ function App() {
           </button>
         </div>
 
-        <nav className="nav-list">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = item.view === activeView || (!item.view && activeView === "tv" && item.label === "TV Geral");
-            return (
-              <button
-                className={`nav-item ${isActive ? "active" : ""}`}
-                key={item.label}
-                onClick={() => item.view && setActiveView(item.view as View)}
-                type="button"
-                title={item.label}
-              >
-                <Icon size={18} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+        <nav className="nav-list" aria-label="Seções do portal">
+          {navSections.map((section) => (
+            <div className="nav-section" key={section.title}>
+              <p className="nav-section-title">{section.title}</p>
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                const isActive = item.view === activeView;
+                return (
+                  <button
+                    className={`nav-item ${isActive ? "active" : ""}`}
+                    key={item.view}
+                    onClick={() => setActiveView(item.view)}
+                    type="button"
+                    title={item.label}
+                    aria-current={isActive ? "page" : undefined}
+                  >
+                    <Icon size={18} />
+                    <span>{item.label}</span>
+                    {item.view === "projects" && myOpenTasks ? (
+                      <b className="nav-badge" title={`${myOpenTasks} tarefa(s) atribuída(s) a você`}>{myOpenTasks}</b>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="sidebar-status">
@@ -1875,31 +1944,21 @@ function App() {
           </div>
 
           <div className="topbar-actions">
-            <label className="search-box">
-              <Search size={17} />
-              <input placeholder="Buscar IP, usuario, maquina ou chamado" />
-            </label>
-            <button className="icon-button" type="button" title="Notificacoes">
-              <Bell size={18} />
-            </button>
             <button className="action-button" type="button" onClick={() => setActiveView("milvusPortal")}>
               <Plus size={17} />
               Abrir chamado
             </button>
-            <div className="session-chip" title={session.user.domain || session.user.login}>
-              <ShieldCheck size={16} />
+            <div className="session-chip" title={`${session.user.login}${session.user.domain ? ` · ${session.user.domain}` : ""}`}>
+              <span className="session-avatar" aria-hidden="true">{userInitials(session.user.name || session.user.login)}</span>
               <span>{session.user.name || session.user.login}</span>
             </div>
-            <button className="icon-button" type="button" title="Sair" onClick={clearSession}>
+            <button className="icon-button" type="button" title="Sair" aria-label="Sair do portal" onClick={clearSession}>
               <LogOut size={18} />
-            </button>
-            <button className="select-button" type="button">
-              Hoje
-              <ChevronDown size={16} />
             </button>
           </div>
         </header>
 
+        <ViewErrorBoundary key={activeView}>
         {activeView === "tv" ? (
           <TvDashboard
             adSummary={adSummaryState}
@@ -1936,9 +1995,12 @@ function App() {
           <WifiPortalDashboard />
         ) : activeView === "pop" ? (
           <PopDashboard />
+        ) : activeView === "projects" ? (
+          <ProjectsDashboard currentUser={{ login: session.user.login, name: session.user.name || session.user.login }} />
         ) : (
           <AdDashboard adSummary={adSummaryState} adStatus={adStatus} adDetails={adDetails} onRefreshAd={loadAd} />
         )}
+        </ViewErrorBoundary>
       </section>
     </main>
   );
@@ -1947,6 +2009,8 @@ function App() {
 function LoginPage({ onLogin }: { onLogin: (session: AuthSession) => void }) {
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [capsLock, setCapsLock] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -1977,47 +2041,75 @@ function LoginPage({ onLogin }: { onLogin: (session: AuthSession) => void }) {
 
   return (
     <main className="login-shell">
-      <section className="login-panel" aria-label="Login do portal">
-        <div className="login-brand">
+      <section className="login-hero" aria-hidden="true">
+        <div className="login-hero-brand">
           <div className="brand-mark">
-            <Network size={26} strokeWidth={2.2} />
+            <Flower2 size={28} strokeWidth={2} />
           </div>
           <div>
-            <strong>Rede Clube</strong>
-            <span>Portal protegido</span>
+            <strong>Clube Paineiras</strong>
+            <span>do Morumby</span>
           </div>
         </div>
 
+        <div className="login-hero-copy">
+          <p className="login-kicker">Tecnologia da Informação</p>
+          <h2>Central de operações de rede</h2>
+          <p>Monitoramento, Active Directory, Intune, Office 365 e chamados em um só lugar.</p>
+        </div>
+
+        <ul className="login-hero-features">
+          <li><ShieldCheck size={18} /> Acesso com sua conta do AD</li>
+          <li><Monitor size={18} /> Painel pronto para a TV do NOC</li>
+          <li><LockKeyhole size={18} /> Sessão encerra após 8 horas</li>
+        </ul>
+      </section>
+
+      <section className="login-panel" aria-label="Login do portal">
         <div className="login-heading">
-          <p className="eyebrow">Autenticacao AD</p>
-          <h1>Entrar no portal</h1>
+          <p className="eyebrow">Acesso restrito</p>
+          <h1>Entrar</h1>
+          <p className="login-subtitle">Use o mesmo registro e senha do computador.</p>
         </div>
 
         <form className="login-form" onSubmit={handleSubmit}>
           <label>
-            <span>Registro</span>
+            <span>Registro ou usuário</span>
             <input
               autoComplete="username"
               autoFocus
               inputMode="text"
               onChange={(event) => setLogin(event.target.value)}
-              placeholder="6008"
+              placeholder="ex.: 1234 ou nome@paineiras.com.br"
               value={login}
             />
           </label>
 
           <label>
-            <span>Senha do AD</span>
-            <input
-              autoComplete="current-password"
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Sua senha"
-              type="password"
-              value={password}
-            />
+            <span>Senha</span>
+            <div className="login-password">
+              <input
+                autoComplete="current-password"
+                onChange={(event) => setPassword(event.target.value)}
+                onKeyUp={(event) => setCapsLock(event.getModifierState("CapsLock"))}
+                placeholder="Sua senha do AD"
+                type={showPassword ? "text" : "password"}
+                value={password}
+              />
+              <button
+                className="login-password-toggle"
+                type="button"
+                onClick={() => setShowPassword((value) => !value)}
+                aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </label>
 
-          {error ? <div className="login-error">{error}</div> : null}
+          {capsLock ? <div className="login-hint">Caps Lock está ativado.</div> : null}
+          {error ? <div className="login-error" role="alert">{error}</div> : null}
 
           <button className="login-button" disabled={loading || !login.trim() || !password} type="submit">
             <KeyRound size={18} />
@@ -2025,29 +2117,8 @@ function LoginPage({ onLogin }: { onLogin: (session: AuthSession) => void }) {
           </button>
         </form>
 
-        <div className="login-domain-strip">
-          <span>paineiras.com.br</span>
-          <span>clubepaineiras.com.br</span>
-        </div>
+        <p className="login-footnote">Problemas para entrar? Abra um chamado com a equipe de TI.</p>
       </section>
-
-      <aside className="login-status" aria-label="Status">
-        <div>
-          <ShieldCheck size={22} />
-          <span>AD</span>
-          <strong>Protegido</strong>
-        </div>
-        <div>
-          <Monitor size={22} />
-          <span>TV</span>
-          <strong>Dashboard</strong>
-        </div>
-        <div>
-          <LockKeyhole size={22} />
-          <span>Sessao</span>
-          <strong>8 horas</strong>
-        </div>
-      </aside>
     </main>
   );
 }
@@ -4606,7 +4677,7 @@ function SnmpDashboard({
               {form.version !== "3" ? (
                 <label>
                   <span>Community</span>
-                  <input value={form.community} onChange={(event) => setForm({ ...form, community: event.target.value })} placeholder="public" />
+                  <input value={form.community} onChange={(event) => setForm({ ...form, community: event.target.value })} placeholder={form.id ? "Salva - deixe vazio para manter" : "public"} type="password" autoComplete="off" />
                 </label>
               ) : (
                 <label>
@@ -4626,7 +4697,7 @@ function SnmpDashboard({
                   </label>
                   <label>
                     <span>Senha auth</span>
-                    <input value={form.authKey} onChange={(event) => setForm({ ...form, authKey: event.target.value })} type="password" />
+                    <input value={form.authKey} onChange={(event) => setForm({ ...form, authKey: event.target.value })} placeholder={form.id ? "Deixe vazio para manter" : ""} type="password" autoComplete="off" />
                   </label>
                   <label>
                     <span>Privacidade</span>
@@ -4638,7 +4709,7 @@ function SnmpDashboard({
                   </label>
                   <label>
                     <span>Senha priv</span>
-                    <input value={form.privKey} onChange={(event) => setForm({ ...form, privKey: event.target.value })} type="password" />
+                    <input value={form.privKey} onChange={(event) => setForm({ ...form, privKey: event.target.value })} placeholder={form.id ? "Deixe vazio para manter" : ""} type="password" autoComplete="off" />
                   </label>
                 </>
               ) : null}
@@ -8477,6 +8548,14 @@ function emptyIpLink(): IpInventoryLink {
   };
 }
 
+function userInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  const first = parts[0][0] || "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
+  return `${first}${last}`.toUpperCase();
+}
+
 function emptySnmpDevice(): SnmpDevice {
   return {
     id: "",
@@ -8568,8 +8647,8 @@ function ouLabel(ou: AdOu) {
   return path || ou.ou || ou.distinguishedName;
 }
 
-function ouPathFromDn(dn: string) {
-  return dn
+function ouPathFromDn(dn: string | undefined) {
+  return (dn || "")
     .split(",")
     .filter((part) => part.trim().toUpperCase().startsWith("OU="))
     .map((part) => part.trim().replace(/^OU=/i, ""))
@@ -8577,8 +8656,8 @@ function ouPathFromDn(dn: string) {
     .join(" / ");
 }
 
-function parentDnFromDn(dn: string) {
-  return dn.split(",").slice(1).join(",");
+function parentDnFromDn(dn: string | undefined) {
+  return (dn || "").split(",").slice(1).join(",");
 }
 
 function makeTopologyId(prefix: string) {
@@ -9392,8 +9471,8 @@ function office365OperationLabel(value: string) {
   return "Filtro ativo";
 }
 
-function extractOu(distinguishedName: string) {
-  const ou = distinguishedName
+function extractOu(distinguishedName: string | undefined) {
+  const ou = (distinguishedName || "")
     .split(",")
     .filter((part) => part.trim().toUpperCase().startsWith("OU="))
     .map((part) => part.trim().replace(/^OU=/i, ""))
@@ -9780,6 +9859,36 @@ function SeverityBadge({ severity }: { severity: string }) {
   const className = severity === "Critico" ? "critical" : severity === "Atencao" ? "attention" : "info";
 
   return <span className={`severity ${className}`}>{severity}</span>;
+}
+
+// Isola falhas de renderizacao por tela: um dado inesperado nao derruba o portal inteiro.
+class ViewErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("Falha ao renderizar a tela:", error, info.componentStack);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="view-error" role="alert">
+        <AlertTriangle size={28} />
+        <div>
+          <strong>Esta tela encontrou um erro e não pôde ser exibida.</strong>
+          <p>O restante do portal continua funcionando. Detalhe técnico: {this.state.error.message}</p>
+        </div>
+        <button className="action-button" type="button" onClick={() => this.setState({ error: null })}>
+          <RefreshCw size={16} />
+          Tentar novamente
+        </button>
+      </div>
+    );
+  }
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

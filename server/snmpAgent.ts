@@ -272,10 +272,28 @@ async function collectDeviceMetric(device: SnmpDevice) {
   }
 }
 
+// Credenciais SNMP nunca saem do servidor. Campo vazio no formulario = manter o valor salvo.
+function publicDevice(device: SnmpDevice): SnmpDevice {
+  return { ...device, community: "", authKey: "", privKey: "" };
+}
+
+function withStoredSecrets(input: unknown, store: SnmpStore) {
+  const source = input && typeof input === "object" ? input as Partial<SnmpDevice> : {};
+  const existing = source.id ? store.devices.find((item) => item.id === source.id) : undefined;
+  if (!existing) return input;
+
+  return {
+    ...source,
+    community: clean(source.community) || existing.community,
+    authKey: clean(source.authKey) || existing.authKey,
+    privKey: clean(source.privKey) || existing.privKey,
+  };
+}
+
 export async function listSnmp() {
   const store = await readStore();
   return {
-    devices: store.devices,
+    devices: store.devices.map(publicDevice),
     metrics: store.metrics,
   };
 }
@@ -296,13 +314,13 @@ export async function getSnmpSummary() {
 
 export async function saveSnmpDevice(input: unknown) {
   const store = await readStore();
-  const device = normalizeDevice(input);
+  const device = normalizeDevice(withStoredSecrets(input, store));
   const exists = store.devices.some((item) => item.id === device.id);
   const devices = exists
     ? store.devices.map((item) => item.id === device.id ? device : item)
     : [...store.devices, device];
   const nextStore = await writeStore({ ...store, devices });
-  return nextStore.devices.find((item) => item.id === device.id) || device;
+  return publicDevice(nextStore.devices.find((item) => item.id === device.id) || device);
 }
 
 export async function deleteSnmpDevice(id: string) {
@@ -315,7 +333,7 @@ export async function deleteSnmpDevice(id: string) {
 }
 
 export async function testSnmpDevice(input: unknown) {
-  const device = normalizeDevice(input);
+  const device = normalizeDevice(withStoredSecrets(input, await readStore()));
   return collectDeviceMetric(device);
 }
 

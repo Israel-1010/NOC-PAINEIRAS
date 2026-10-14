@@ -1,6 +1,6 @@
 import { Attribute, Change, Client, Entry } from "ldapts";
 import fs from "node:fs";
-import { adConfig, AdConfig, isAdConfigured } from "./config";
+import { adConfig, AdConfig, isAdConfigured, isProduction } from "./config";
 import { mockAdSummary, mockComputers, mockGroups, mockLockouts, mockUsers } from "./mockAd";
 
 const userAttributes = [
@@ -556,6 +556,11 @@ export async function authenticateAdUser(login: string, password: string, domain
   }
 
   if (adConfig.useMock || !isAdConfigured()) {
+    // Em mock qualquer senha e aceita; nunca permitir isso em producao.
+    if (isProduction) {
+      throw new Error("Login indisponivel: AD nao configurado no servidor.");
+    }
+
     return {
       login,
       name: login,
@@ -1338,6 +1343,69 @@ export async function listAdGroups(query = "", limit?: string | number) {
     }));
 
     return { source: "ldap", items };
+  }));
+}
+
+export type AdTeamMember = { login: string; name: string; mail: string; title: string; department: string };
+
+// Usuarios ativos de uma OU (por nome, ex. "Tecnologia", ou DN completo), incluindo sub-OUs.
+export async function listAdUsersInOu(ou: string) {
+  const target = ou.trim();
+  if (!target) throw new Error("OU da equipe nao configurada.");
+
+  if (adConfig.useMock || !isAdConfigured()) {
+    return {
+      source: "mock",
+      ous: [`OU=${target},DC=mock,DC=local`],
+      items: [
+        { login: "israel.lima", name: "Israel Lima", mail: "israel.lima@mock.local", title: "Coordenador de TI", department: "Tecnologia" },
+        { login: "c.souza", name: "Carla Souza", mail: "c.souza@mock.local", title: "Analista de Infraestrutura", department: "Tecnologia" },
+        { login: "p.mendes", name: "Paulo Mendes", mail: "p.mendes@mock.local", title: "Analista de Suporte", department: "Tecnologia" },
+        { login: "j.silva", name: "Joao Silva", mail: "j.silva@mock.local", title: "Tecnico de Redes", department: "Tecnologia" },
+      ] satisfies AdTeamMember[],
+    };
+  }
+
+  return cached(`team-ou:${target.toLowerCase()}`, 5 * 60 * 1000, () => withClient(async (client) => {
+    let ouDns: string[];
+    if (target.includes("=")) {
+      ouDns = [target];
+    } else {
+      const filter = `(&(objectClass=organizationalUnit)(ou=${ldapFilterEscape(target)}))`;
+      const found = await Promise.all(getConfiguredDomains().map(async (domain) => {
+        try {
+          return await search(client, domain.baseDn, filter, ["distinguishedName"], 20);
+        } catch {
+          return [];
+        }
+      }));
+      ouDns = found.flat().map((entry) => String(firstAttr(entry, "distinguishedName"))).filter(Boolean);
+    }
+
+    if (!ouDns.length) {
+      throw new Error(`OU "${target}" nao encontrada no AD. Ajuste PROJECTS_TEAM_OU.`);
+    }
+
+    const userFilter = "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))";
+    const entries = (await Promise.all(ouDns.map((dn) => search(client, dn, userFilter, userAttributes, 1000)))).flat();
+    const byLogin = new Map<string, AdTeamMember>();
+    for (const entry of entries) {
+      const login = String(firstAttr(entry, "sAMAccountName") || "");
+      if (!login) continue;
+      byLogin.set(login.toLowerCase(), {
+        login,
+        name: String(firstAttr(entry, "displayName") || firstAttr(entry, "cn") || login),
+        mail: String(firstAttr(entry, "mail") || ""),
+        title: String(firstAttr(entry, "title") || ""),
+        department: String(firstAttr(entry, "department") || ""),
+      });
+    }
+
+    return {
+      source: "ldap",
+      ous: ouDns,
+      items: Array.from(byLogin.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    };
   }));
 }
 

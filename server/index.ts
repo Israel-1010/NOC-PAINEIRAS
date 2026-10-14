@@ -5,7 +5,15 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { adConfig, isAdConfigured, port } from "./config";
+import { adConfig, allowedLoginGroups, isAdConfigured, isProduction, port, projectsConfig } from "./config";
+import {
+  auditMutations,
+  checkLoginThrottle,
+  clearLoginFailures,
+  registerLoginFailure,
+  securityHeaders,
+  writeAudit,
+} from "./security";
 import {
   addAdUserToGroup,
   authenticateAdUser,
@@ -19,6 +27,7 @@ import {
   listAdGroups,
   listAdOrganizationalUnits,
   listAdUsers,
+  listAdUsersInOu,
   listLockedUsers,
   removeAdUserFromGroup,
   resolveAdUserIdentity,
@@ -86,6 +95,18 @@ import {
   updateIp,
 } from "./ipInventoryClient";
 import { getTopology, saveTopology } from "./topologyStore";
+import {
+  addTaskComment,
+  createSpace,
+  createTask,
+  deleteSpace,
+  deleteTask,
+  getProjects,
+  updateSpace,
+  updateTask,
+} from "./projectStore";
+import type { AuthUser } from "./auth";
+import type { ProjectAccess } from "./projectStore";
 
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
@@ -112,12 +133,16 @@ function isAllowedOrigin(origin?: string) {
   }
 }
 
+app.disable("x-powered-by");
+if (process.env.TRUST_PROXY) app.set("trust proxy", process.env.TRUST_PROXY);
+app.use(securityHeaders);
 app.use(cors({
   origin(origin, callback) {
     callback(null, isAllowedOrigin(origin));
   },
 }));
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
+app.use("/api", auditMutations);
 
 function asyncRoute<T>(handler: (req: express.Request) => Promise<T>) {
   return async (req: express.Request, res: express.Response) => {
@@ -125,7 +150,8 @@ function asyncRoute<T>(handler: (req: express.Request) => Promise<T>) {
       res.json(await handler(req));
     } catch (error) {
       const message = formatApiError(error);
-      res.status(500).json({ ok: false, message });
+      const status = error && typeof error === "object" && "status" in error ? Number((error as { status?: unknown }).status) || 500 : 500;
+      res.status(status).json({ ok: false, message });
     }
   };
 }
@@ -196,7 +222,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "rede-clube-api" });
 });
 
-app.get("/api/diagnostics/ad", async (_req, res) => {
+app.get("/api/diagnostics/ad", requireAuth, async (_req, res) => {
   let urlInfo = { protocol: "", host: "", port: "" };
 
   try {
@@ -249,14 +275,45 @@ app.get("/api/diagnostics/ad", async (_req, res) => {
   }
 });
 
+async function isUserAllowed(login: string) {
+  if (!allowedLoginGroups.length || adConfig.useMock || !isAdConfigured()) return true;
+  const details = await getAdUserDetails(login);
+  return details.groups.some((group) => allowedLoginGroups.includes(String(group.name).toLowerCase()));
+}
+
 app.post("/api/auth/login", async (req, res) => {
+  const throttled = checkLoginThrottle(req);
+  if (throttled) {
+    res.status(429).json({ ok: false, message: throttled });
+    return;
+  }
+
+  const attemptedLogin = String(req.body?.login || "");
+
   try {
-    const user = await authenticateAdUser(String(req.body?.login || ""), String(req.body?.password || ""), String(req.body?.domain || ""));
+    const user = await authenticateAdUser(attemptedLogin, String(req.body?.password || ""), String(req.body?.domain || ""));
+
+    if (!(await isUserAllowed(user.login))) {
+      writeAudit({ event: "login-negado-grupo", user: user.login, ip: req.ip });
+      res.status(403).json({ ok: false, message: "Seu usuario nao tem permissao para acessar o portal. Solicite inclusao no grupo autorizado." });
+      return;
+    }
+
+    clearLoginFailures(req);
+    writeAudit({ event: "login", user: user.login, ip: req.ip });
     const token = createSessionToken(user);
     res.json({ ok: true, token, user });
   } catch (error) {
     const message = formatApiError(error);
-    res.status(message.includes("Informe") ? 400 : 401).json({ ok: false, message });
+    const isValidation = message.includes("Informe");
+    if (!isValidation) {
+      registerLoginFailure(req);
+      writeAudit({ event: "login-falhou", user: attemptedLogin, ip: req.ip });
+    }
+    // Em producao nao revela se o usuario existe ou detalhes do LDAP.
+    const isServerConfigIssue = /^(Login indisponivel|Conta usada para conectar|Senha da conta usada)/.test(message);
+    const publicMessage = isProduction && !isValidation && !isServerConfigIssue ? "Registro ou senha invalidos." : message;
+    res.status(isValidation ? 400 : 401).json({ ok: false, message: publicMessage });
   }
 });
 
@@ -331,7 +388,10 @@ app.use("/api/intune", requireAuth);
 app.get("/api/intune/status", asyncRoute(() => getIntuneStatus()));
 app.get("/api/intune/summary", asyncRoute(() => getIntuneSummary()));
 app.get("/api/intune/devices", asyncRoute((req) => listIntuneDevices(String(req.query.search || ""), String(req.query.limit || ""))));
-app.get("/api/intune/devices/:id/laps", asyncRoute((req) => getIntuneDeviceLapsCredential(String(req.params.id))));
+app.get("/api/intune/devices/:id/laps", (req, res, next) => {
+  writeAudit({ event: "laps-consultado", user: res.locals.user?.login, ip: req.ip, deviceId: String(req.params.id) });
+  next();
+}, asyncRoute((req) => getIntuneDeviceLapsCredential(String(req.params.id))));
 app.get("/api/intune/devices/:id", asyncRoute((req) => getIntuneDeviceDetails(String(req.params.id))));
 
 app.use("/api/office365", requireAuth);
@@ -425,6 +485,31 @@ app.post("/api/topology/ping", asyncRoute(async (req) => {
   const items = await Promise.all(uniqueIps.map((ip) => pingHost(ip)));
   return { ok: true, items };
 }));
+
+app.use("/api/projects", requireAuth);
+
+function projectAccess(req: express.Request): ProjectAccess {
+  const user = (req.res?.locals.user || {}) as AuthUser;
+  const isAdmin = !projectsConfig.admins.length || projectsConfig.admins.includes(String(user.login || "").toLowerCase());
+  return { user, isAdmin };
+}
+
+function projectRoute<T>(handler: (req: express.Request, access: ProjectAccess) => Promise<T> | T) {
+  return asyncRoute(async (req) => handler(req, projectAccess(req)));
+}
+
+app.get("/api/projects", projectRoute((_req, access) => getProjects(access)));
+app.get("/api/projects/team", asyncRoute(async () => {
+  const team = await listAdUsersInOu(projectsConfig.teamOu);
+  return { ...team, items: team.items.filter((member) => !projectsConfig.teamExclude.includes(member.login.toLowerCase())) };
+}));
+app.post("/api/projects/spaces", projectRoute((req, access) => createSpace(req.body, access)));
+app.patch("/api/projects/spaces/:id", projectRoute((req, access) => updateSpace(String(req.params.id), req.body, access)));
+app.delete("/api/projects/spaces/:id", projectRoute((req, access) => deleteSpace(String(req.params.id), access)));
+app.post("/api/projects/tasks", projectRoute((req, access) => createTask(req.body, access)));
+app.patch("/api/projects/tasks/:id", projectRoute((req, access) => updateTask(String(req.params.id), req.body, access)));
+app.delete("/api/projects/tasks/:id", projectRoute((req, access) => deleteTask(String(req.params.id), access)));
+app.post("/api/projects/tasks/:id/comments", projectRoute((req, access) => addTaskComment(String(req.params.id), req.body, access)));
 
 if (existsSync(distDir)) {
   app.use(express.static(distDir));

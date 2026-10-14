@@ -5,3 +5,5 @@ dist
 npm-debug.log*
 data/*.json
 *.xlsx
+data/*.log
+data/*.tmp

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import crypto from "node:crypto";
 
 export type AdConfig = {
   useMock: boolean;
@@ -61,7 +62,54 @@ export type SharePointConfig = {
 };
 
 export const port = Number(process.env.PORT || 3333);
-export const sessionSecret = process.env.APP_SESSION_SECRET || "rede-clube-dev-secret-change-me";
+export const isProduction = process.env.NODE_ENV === "production";
+
+function resolveSessionSecret() {
+  const configured = process.env.APP_SESSION_SECRET || "";
+  const knownDefaults = ["troque_este_segredo", "rede-clube-dev-secret-change-me"];
+  const isMissing = !configured || knownDefaults.includes(configured);
+
+  if (!isMissing) {
+    if (configured.length < 32) {
+      console.warn("[seguranca] APP_SESSION_SECRET tem menos de 32 caracteres. Gere um mais forte.");
+    }
+    return configured;
+  }
+
+  if (isProduction) {
+    throw new Error("APP_SESSION_SECRET ausente ou com valor padrao. Gere com: node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\"");
+  }
+
+  // Dev: segredo aleatorio por execucao. Sessoes expiram a cada reinicio da API.
+  console.warn("[seguranca] APP_SESSION_SECRET nao definido ou fraco; usando segredo temporario de desenvolvimento.");
+  return crypto.randomBytes(48).toString("base64url");
+}
+
+export const sessionSecret = resolveSessionSecret();
+
+// Grupos do AD autorizados a entrar no portal (CN do grupo, separados por virgula).
+// Vazio = qualquer usuario autenticado no AD entra (nao recomendado em producao).
+export const allowedLoginGroups = (process.env.APP_ALLOWED_GROUPS || "")
+  .split(",")
+  .map((item) => item.trim().toLowerCase())
+  .filter(Boolean);
+
+function loginList(value?: string) {
+  return (value || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
+}
+
+export const projectsConfig = {
+  // OU do AD de onde vem a equipe (nome da OU ou DN completo).
+  teamOu: process.env.PROJECTS_TEAM_OU || "Tecnologia",
+  // Logins que gerenciam todos os projetos. Vazio = todos sao gestores (modo aberto).
+  admins: loginList(process.env.PROJECTS_ADMINS),
+  // Contas da OU que nao sao pessoas (servico, teste) e nao devem aparecer na equipe.
+  teamExclude: loginList(process.env.PROJECTS_TEAM_EXCLUDE),
+};
+
+if (!projectsConfig.admins.length) {
+  console.warn("[projetos] PROJECTS_ADMINS vazio: todos os usuarios enxergam e gerenciam todos os projetos.");
+}
 
 export const adConfig: AdConfig = {
   useMock: process.env.AD_USE_MOCK !== "false",
