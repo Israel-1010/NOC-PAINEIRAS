@@ -37,6 +37,9 @@ export function securityHeaders(_req: express.Request, res: express.Response, ne
 
 type Attempt = { failures: number; firstFailureAt: number; blockedUntil: number };
 
+// Bloqueio por tentativas erradas: desligado por enquanto (fase de testes).
+// Para religar, defina LOGIN_THROTTLE=true no ambiente do container.
+const throttleEnabled = process.env.LOGIN_THROTTLE === "true";
 const loginWindowMs = 15 * 60 * 1000;
 const maxFailures = 5;
 const blockMs = 15 * 60 * 1000;
@@ -49,6 +52,7 @@ function attemptKeys(req: express.Request) {
 }
 
 export function checkLoginThrottle(req: express.Request) {
+  if (!throttleEnabled) return "";
   const now = Date.now();
   for (const key of attemptKeys(req)) {
     const entry = attempts.get(key);
@@ -61,6 +65,7 @@ export function checkLoginThrottle(req: express.Request) {
 }
 
 export function registerLoginFailure(req: express.Request) {
+  if (!throttleEnabled) return;
   const now = Date.now();
   for (const key of attemptKeys(req)) {
     const entry = attempts.get(key);
