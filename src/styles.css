@@ -7557,3 +7557,364 @@ h1 {
   color: var(--warning-ink);
   background: var(--warning-soft);
 }
+/* ===== Cronometro do checklist e progresso por horas ===== */
+
+@keyframes pm-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(18, 147, 106, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(18, 147, 106, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(18, 147, 106, 0); }
+}
+
+.pm-live-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--success);
+  border-radius: 50%;
+  animation: pm-pulse 1.6s infinite;
+}
+
+.pm-live-dot.big {
+  width: 12px;
+  height: 12px;
+  margin: 3px;
+}
+
+.pm-timer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  color: var(--success-ink);
+  background: var(--success-soft);
+  border: 1px solid var(--success-border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-stats {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.pm-stats div.hours {
+  border-left-color: var(--accent);
+}
+
+.pm-stats div.hours.live strong {
+  color: var(--success);
+}
+
+/* Card do projeto: barra unica em % */
+.pm-card-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pm-card-progress {
+  display: block;
+  flex: 1;
+  gap: 0;
+  height: 12px;
+}
+
+.pm-card-progress span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  background: linear-gradient(90deg, var(--accent), var(--success));
+  border-radius: 999px;
+  transition: width 300ms ease;
+}
+
+.pm-project-status {
+  flex: none;
+  padding: 3px 10px;
+  color: var(--tone);
+  background: var(--surface-2);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.pm-card-hours {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.pm-card-hours > div {
+  display: grid;
+  gap: 2px;
+}
+
+.pm-card-hours small {
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pm-card-hours strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--heading);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.pm-card-hours strong.live {
+  color: var(--success);
+}
+
+.pm-card-hours span {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pm-avatar.live {
+  animation: pm-pulse 1.6s infinite;
+}
+
+.pm-cards-grid.single {
+  grid-template-columns: 1fr;
+}
+
+.pm-project-card.single {
+  cursor: default;
+}
+
+.pm-project-card.single:hover {
+  transform: none;
+}
+
+/* Horas por analista */
+.pm-people-hours {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pm-people-hours li {
+  display: grid;
+  grid-template-columns: 28px minmax(90px, 180px) minmax(60px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.pm-people-hours-name {
+  overflow: hidden;
+  color: var(--heading);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-people-hours-bar {
+  height: 8px;
+  overflow: hidden;
+  background: var(--border-soft);
+  border-radius: 999px;
+}
+
+.pm-people-hours-bar span {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  border-radius: 999px;
+}
+
+.pm-people-hours strong {
+  color: var(--heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-task-people-hours {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+
+.pm-task-people-hours small {
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Checklist com cronometro */
+.pm-h3-hours {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.pm-checklist.timed {
+  gap: 6px;
+}
+
+.pm-checklist.timed li {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 10px;
+}
+
+.pm-checklist.timed li.state-em_andamento {
+  background: var(--success-soft);
+  border-color: var(--success-border);
+  border-left-color: var(--success);
+}
+
+.pm-checklist.timed li.state-pausado {
+  border-left-color: var(--warning);
+}
+
+.pm-checklist.timed li.state-concluido {
+  border-left-color: var(--success);
+}
+
+.pm-checklist.timed li.state-concluido .pm-item-text {
+  color: var(--muted-2);
+  text-decoration: line-through;
+}
+
+.pm-item-state {
+  display: grid;
+  place-items: center;
+  color: var(--muted-3);
+}
+
+.state-concluido .pm-item-state {
+  color: var(--success);
+}
+
+.pm-item-body {
+  display: grid;
+  min-width: 0;
+}
+
+.pm-item-text {
+  overflow-wrap: anywhere;
+  color: var(--heading);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pm-item-body small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.state-em_andamento .pm-item-body small {
+  color: var(--success-ink);
+  font-weight: 600;
+}
+
+.state-pausado .pm-item-body small {
+  color: var(--warning-ink);
+  font-weight: 600;
+}
+
+.pm-item-clock {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-item-clock.running {
+  color: var(--success-ink);
+}
+
+.pm-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pm-timer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pm-timer-btn.start {
+  color: var(--on-brand);
+  background: var(--success);
+}
+
+.pm-timer-btn.start:hover {
+  background: var(--success-ink);
+}
+
+.pm-timer-btn.pause {
+  color: var(--warning-ink);
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+}
+
+.pm-timer-btn.finish {
+  color: var(--brand);
+  background: var(--surface);
+  border-color: var(--brand-border);
+}
+
+.pm-timer-btn.finish:hover {
+  color: var(--on-brand);
+  background: var(--brand);
+}
+
+.pm-timer-btn.ghost {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--border);
+}
+
+@media (max-width: 720px) {
+  .pm-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pm-checklist.timed li {
+    grid-template-columns: 26px minmax(0, 1fr) auto;
+  }
+
+  .pm-item-actions {
+    grid-column: 2 / -1;
+    flex-wrap: wrap;
+  }
+}
+.pm-project-card > .pm-project-status {
+  justify-self: start;
+}

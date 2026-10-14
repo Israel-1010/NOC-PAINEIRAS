@@ -6,6 +6,11 @@ import {
   ChevronRight,
   Circle,
   CircleCheck,
+  Clock,
+  Pause,
+  Play,
+  RotateCcw,
+  Check,
   Flag,
   FolderKanban,
   Kanban,
@@ -41,7 +46,22 @@ type ProjectSpace = {
 
 type TeamMember = { login: string; name: string; mail: string; title: string; department: string };
 
-type ChecklistItem = { id: string; text: string; done: boolean };
+type ChecklistState = "pendente" | "em_andamento" | "pausado" | "concluido";
+type WorkSession = { login: string; name: string; start: string; end: string; ms: number };
+type ChecklistItem = {
+  id: string;
+  text: string;
+  done: boolean;
+  state: ChecklistState;
+  elapsedMs: number;
+  runningSince: string;
+  runningBy: string;
+  runningByName: string;
+  sessions: WorkSession[];
+  completedAt: string;
+  completedBy: string;
+};
+type ChecklistAction = "start" | "pause" | "finish" | "reopen";
 type TaskComment = { id: string; author: string; authorName: string; text: string; at: string };
 
 type ProjectTask = {
@@ -85,6 +105,13 @@ const PRIORITIES: { id: TaskPriority; label: string }[] = [
   { id: "normal", label: "Normal" },
   { id: "baixa", label: "Baixa" },
 ];
+
+const CHECKLIST_LABEL: Record<ChecklistState, string> = {
+  pendente: "Não iniciado",
+  em_andamento: "Em andamento",
+  pausado: "Pausado",
+  concluido: "Finalizado",
+};
 
 const SPACE_COLORS = ["#e01783", "#021d49", "#2e63d6", "#12936a", "#e0931f", "#7c3aed", "#d02b3f", "#0891b2"];
 const VIEW_STORAGE_KEY = "rede-clube-projects-view";
@@ -161,6 +188,97 @@ function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return "?";
   return `${parts[0][0] || ""}${parts.length > 1 ? parts[parts.length - 1][0] : ""}`.toUpperCase();
+}
+
+/* ---------- Tempo e progresso ---------- */
+
+// Relogio que so "anda" enquanto houver cronometro ativo na tela.
+function useNow(active: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return undefined;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
+function itemMs(item: ChecklistItem, now: number) {
+  const running = item.state === "em_andamento" && item.runningSince ? Math.max(0, now - new Date(item.runningSince).getTime()) : 0;
+  return (item.elapsedMs || 0) + running;
+}
+
+function taskMs(task: ProjectTask, now: number) {
+  return task.checklist.reduce((sum, item) => sum + itemMs(item, now), 0);
+}
+
+function isRunning(task: ProjectTask) {
+  return task.checklist.some((item) => item.state === "em_andamento");
+}
+
+// Progresso da tarefa: itens finalizados do checklist; sem checklist, vale o status.
+function taskProgress(task: ProjectTask) {
+  if (task.status === "concluido") return 1;
+  if (!task.checklist.length) return 0;
+  return task.checklist.filter((item) => item.state === "concluido").length / task.checklist.length;
+}
+
+function formatClock(ms: number) {
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function formatHours(ms: number) {
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 1) return ms > 0 ? "< 1min" : "0h";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (!h) return `${m}min`;
+  return m ? `${h}h ${m}min` : `${h}h`;
+}
+
+// Horas por pessoa (intervalos fechados + o que esta rodando agora).
+function hoursByPerson(tasks: ProjectTask[], now: number) {
+  const totals = new Map<string, { login: string; name: string; ms: number }>();
+  const add = (login: string, name: string, ms: number) => {
+    if (!login || ms <= 0) return;
+    const key = login.toLowerCase();
+    const entry = totals.get(key) || { login, name: name || login, ms: 0 };
+    entry.ms += ms;
+    totals.set(key, entry);
+  };
+  for (const task of tasks) {
+    for (const item of task.checklist) {
+      for (const session of item.sessions || []) add(session.login, session.name, session.ms);
+      if (item.state === "em_andamento" && item.runningSince) add(item.runningBy, item.runningByName, now - new Date(item.runningSince).getTime());
+    }
+  }
+  return Array.from(totals.values()).sort((a, b) => b.ms - a.ms);
+}
+
+// Primeiro inicio e ultimo fim registrados no projeto.
+function workPeriod(tasks: ProjectTask[]) {
+  let first = "";
+  let last = "";
+  for (const task of tasks) {
+    for (const item of task.checklist) {
+      for (const session of item.sessions || []) {
+        if (!first || session.start < first) first = session.start;
+        if (!last || session.end > last) last = session.end;
+      }
+      if (item.runningSince && (!first || item.runningSince < first)) first = item.runningSince;
+    }
+  }
+  return { first, last };
+}
+
+function shortDate(iso: string) {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
 // Cor fixa por pessoa (mesmo login = mesma cor em todo o painel).
@@ -246,6 +364,9 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
       .sort((a, b) => a.order - b.order);
   }, [assigneeFilter, currentUser.login, priorityFilter, scopedTasks, search, showDone]);
 
+  const anyRunning = data.tasks.some(isRunning);
+  const now = useNow(anyRunning);
+
   const stats = useMemo(() => {
     const weekAgo = Date.now() - 7 * 86400000;
     return {
@@ -255,10 +376,26 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
       doneWeek: scopedTasks.filter((task) => task.completedAt && new Date(task.completedAt).getTime() >= weekAgo).length,
     };
   }, [scopedTasks]);
+  const workedMs = scopedTasks.reduce((sum, task) => sum + taskMs(task, now), 0);
 
   const openTask = data.tasks.find((task) => task.id === openTaskId) || null;
 
   const replaceTask = (task: ProjectTask) => setData((current) => ({ ...current, tasks: current.tasks.map((item) => (item.id === task.id ? task : item)) }));
+
+  async function runChecklistAction(taskId: string, itemId: string, action: ChecklistAction) {
+    try {
+      const result = await api<{ task: ProjectTask; pausedElsewhere: string[] }>(
+        `/api/projects/tasks/${encodeURIComponent(taskId)}/checklist/${encodeURIComponent(itemId)}/${action}`,
+        "POST",
+      );
+      replaceTask(result.task);
+      // Iniciar pausa o cronometro que a pessoa tinha rodando em outra tarefa.
+      if (result.pausedElsewhere?.length) load();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Nao foi possivel atualizar o item.");
+      load();
+    }
+  }
 
   async function patchTask(id: string, patch: Partial<ProjectTask>) {
     // Atualizacao otimista: a tela responde na hora e sincroniza em seguida.
@@ -502,6 +639,7 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
           <div><span>Em andamento</span><strong>{stats.doing}</strong></div>
           <div className={stats.overdue ? "alert" : ""}><span>Atrasadas</span><strong>{stats.overdue}</strong></div>
           <div className="good"><span>Concluídas em 7 dias</span><strong>{stats.doneWeek}</strong></div>
+          <div className={`hours ${anyRunning ? "live" : ""}`}><span>Horas trabalhadas</span><strong>{formatHours(workedMs)}</strong></div>
         </div>
 
         {error ? (
@@ -513,7 +651,10 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
         ) : null}
 
         {!loading && spaceFilter === "all" && data.spaces.length ? (
-          <ProjectCards spaces={data.spaces} tasks={data.tasks} onOpen={setSpaceFilter} />
+          <ProjectCards spaces={data.spaces} tasks={data.tasks} now={now} onOpen={setSpaceFilter} />
+        ) : null}
+        {!loading && activeSpace ? (
+          <ProjectCards spaces={[activeSpace]} tasks={data.tasks} now={now} single />
         ) : null}
 
         {loading ? (
@@ -541,6 +682,7 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
             onPatch={patchTask}
             onQuickAdd={createTask}
             filtered={hasFilters}
+            now={now}
           />
         ) : (
           <TaskBoard
@@ -550,6 +692,7 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
             onOpen={setOpenTaskId}
             onPatch={patchTask}
             onQuickAdd={createTask}
+            now={now}
           />
         )}
       </section>
@@ -562,6 +705,8 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
           currentUser={currentUser}
           onClose={() => setOpenTaskId("")}
           onPatch={(patch) => patchTask(openTask.id, patch)}
+          onChecklistAction={(itemId, action) => runChecklistAction(openTask.id, itemId, action)}
+          now={now}
           onDelete={() => removeTask(openTask)}
           onCommented={replaceTask}
           onError={setError}
@@ -702,112 +847,168 @@ function firstName(name: string) {
   return parts[0] ? parts[0][0].toUpperCase() + parts[0].slice(1).toLowerCase() : name;
 }
 
-function ProjectCards({ spaces, tasks, onOpen }: { spaces: ProjectSpace[]; tasks: ProjectTask[]; onOpen: (id: string) => void }) {
+function ProjectCards({
+  spaces,
+  tasks,
+  now,
+  onOpen,
+  single = false,
+}: {
+  spaces: ProjectSpace[];
+  tasks: ProjectTask[];
+  now: number;
+  onOpen?: (id: string) => void;
+  single?: boolean;
+}) {
   const cards = spaces
-    .filter((space) => !space.archived)
+    .filter((space) => single || !space.archived)
     .map((space) => {
       const own = tasks.filter((task) => task.spaceId === space.id);
-      const done = own.filter((task) => task.status === "concluido").length;
-      const counts = STATUSES.map((status) => ({ ...status, count: own.filter((task) => task.status === status.id).length }));
+      const percent = own.length ? Math.round((own.reduce((sum, task) => sum + taskProgress(task), 0) / own.length) * 100) : 0;
+      const items = own.flatMap((task) => task.checklist);
+      const itemsDone = items.filter((item) => item.state === "concluido").length;
+      const tasksDone = own.filter((task) => task.status === "concluido").length;
       const overdue = own.filter(isOverdue).length;
       const blocked = own.filter((task) => task.status === "bloqueado").length;
+      const workedMs = own.reduce((sum, task) => sum + taskMs(task, now), 0);
+      const period = workPeriod(own);
 
-      // "Trabalhando agora": quem tem tarefa em andamento ou em revisao neste projeto.
-      const active = new Map<string, { login: string; name: string; tasks: number }>();
+      // Status do projeto: inicia quando alguem comeca o primeiro item ou tarefa.
+      const started = workedMs > 0 || own.some((task) => task.status !== "a_fazer");
+      const status = own.length && tasksDone === own.length
+        ? { label: "Concluído", tone: "done" }
+        : started ? { label: "Em andamento", tone: "doing" } : { label: "Não iniciado", tone: "todo" };
+
+      // Trabalhando agora: cronometro rodando primeiro, depois quem tem tarefa em andamento.
+      const people = new Map<string, { login: string; name: string; live: boolean }>();
+      for (const task of own) {
+        for (const item of task.checklist) {
+          if (item.state === "em_andamento" && item.runningBy) {
+            people.set(item.runningBy.toLowerCase(), { login: item.runningBy, name: item.runningByName || item.runningBy, live: true });
+          }
+        }
+      }
       for (const task of own) {
         if (!task.assignee || (task.status !== "em_andamento" && task.status !== "revisao")) continue;
         const key = task.assignee.toLowerCase();
-        const entry = active.get(key) || { login: task.assignee, name: task.assigneeName || task.assignee, tasks: 0 };
-        entry.tasks += 1;
-        active.set(key, entry);
+        if (!people.has(key)) people.set(key, { login: task.assignee, name: task.assigneeName || task.assignee, live: false });
       }
-      const working = Array.from(active.values()).sort((a, b) => b.tasks - a.tasks);
+      const working = Array.from(people.values()).sort((a, b) => Number(b.live) - Number(a.live));
 
       const nextDue = own
         .filter((task) => task.dueDate && task.status !== "concluido")
         .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
 
-      return {
-        space,
-        total: own.length,
-        done,
-        percent: own.length ? Math.round((done / own.length) * 100) : 0,
-        counts,
-        overdue,
-        blocked,
-        working,
-        nextDue,
-      };
+      return { space, own, percent, items, itemsDone, tasksDone, overdue, blocked, workedMs, period, status, working, nextDue };
     })
-    .sort((a, b) => b.working.length - a.working.length || a.space.name.localeCompare(b.space.name, "pt-BR"));
+    .sort((a, b) => Number(b.working.some((p) => p.live)) - Number(a.working.some((p) => p.live)) || b.working.length - a.working.length || a.space.name.localeCompare(b.space.name, "pt-BR"));
 
   return (
-    <div className="pm-cards-grid">
-      {cards.map((card) => (
-        <button
-          className="pm-project-card"
-          key={card.space.id}
-          type="button"
-          onClick={() => onOpen(card.space.id)}
-          style={{ "--project-color": card.space.color } as React.CSSProperties}
-        >
-          <header>
-            <i className="pm-space-dot large" style={{ background: card.space.color }} />
-            <strong title={card.space.name}>{card.space.name}</strong>
-            <span className="pm-card-percent">{card.percent}%</span>
-          </header>
+    <div className={single ? "pm-cards-grid single" : "pm-cards-grid"}>
+      {cards.map((card) => {
+        const Tag = single ? "div" : "button";
+        const live = card.working.some((person) => person.live);
+        const caption = card.items.length
+          ? `${card.itemsDone} de ${card.items.length} itens finalizados · ${card.tasksDone}/${card.own.length} tarefas`
+          : card.own.length ? `${card.tasksDone} de ${card.own.length} tarefas concluídas` : "Nenhuma tarefa ainda";
+        return (
+          <Tag
+            className={`pm-project-card ${single ? "single" : ""}`}
+            key={card.space.id}
+            {...(single ? {} : { type: "button" as const, onClick: () => onOpen?.(card.space.id) })}
+            style={{ "--project-color": card.space.color } as React.CSSProperties}
+          >
+            <header>
+              <i className="pm-space-dot large" style={{ background: card.space.color }} />
+              <strong title={card.space.name}>{card.space.name}</strong>
+            </header>
+            <span className={`pm-project-status tone-${card.status.tone}`}>{card.status.label}</span>
 
-          <div className="pm-card-progress" aria-label={`${card.percent}% concluído`}>
-            {card.total ? (
-              card.counts.filter((status) => status.count).map((status) => (
-                <span
-                  className={`tone-${status.tone}`}
-                  key={status.id}
-                  style={{ flexGrow: status.count }}
-                  title={`${status.label}: ${status.count}`}
-                />
-              ))
-            ) : (
-              <span className="empty" />
-            )}
-          </div>
-          <p className="pm-card-caption">
-            {card.total ? `${card.done} de ${card.total} tarefas concluídas` : "Nenhuma tarefa ainda"}
-          </p>
+            <div className="pm-card-progress-row">
+              <div className="pm-card-progress" role="progressbar" aria-valuenow={card.percent} aria-valuemin={0} aria-valuemax={100} aria-label="Progresso do projeto">
+                <span style={{ width: `${card.percent}%` }} />
+              </div>
+              <span className="pm-card-percent">{card.percent}%</span>
+            </div>
+            <p className="pm-card-caption">{caption}</p>
 
-          <div className="pm-card-working">
-            <small>Trabalhando agora</small>
-            {card.working.length ? (
-              <div className="pm-card-people">
-                <div className="pm-avatar-stack">
-                  {card.working.slice(0, 4).map((person) => (
-                    <span className="pm-avatar" key={person.login} title={`${person.name} · ${person.tasks} tarefa(s) em andamento`} style={avatarStyle(person.login)}>
-                      {initials(person.name)}
-                    </span>
-                  ))}
-                  {card.working.length > 4 ? <span className="pm-avatar more">+{card.working.length - 4}</span> : null}
-                </div>
-                <span className="pm-card-names">
-                  {card.working.slice(0, 2).map((person) => firstName(person.name)).join(", ")}
-                  {card.working.length > 2 ? ` e mais ${card.working.length - 2}` : ""}
+            <div className="pm-card-hours">
+              <div>
+                <small>Horas</small>
+                <strong className={live ? "live" : ""}>
+                  <Clock size={15} /> {formatHours(card.workedMs)}
+                </strong>
+              </div>
+              <div>
+                <small>Período</small>
+                <span>
+                  {card.period.first
+                    ? `${shortDate(card.period.first)} → ${card.status.tone === "done" && card.period.last ? shortDate(card.period.last) : "hoje"}`
+                    : "—"}
                 </span>
               </div>
-            ) : (
-              <span className="pm-card-idle">Ninguém com tarefa em andamento</span>
-            )}
-          </div>
+            </div>
 
-          <footer>
-            <span className="pm-meta" title="Membros do projeto"><Users size={13} /> {card.space.members.length}</span>
-            {card.overdue ? <span className="pm-card-flag danger">{card.overdue} atrasada(s)</span> : null}
-            {card.blocked ? <span className="pm-card-flag warn">{card.blocked} bloqueada(s)</span> : null}
-            {card.nextDue && !card.overdue ? (
-              <span className="pm-due" title={card.nextDue.title}><CalendarDays size={13} /> Próx. prazo {formatDue(card.nextDue.dueDate)}</span>
-            ) : null}
-          </footer>
-        </button>
-      ))}
+            <div className="pm-card-working">
+              <small>Trabalhando agora</small>
+              {card.working.length ? (
+                <div className="pm-card-people">
+                  <div className="pm-avatar-stack">
+                    {card.working.slice(0, 4).map((person) => (
+                      <span
+                        className={`pm-avatar ${person.live ? "live" : ""}`}
+                        key={person.login}
+                        title={`${person.name}${person.live ? " · cronômetro ativo" : " · tarefa em andamento"}`}
+                        style={avatarStyle(person.login)}
+                      >
+                        {initials(person.name)}
+                      </span>
+                    ))}
+                    {card.working.length > 4 ? <span className="pm-avatar more">+{card.working.length - 4}</span> : null}
+                  </div>
+                  <span className="pm-card-names">
+                    {card.working.slice(0, 2).map((person) => firstName(person.name)).join(", ")}
+                    {card.working.length > 2 ? ` e mais ${card.working.length - 2}` : ""}
+                  </span>
+                </div>
+              ) : (
+                <span className="pm-card-idle">Ninguém trabalhando agora</span>
+              )}
+            </div>
+
+            {single ? <PeopleHours tasks={card.own} now={now} /> : null}
+
+            <footer>
+              <span className="pm-meta" title="Membros do projeto"><Users size={13} /> {card.space.members.length}</span>
+              {card.overdue ? <span className="pm-card-flag danger">{card.overdue} atrasada(s)</span> : null}
+              {card.blocked ? <span className="pm-card-flag warn">{card.blocked} bloqueada(s)</span> : null}
+              {card.nextDue && !card.overdue ? (
+                <span className="pm-due" title={card.nextDue.title}><CalendarDays size={13} /> Próx. prazo {formatDue(card.nextDue.dueDate)}</span>
+              ) : null}
+            </footer>
+          </Tag>
+        );
+      })}
     </div>
+  );
+}
+
+// Horas por analista (usado no resumo do projeto e no detalhe da tarefa).
+function PeopleHours({ tasks, now }: { tasks: ProjectTask[]; now: number }) {
+  const people = hoursByPerson(tasks, now);
+  if (!people.length) return null;
+  const max = people[0].ms || 1;
+  return (
+    <ul className="pm-people-hours">
+      {people.map((person) => (
+        <li key={person.login}>
+          <span className="pm-avatar" style={avatarStyle(person.login)}>{initials(person.name)}</span>
+          <span className="pm-people-hours-name">{person.name}</span>
+          <span className="pm-people-hours-bar"><span style={{ width: `${(person.ms / max) * 100}%` }} /></span>
+          <strong>{formatHours(person.ms)}</strong>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -837,14 +1038,28 @@ function DueDate({ task }: { task: ProjectTask }) {
   );
 }
 
-function TaskMeta({ task }: { task: ProjectTask }) {
-  const done = task.checklist.filter((item) => item.done).length;
+function TaskMeta({ task, now }: { task: ProjectTask; now: number }) {
+  const done = task.checklist.filter((item) => item.state === "concluido").length;
+  const running = task.checklist.find((item) => item.state === "em_andamento");
+  const worked = taskMs(task, now);
   return (
     <>
+      {running ? (
+        <span className="pm-timer-badge" title={`${running.runningByName || running.runningBy} trabalhando em: ${running.text}`}>
+          <span className="pm-live-dot" />
+          {formatClock(itemMs(running, now))}
+        </span>
+      ) : null}
       {task.checklist.length ? (
-        <span className={`pm-meta ${done === task.checklist.length ? "complete" : ""}`} title="Checklist">
+        <span className={`pm-meta ${done === task.checklist.length ? "complete" : ""}`} title="Itens do checklist finalizados">
           <ListChecks size={13} />
-          {done}/{task.checklist.length}
+          {done}/{task.checklist.length} · {Math.round(taskProgress(task) * 100)}%
+        </span>
+      ) : null}
+      {worked > 0 && !running ? (
+        <span className="pm-meta" title="Horas trabalhadas na tarefa">
+          <Clock size={13} />
+          {formatHours(worked)}
         </span>
       ) : null}
       {task.comments.length ? (
@@ -856,7 +1071,6 @@ function TaskMeta({ task }: { task: ProjectTask }) {
     </>
   );
 }
-
 function QuickAdd({ onAdd, label = "Adicionar tarefa" }: { onAdd: (title: string) => void; label?: string }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState("");
@@ -899,11 +1113,12 @@ type ViewProps = {
   onOpen: (id: string) => void;
   onPatch: (id: string, patch: Partial<ProjectTask>) => void;
   onQuickAdd: (title: string, status: TaskStatus) => void;
+  now: number;
 };
 
 /* ---------- Visao em lista ---------- */
 
-function TaskList({ tasks, spaceById, showSpace, onOpen, onPatch, onQuickAdd, filtered }: ViewProps & { filtered: boolean }) {
+function TaskList({ tasks, spaceById, showSpace, onOpen, onPatch, onQuickAdd, filtered, now }: ViewProps & { filtered: boolean }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ concluido: true });
 
   if (!tasks.length && filtered) {
@@ -944,7 +1159,7 @@ function TaskList({ tasks, spaceById, showSpace, onOpen, onPatch, onQuickAdd, fi
                         <span className="pm-row-badges">
                           {showSpace && space ? <span className="pm-space-badge"><i className="pm-space-dot" style={{ background: space.color }} />{space.name}</span> : null}
                           {task.tags.map((tag) => <span className="pm-tag" key={tag}>{tag}</span>)}
-                          <TaskMeta task={task} />
+                          <TaskMeta task={task} now={now} />
                         </span>
                       </button>
                       <Assignee task={task} />
@@ -965,7 +1180,7 @@ function TaskList({ tasks, spaceById, showSpace, onOpen, onPatch, onQuickAdd, fi
 
 /* ---------- Visao em quadro (Kanban) ---------- */
 
-function TaskBoard({ tasks, spaceById, showSpace, onOpen, onPatch, onQuickAdd }: ViewProps) {
+function TaskBoard({ tasks, spaceById, showSpace, onOpen, onPatch, onQuickAdd, now }: ViewProps) {
   const [dragOver, setDragOver] = useState<TaskStatus | "">("");
   const draggingId = useRef("");
 
@@ -1019,7 +1234,7 @@ function TaskBoard({ tasks, spaceById, showSpace, onOpen, onPatch, onQuickAdd }:
                     <footer>
                       <Assignee task={task} />
                       <DueDate task={task} />
-                      <TaskMeta task={task} />
+                      <TaskMeta task={task} now={now} />
                       <PriorityFlag priority={task.priority} />
                     </footer>
                   </article>
@@ -1047,6 +1262,8 @@ function TaskDrawer({
   onError,
   team,
   canDelete,
+  onChecklistAction,
+  now,
 }: {
   task: ProjectTask;
   spaces: ProjectSpace[];
@@ -1058,6 +1275,8 @@ function TaskDrawer({
   onError: (message: string) => void;
   team: TeamMember[];
   canDelete: boolean;
+  onChecklistAction: (itemId: string, action: ChecklistAction) => void;
+  now: number;
 }) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
@@ -1103,7 +1322,21 @@ function TaskDrawer({
   function addChecklistItem() {
     const textValue = newItem.trim();
     setNewItem("");
-    if (textValue) onPatch({ checklist: [...task.checklist, { id: `novo-${Date.now()}`, text: textValue, done: false }] });
+    if (!textValue) return;
+    const item: ChecklistItem = {
+      id: `novo-${Date.now()}`,
+      text: textValue,
+      done: false,
+      state: "pendente",
+      elapsedMs: 0,
+      runningSince: "",
+      runningBy: "",
+      runningByName: "",
+      sessions: [],
+      completedAt: "",
+      completedBy: "",
+    };
+    onPatch({ checklist: [...task.checklist, item] });
   }
 
   async function sendComment() {
@@ -1256,27 +1489,75 @@ function TaskDrawer({
           <section className="pm-section">
             <h3>
               Checklist
-              {task.checklist.length ? <small>{doneItems}/{task.checklist.length}</small> : null}
+              {task.checklist.length ? <small>{doneItems}/{task.checklist.length} · {Math.round((doneItems / task.checklist.length) * 100)}%</small> : null}
+              {taskMs(task, now) > 0 ? <small className="pm-h3-hours"><Clock size={13} /> {formatHours(taskMs(task, now))}</small> : null}
             </h3>
             {task.checklist.length ? (
               <div className="pm-progress" aria-hidden="true"><span style={{ width: `${(doneItems / task.checklist.length) * 100}%` }} /></div>
             ) : null}
-            <ul className="pm-checklist">
-              {task.checklist.map((item) => (
-                <li key={item.id} className={item.done ? "done" : ""}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={item.done}
-                      onChange={() => onPatch({ checklist: task.checklist.map((entry) => (entry.id === item.id ? { ...entry, done: !entry.done } : entry)) })}
-                    />
-                    <span>{item.text}</span>
-                  </label>
-                  <button type="button" className="pm-icon-btn" aria-label="Remover item" onClick={() => onPatch({ checklist: task.checklist.filter((entry) => entry.id !== item.id) })}>
-                    <X size={13} />
-                  </button>
-                </li>
-              ))}
+            <ul className="pm-checklist timed">
+              {task.checklist.map((item) => {
+                const running = item.state === "em_andamento";
+                const elapsed = itemMs(item, now);
+                const mineRunning = running && sameUser(item.runningBy, currentUser.login);
+                return (
+                  <li key={item.id} className={`state-${item.state}`}>
+                    <span className="pm-item-state" title={CHECKLIST_LABEL[item.state]}>
+                      {item.state === "concluido" ? <CircleCheck size={18} /> : running ? <span className="pm-live-dot big" /> : <Circle size={18} />}
+                    </span>
+                    <div className="pm-item-body">
+                      <span className="pm-item-text">{item.text}</span>
+                      <small>
+                        {CHECKLIST_LABEL[item.state]}
+                        {running && item.runningByName ? ` por ${firstName(item.runningByName)}` : ""}
+                        {item.state === "concluido" && item.completedAt ? ` em ${formatDateTime(item.completedAt)}` : ""}
+                      </small>
+                    </div>
+                    <span className={`pm-item-clock ${running ? "running" : ""}`} title="Tempo trabalhado neste item">
+                      {elapsed > 0 || running ? formatClock(elapsed) : "--:--:--"}
+                    </span>
+                    <div className="pm-item-actions">
+                      {item.state === "concluido" ? (
+                        <button type="button" className="pm-timer-btn ghost" onClick={() => onChecklistAction(item.id, "reopen")} title="Reabrir item">
+                          <RotateCcw size={14} /> Reabrir
+                        </button>
+                      ) : (
+                        <>
+                          {running ? (
+                            <button
+                              type="button"
+                              className="pm-timer-btn pause"
+                              onClick={() => onChecklistAction(item.id, "pause")}
+                              title={mineRunning ? "Pausar" : `Pausar o cronômetro de ${item.runningByName || item.runningBy}`}
+                            >
+                              <Pause size={14} /> Pausar
+                            </button>
+                          ) : (
+                            <button type="button" className="pm-timer-btn start" onClick={() => onChecklistAction(item.id, "start")} title={item.state === "pausado" ? "Continuar" : "Iniciar"}>
+                              <Play size={14} /> {item.state === "pausado" ? "Continuar" : "Iniciar"}
+                            </button>
+                          )}
+                          <button type="button" className="pm-timer-btn finish" onClick={() => onChecklistAction(item.id, "finish")} title="Finalizar item">
+                            <Check size={14} /> Finalizar
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        className="pm-icon-btn"
+                        aria-label="Remover item"
+                        title="Remover item"
+                        onClick={() => {
+                          if (elapsed > 0 && !window.confirm(`Remover "${item.text}"? As ${formatHours(elapsed)} registradas nele serão perdidas.`)) return;
+                          onPatch({ checklist: task.checklist.filter((entry) => entry.id !== item.id) });
+                        }}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
             <input
               className="pm-inline-input"
@@ -1286,8 +1567,13 @@ function TaskDrawer({
               placeholder="+ Adicionar item e Enter"
               maxLength={300}
             />
+            {hoursByPerson([task], now).length ? (
+              <div className="pm-task-people-hours">
+                <small>Horas por analista nesta tarefa</small>
+                <PeopleHours tasks={[task]} now={now} />
+              </div>
+            ) : null}
           </section>
-
           <section className="pm-section">
             <h3>Comentários {task.comments.length ? <small>{task.comments.length}</small> : null}</h3>
             <ol className="pm-comments">

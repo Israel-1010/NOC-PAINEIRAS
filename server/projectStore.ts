@@ -23,7 +23,26 @@ export type ProjectSpace = {
   updatedAt: string;
 };
 
-export type ChecklistItem = { id: string; text: string; done: boolean };
+export const checklistStates = ["pendente", "em_andamento", "pausado", "concluido"] as const;
+export type ChecklistState = (typeof checklistStates)[number];
+
+// Cada intervalo trabalhado (Iniciar -> Pausar/Finalizar), com quem trabalhou.
+export type WorkSession = { login: string; name: string; start: string; end: string; ms: number };
+
+export type ChecklistItem = {
+  id: string;
+  text: string;
+  done: boolean;
+  state: ChecklistState;
+  // Horas ja fechadas; o intervalo em curso fica em runningSince/runningBy.
+  elapsedMs: number;
+  runningSince: string;
+  runningBy: string;
+  runningByName: string;
+  sessions: WorkSession[];
+  completedAt: string;
+  completedBy: string;
+};
 
 export type TaskComment = { id: string; author: string; authorName: string; text: string; at: string };
 
@@ -105,11 +124,58 @@ function normalizeSpace(input: unknown, index = 0): ProjectSpace {
   };
 }
 
+function normalizeSessions(input: unknown): WorkSession[] {
+  if (!Array.isArray(input)) return [];
+  return input.slice(-1000).map((item) => {
+    const source = (item && typeof item === "object" ? item : {}) as Partial<WorkSession>;
+    return {
+      login: text(source.login, 120),
+      name: text(source.name, 160),
+      start: text(source.start, 30),
+      end: text(source.end, 30),
+      ms: Math.max(0, Number(source.ms) || 0),
+    };
+  }).filter((session) => session.start && session.end);
+}
+
+function normalizeChecklistItem(input: unknown): ChecklistItem {
+  const source = (input && typeof input === "object" ? input : {}) as Partial<ChecklistItem>;
+  // Itens antigos so tinham "done".
+  const state = checklistStates.includes(source.state as ChecklistState)
+    ? (source.state as ChecklistState)
+    : source.done === true ? "concluido" : "pendente";
+  const running = state === "em_andamento" ? text(source.runningSince, 30) : "";
+  return {
+    id: text(source.id, 40) || makeId("chk"),
+    text: text(source.text, 300),
+    done: state === "concluido",
+    state: state === "em_andamento" && !running ? "pausado" : state,
+    elapsedMs: Math.max(0, Number(source.elapsedMs) || 0),
+    runningSince: running,
+    runningBy: running ? text(source.runningBy, 120) : "",
+    runningByName: running ? text(source.runningByName, 160) : "",
+    sessions: normalizeSessions(source.sessions),
+    completedAt: state === "concluido" ? text(source.completedAt, 30) : "",
+    completedBy: state === "concluido" ? text(source.completedBy, 120) : "",
+  };
+}
+
 function normalizeChecklist(input: unknown): ChecklistItem[] {
   if (!Array.isArray(input)) return [];
-  return input.slice(0, 100).map((item) => {
-    const source = (item && typeof item === "object" ? item : {}) as Partial<ChecklistItem>;
-    return { id: text(source.id, 40) || makeId("chk"), text: text(source.text, 300), done: source.done === true };
+  return input.slice(0, 100).map(normalizeChecklistItem).filter((item) => item.text);
+}
+
+// Do cliente so aceitamos texto, ordem, inclusao e remocao de itens.
+// Estado e horas so mudam pelas acoes Iniciar/Pausar/Finalizar (horario do servidor).
+function mergeClientChecklist(current: ChecklistItem[], incoming: unknown): ChecklistItem[] {
+  if (!Array.isArray(incoming)) return current;
+  const byId = new Map(current.map((item) => [item.id, item]));
+  return incoming.slice(0, 100).map((raw) => {
+    const source = (raw && typeof raw === "object" ? raw : {}) as Partial<ChecklistItem>;
+    const existing = source.id ? byId.get(String(source.id)) : undefined;
+    const label = text(source.text, 300);
+    if (existing) return { ...existing, text: label || existing.text };
+    return normalizeChecklistItem({ id: source.id, text: label });
   }).filter((item) => item.text);
 }
 
@@ -339,6 +405,7 @@ export function createTask(input: unknown, access: ProjectAccess) {
       ...source,
       id: undefined,
       comments: [],
+      checklist: mergeClientChecklist([], source.checklist),
       createdBy: access.user.login,
       createdByName: access.user.name,
       createdAt: undefined,
@@ -367,6 +434,7 @@ export function updateTask(id: string, input: unknown, access: ProjectAccess) {
     // Valor invalido em campo de lista fechada e ignorado (mantem o atual).
     if ("status" in patch && !taskStatuses.includes(patch.status as TaskStatus)) delete patch.status;
     if ("priority" in patch && !taskPriorities.includes(patch.priority as TaskPriority)) delete patch.priority;
+    if ("checklist" in patch) patch.checklist = mergeClientChecklist(current.checklist, patch.checklist);
     if (patch.spaceId && patch.spaceId !== current.spaceId) {
       const target = store.spaces.find((space) => space.id === patch.spaceId);
       if (!target || !canSeeSpace(target, access)) throw new ProjectAccessError("Voce nao participa do projeto de destino.");
@@ -404,5 +472,97 @@ export function addTaskComment(id: string, input: unknown, access: ProjectAccess
     task.comments.push(comment);
     task.updatedAt = comment.at;
     return task;
+  });
+}
+
+/* ---------- Cronometro dos itens do checklist ---------- */
+
+export const checklistActions = ["start", "pause", "finish", "reopen"] as const;
+export type ChecklistAction = (typeof checklistActions)[number];
+
+// Fecha o intervalo em curso e soma as horas no item.
+function closeRunning(item: ChecklistItem, now: Date) {
+  if (item.state !== "em_andamento" || !item.runningSince) return;
+  const started = new Date(item.runningSince);
+  const ms = Math.max(0, now.getTime() - started.getTime());
+  item.elapsedMs += ms;
+  item.sessions.push({ login: item.runningBy, name: item.runningByName, start: item.runningSince, end: now.toISOString(), ms });
+  item.runningSince = "";
+  item.runningBy = "";
+  item.runningByName = "";
+}
+
+function touchTask(task: ProjectTask, now: Date) {
+  task.updatedAt = now.toISOString();
+}
+
+export function checklistAction(taskId: string, itemId: string, action: string, access: ProjectAccess) {
+  if (!checklistActions.includes(action as ChecklistAction)) throw new Error("Acao invalida.");
+  return mutate((store) => {
+    const task = findTask(store, taskId, access);
+    const item = task.checklist.find((entry) => entry.id === itemId);
+    if (!item) throw new NotFoundError("Item do checklist nao encontrado.");
+    const now = new Date();
+    const pausedElsewhere: string[] = [];
+
+    if (action === "start") {
+      if (item.state === "concluido") throw new Error("Item ja finalizado. Reabra antes de iniciar.");
+      if (item.state === "em_andamento") return { task, pausedElsewhere };
+
+      // Um cronometro por pessoa: pausa o que esta rodando em outro item.
+      for (const other of store.tasks) {
+        for (const entry of other.checklist) {
+          if (entry !== item && entry.state === "em_andamento" && sameLogin(entry.runningBy, access.user.login)) {
+            closeRunning(entry, now);
+            entry.state = "pausado";
+            touchTask(other, now);
+            pausedElsewhere.push(other.id);
+          }
+        }
+      }
+
+      item.state = "em_andamento";
+      item.done = false;
+      item.runningSince = now.toISOString();
+      item.runningBy = access.user.login;
+      item.runningByName = access.user.name || access.user.login;
+      // Primeiro item iniciado coloca a tarefa (e portanto o projeto) em andamento.
+      if (task.status === "a_fazer") task.status = "em_andamento";
+    }
+
+    if (action === "pause") {
+      if (item.state !== "em_andamento") return { task, pausedElsewhere };
+      closeRunning(item, now);
+      item.state = "pausado";
+    }
+
+    if (action === "finish") {
+      closeRunning(item, now);
+      item.state = "concluido";
+      item.done = true;
+      item.completedAt = now.toISOString();
+      item.completedBy = access.user.login;
+      if (task.status === "a_fazer") task.status = "em_andamento";
+      // Todos os itens finalizados: tarefa concluida.
+      if (task.checklist.every((entry) => entry.state === "concluido")) {
+        task.status = "concluido";
+        task.completedAt = now.toISOString();
+      }
+    }
+
+    if (action === "reopen") {
+      if (item.state !== "concluido") return { task, pausedElsewhere };
+      item.state = item.elapsedMs > 0 ? "pausado" : "pendente";
+      item.done = false;
+      item.completedAt = "";
+      item.completedBy = "";
+      if (task.status === "concluido") {
+        task.status = "em_andamento";
+        task.completedAt = "";
+      }
+    }
+
+    touchTask(task, now);
+    return { task, pausedElsewhere };
   });
 }

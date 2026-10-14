@@ -97,6 +97,7 @@ import {
 import { getTopology, saveTopology } from "./topologyStore";
 import {
   addTaskComment,
+  checklistAction,
   createSpace,
   createTask,
   deleteSpace,
@@ -510,6 +511,10 @@ app.post("/api/projects/tasks", projectRoute((req, access) => createTask(req.bod
 app.patch("/api/projects/tasks/:id", projectRoute((req, access) => updateTask(String(req.params.id), req.body, access)));
 app.delete("/api/projects/tasks/:id", projectRoute((req, access) => deleteTask(String(req.params.id), access)));
 app.post("/api/projects/tasks/:id/comments", projectRoute((req, access) => addTaskComment(String(req.params.id), req.body, access)));
+app.post(
+  "/api/projects/tasks/:id/checklist/:itemId/:action",
+  projectRoute((req, access) => checklistAction(String(req.params.id), String(req.params.itemId), String(req.params.action), access)),
+);
 
 if (existsSync(distDir)) {
   app.use(express.static(distDir));
