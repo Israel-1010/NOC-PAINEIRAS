@@ -65,10 +65,22 @@ export type ProjectTask = {
   createdByName: string;
   createdAt: string;
   updatedAt: string;
+  // Datas reais (automaticas): primeiro "Iniciar" e conclusao da tarefa.
+  startedAt: string;
   completedAt: string;
 };
 
 type ProjectStore = { spaces: ProjectSpace[]; tasks: ProjectTask[] };
+
+// Primeiro registro de trabalho no checklist (para tarefas criadas antes do campo startedAt).
+function firstWorkAt(checklist: ChecklistItem[]) {
+  let first = "";
+  for (const item of checklist) {
+    const candidates = [item.runningSince, ...item.sessions.map((session) => session.start)].filter(Boolean);
+    for (const value of candidates) if (!first || value < first) first = value;
+  }
+  return first;
+}
 
 const dataDir = path.resolve(process.cwd(), "data");
 const storePath = path.join(dataDir, "projects.json");
@@ -203,6 +215,9 @@ function normalizeTask(input: unknown): ProjectTask {
   const source = (input && typeof input === "object" ? input : {}) as Partial<ProjectTask>;
   const now = new Date().toISOString();
   const status = oneOf(source.status, taskStatuses, "a_fazer");
+  const checklist = normalizeChecklist(source.checklist);
+  const completedAt = status === "concluido" ? text(source.completedAt, 30) || now : "";
+  const startedAt = text(source.startedAt, 30) || firstWorkAt(checklist) || (status !== "a_fazer" ? completedAt : "");
   return {
     id: text(source.id, 40) || makeId("tar"),
     spaceId: text(source.spaceId, 40),
@@ -215,14 +230,15 @@ function normalizeTask(input: unknown): ProjectTask {
     startDate: isoDate(source.startDate),
     dueDate: isoDate(source.dueDate),
     tags: normalizeTags(source.tags),
-    checklist: normalizeChecklist(source.checklist),
+    checklist,
     comments: normalizeComments(source.comments),
     order: Number.isFinite(Number(source.order)) ? Number(source.order) : Date.now(),
     createdBy: text(source.createdBy, 120),
     createdByName: text(source.createdByName, 160),
     createdAt: text(source.createdAt, 30) || now,
     updatedAt: text(source.updatedAt, 30) || now,
-    completedAt: status === "concluido" ? text(source.completedAt, 30) || now : "",
+    startedAt,
+    completedAt,
   };
 }
 
@@ -406,6 +422,9 @@ export function createTask(input: unknown, access: ProjectAccess) {
       id: undefined,
       comments: [],
       checklist: mergeClientChecklist([], source.checklist),
+      // Datas reais sao sempre do servidor.
+      startedAt: source.status && source.status !== "a_fazer" ? new Date().toISOString() : "",
+      completedAt: undefined,
       createdBy: access.user.login,
       createdByName: access.user.name,
       createdAt: undefined,
@@ -440,11 +459,14 @@ export function updateTask(id: string, input: unknown, access: ProjectAccess) {
       if (!target || !canSeeSpace(target, access)) throw new ProjectAccessError("Voce nao participa do projeto de destino.");
     }
     const nextStatus = patch.status ?? current.status;
+    const stamp = new Date().toISOString();
     const next = normalizeTask({
       ...current,
       ...patch,
-      updatedAt: new Date().toISOString(),
-      completedAt: nextStatus === "concluido" ? current.completedAt || new Date().toISOString() : "",
+      updatedAt: stamp,
+      // Saiu de "A fazer" pela primeira vez: registra o inicio real.
+      startedAt: current.startedAt || (nextStatus !== "a_fazer" ? stamp : ""),
+      completedAt: nextStatus === "concluido" ? current.completedAt || stamp : "",
     });
     ensureMember(store, next.spaceId, next.assignee, next.assigneeName);
     store.tasks = store.tasks.map((task) => (task.id === id ? next : task));
@@ -528,6 +550,7 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
       item.runningByName = access.user.name || access.user.login;
       // Primeiro item iniciado coloca a tarefa (e portanto o projeto) em andamento.
       if (task.status === "a_fazer") task.status = "em_andamento";
+      if (!task.startedAt) task.startedAt = now.toISOString();
     }
 
     if (action === "pause") {
@@ -543,6 +566,7 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
       item.completedAt = now.toISOString();
       item.completedBy = access.user.login;
       if (task.status === "a_fazer") task.status = "em_andamento";
+      if (!task.startedAt) task.startedAt = now.toISOString();
       // Todos os itens finalizados: tarefa concluida.
       if (task.checklist.every((entry) => entry.state === "concluido")) {
         task.status = "concluido";

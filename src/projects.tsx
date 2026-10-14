@@ -83,6 +83,7 @@ type ProjectTask = {
   createdByName: string;
   createdAt: string;
   updatedAt: string;
+  startedAt: string;
   completedAt: string;
 };
 
@@ -274,6 +275,30 @@ function workPeriod(tasks: ProjectTask[]) {
     }
   }
   return { first, last };
+}
+
+function dateTime(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} ${date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+// Duracao de calendario entre inicio e fim (ou ate agora).
+function calendarSpan(startIso: string, endIso: string, now: number) {
+  const start = new Date(startIso).getTime();
+  const end = endIso ? new Date(endIso).getTime() : now;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "";
+  const hours = (end - start) / 3600000;
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}min`;
+  if (hours < 24) return `${Math.round(hours)}h`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "1 dia" : `${days} dias`;
+}
+
+// Inicio e fim reais de um item do checklist.
+function itemStartedAt(item: ChecklistItem) {
+  const values = [item.runningSince, ...(item.sessions || []).map((session) => session.start)].filter(Boolean).sort();
+  return values[0] || "";
 }
 
 function shortDate(iso: string) {
@@ -1050,6 +1075,12 @@ function TaskMeta({ task, now }: { task: ProjectTask; now: number }) {
           {formatClock(itemMs(running, now))}
         </span>
       ) : null}
+      {task.startedAt ? (
+        <span className="pm-meta" title={`Iniciada em ${dateTime(task.startedAt)}${task.completedAt ? ` · finalizada em ${dateTime(task.completedAt)}` : ""}`}>
+          <CalendarDays size={13} />
+          {shortDate(task.startedAt)} → {task.completedAt ? shortDate(task.completedAt) : "em andamento"}
+        </span>
+      ) : null}
       {task.checklist.length ? (
         <span className={`pm-meta ${done === task.checklist.length ? "complete" : ""}`} title="Itens do checklist finalizados">
           <ListChecks size={13} />
@@ -1441,16 +1472,48 @@ function TaskDrawer({
               </div>
             </dd>
 
-            <dt>Datas</dt>
+            <dt>Planejado</dt>
             <dd className="pm-dates">
               <label>
-                <span>Início</span>
+                <span>Início previsto</span>
                 <input type="date" value={task.startDate} onChange={(event) => onPatch({ startDate: event.target.value })} />
               </label>
               <label className={isOverdue(task) ? "overdue" : ""}>
-                <span>Prazo</span>
+                <span>Prazo (fim previsto)</span>
                 <input type="date" value={task.dueDate} onChange={(event) => onPatch({ dueDate: event.target.value })} />
               </label>
+            </dd>
+
+            <dt>Realizado</dt>
+            <dd>
+              <div className="pm-real-dates">
+                <div>
+                  <span>Iniciada em</span>
+                  <strong>{task.startedAt ? dateTime(task.startedAt) : "Ainda não iniciada"}</strong>
+                </div>
+                <div>
+                  <span>Finalizada em</span>
+                  <strong>{task.completedAt ? dateTime(task.completedAt) : task.startedAt ? "Em andamento" : "—"}</strong>
+                </div>
+                <div>
+                  <span>Duração</span>
+                  <strong>
+                    {task.startedAt ? calendarSpan(task.startedAt, task.completedAt, now) : "—"}
+                    {task.startedAt && !task.completedAt ? " até agora" : ""}
+                  </strong>
+                </div>
+                <div>
+                  <span>Horas trabalhadas</span>
+                  <strong>{formatHours(taskMs(task, now))}</strong>
+                </div>
+              </div>
+              {task.completedAt && task.dueDate ? (
+                <p className={`pm-deadline-result ${task.completedAt.slice(0, 10) > task.dueDate ? "late" : "ontime"}`}>
+                  {task.completedAt.slice(0, 10) > task.dueDate
+                    ? `Entregue com atraso (prazo era ${formatDue(task.dueDate)})`
+                    : "Entregue dentro do prazo"}
+                </p>
+              ) : null}
             </dd>
 
             <dt>Etiquetas</dt>
@@ -1510,7 +1573,8 @@ function TaskDrawer({
                       <small>
                         {CHECKLIST_LABEL[item.state]}
                         {running && item.runningByName ? ` por ${firstName(item.runningByName)}` : ""}
-                        {item.state === "concluido" && item.completedAt ? ` em ${formatDateTime(item.completedAt)}` : ""}
+                        {itemStartedAt(item) ? ` · início ${dateTime(itemStartedAt(item))}` : ""}
+                        {item.state === "concluido" && item.completedAt ? ` · fim ${dateTime(item.completedAt)}` : ""}
                       </small>
                     </div>
                     <span className={`pm-item-clock ${running ? "running" : ""}`} title="Tempo trabalhado neste item">

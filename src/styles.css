@@ -7918,3 +7918,46 @@ h1 {
 .pm-project-card > .pm-project-status {
   justify-self: start;
 }
+/* Datas reais da tarefa */
+.pm-real-dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+
+.pm-real-dates div {
+  display: grid;
+  gap: 2px;
+}
+
+.pm-real-dates span {
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pm-real-dates strong {
+  color: var(--heading);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pm-deadline-result {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pm-deadline-result.ontime {
+  color: var(--success-ink);
+}
+
+.pm-deadline-result.late {
+  color: var(--danger);
+}
