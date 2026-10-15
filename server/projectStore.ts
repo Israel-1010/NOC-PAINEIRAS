@@ -27,7 +27,8 @@ export const checklistStates = ["pendente", "em_andamento", "pausado", "concluid
 export type ChecklistState = (typeof checklistStates)[number];
 
 // Cada intervalo trabalhado (Iniciar -> Pausar/Finalizar), com quem trabalhou.
-export type WorkSession = { login: string; name: string; start: string; end: string; ms: number };
+// login = dono das horas; by = quem clicou em Iniciar (auditoria, quando diferente).
+export type WorkSession = { login: string; name: string; start: string; end: string; ms: number; by: string };
 
 export type ChecklistItem = {
   id: string;
@@ -39,6 +40,8 @@ export type ChecklistItem = {
   runningSince: string;
   runningBy: string;
   runningByName: string;
+  // Quem clicou em Iniciar (pode ser o gestor iniciando pelo analista).
+  runningStartedBy: string;
   sessions: WorkSession[];
   completedAt: string;
   completedBy: string;
@@ -151,6 +154,7 @@ function normalizeSessions(input: unknown): WorkSession[] {
       start: text(source.start, 30),
       end: text(source.end, 30),
       ms: Math.max(0, Number(source.ms) || 0),
+      by: text(source.by, 120),
     };
   }).filter((session) => session.start && session.end);
 }
@@ -171,6 +175,7 @@ function normalizeChecklistItem(input: unknown): ChecklistItem {
     runningSince: running,
     runningBy: running ? text(source.runningBy, 120) : "",
     runningByName: running ? text(source.runningByName, 160) : "",
+    runningStartedBy: running ? text(source.runningStartedBy, 120) : "",
     sessions: normalizeSessions(source.sessions),
     completedAt: state === "concluido" ? text(source.completedAt, 30) : "",
     completedBy: state === "concluido" ? text(source.completedBy, 120) : "",
@@ -381,7 +386,7 @@ export function viewTask(store: ProjectStore, task: ProjectTask, access: Project
     ...task,
     checklist: task.checklist.map((item) => {
       const mine = item.sessions.filter((session) => sameLogin(session.login, me));
-      const runningMine = item.state === "em_andamento" && sameLogin(item.runningBy, me);
+      const runningMine = item.state === "em_andamento" && (sameLogin(item.runningBy, me) || sameLogin(item.runningStartedBy, me));
       return {
         ...item,
         sessions: mine,
@@ -389,6 +394,7 @@ export function viewTask(store: ProjectStore, task: ProjectTask, access: Project
         runningSince: runningMine ? item.runningSince : "",
         runningBy: runningMine ? item.runningBy : "",
         runningByName: runningMine ? item.runningByName : "",
+        runningStartedBy: runningMine ? item.runningStartedBy : "",
         completedBy: sameLogin(item.completedBy, me) ? item.completedBy : "",
       };
     }),
@@ -577,10 +583,25 @@ function closeRunning(item: ChecklistItem, now: Date) {
   const started = new Date(item.runningSince);
   const ms = Math.max(0, now.getTime() - started.getTime());
   item.elapsedMs += ms;
-  item.sessions.push({ login: item.runningBy, name: item.runningByName, start: item.runningSince, end: now.toISOString(), ms });
+  item.sessions.push({ login: item.runningBy, name: item.runningByName, start: item.runningSince, end: now.toISOString(), ms, by: item.runningStartedBy });
   item.runningSince = "";
   item.runningBy = "";
   item.runningByName = "";
+  item.runningStartedBy = "";
+}
+
+// Dono das horas: dono do item > responsavel pela tarefa > quem clicou.
+function hoursOwner(task: ProjectTask, item: ChecklistItem, access: ProjectAccess) {
+  if (item.assignee) return { login: item.assignee, name: item.assigneeName || item.assignee };
+  if (task.assignee) return { login: task.assignee, name: task.assigneeName || task.assignee };
+  return { login: access.user.login, name: access.user.name || access.user.login };
+}
+
+// Pode mexer no cronometro: dono das horas, quem iniciou, ou gestor.
+function controlsTimer(store: ProjectStore, task: ProjectTask, item: ChecklistItem, access: ProjectAccess) {
+  return sameLogin(item.runningBy, access.user.login)
+    || sameLogin(item.runningStartedBy, access.user.login)
+    || isTaskManager(store, task, access);
 }
 
 function touchTask(task: ProjectTask, now: Date) {
@@ -604,8 +625,10 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
       item.state = "em_andamento";
       item.done = false;
       item.runningSince = now.toISOString();
-      item.runningBy = access.user.login;
-      item.runningByName = access.user.name || access.user.login;
+      const owner = hoursOwner(task, item, access);
+      item.runningBy = owner.login;
+      item.runningByName = owner.name;
+      item.runningStartedBy = access.user.login;
       // Primeiro item iniciado coloca a tarefa (e portanto o projeto) em andamento.
       if (task.status === "a_fazer") task.status = "em_andamento";
       if (!task.startedAt) task.startedAt = now.toISOString();
@@ -613,7 +636,7 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
 
     if (action === "pause") {
       if (item.state !== "em_andamento") return { task: viewTask(store, task, access), pausedElsewhere };
-      if (!sameLogin(item.runningBy, access.user.login) && !isTaskManager(store, task, access)) {
+      if (!controlsTimer(store, task, item, access)) {
         throw new ProjectAccessError("Este item esta em andamento com outra pessoa.");
       }
       closeRunning(item, now);
@@ -621,7 +644,7 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
     }
 
     if (action === "finish") {
-      if (item.state === "em_andamento" && !sameLogin(item.runningBy, access.user.login) && !isTaskManager(store, task, access)) {
+      if (item.state === "em_andamento" && !controlsTimer(store, task, item, access)) {
         throw new ProjectAccessError("Este item esta em andamento com outra pessoa.");
       }
       closeRunning(item, now);

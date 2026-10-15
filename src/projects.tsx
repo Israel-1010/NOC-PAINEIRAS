@@ -47,7 +47,7 @@ type ProjectSpace = {
 type TeamMember = { login: string; name: string; mail: string; title: string; department: string };
 
 type ChecklistState = "pendente" | "em_andamento" | "pausado" | "concluido";
-type WorkSession = { login: string; name: string; start: string; end: string; ms: number };
+type WorkSession = { login: string; name: string; start: string; end: string; ms: number; by?: string };
 type ChecklistItem = {
   id: string;
   text: string;
@@ -57,6 +57,7 @@ type ChecklistItem = {
   runningSince: string;
   runningBy: string;
   runningByName: string;
+  runningStartedBy?: string;
   sessions: WorkSession[];
   completedAt: string;
   completedBy: string;
@@ -1725,7 +1726,7 @@ function TaskDrawer({
               {orderedChecklist(task.checklist).map((item) => {
                 const running = item.state === "em_andamento";
                 const elapsed = itemMs(item, now);
-                const mineRunning = running && sameUser(item.runningBy, currentUser.login);
+                const mineRunning = running && (sameUser(item.runningBy, currentUser.login) || sameUser(item.runningStartedBy || "", currentUser.login));
                 // Analista nao recebe o cronometro de colegas: so sabe que esta em andamento com outra pessoa.
                 const runningByOther = running && !mineRunning && (!item.runningSince || !canManage);
                 return (
@@ -1761,6 +1762,7 @@ function TaskDrawer({
                       <small>
                         {CHECKLIST_LABEL[item.state]}
                         {running && item.runningByName ? ` por ${firstName(item.runningByName)}` : ""}
+                        {running && item.runningStartedBy && !sameUser(item.runningStartedBy, item.runningBy) ? ` (iniciado por ${sameUser(item.runningStartedBy, currentUser.login) ? "você" : item.runningStartedBy})` : ""}
                         {running && !item.runningByName ? " com outra pessoa" : ""}
                         {itemStartedAt(item) ? ` · início ${dateTime(itemStartedAt(item))}` : ""}
                         {item.state === "concluido" && item.completedAt ? ` · fim ${dateTime(item.completedAt)}` : ""}
