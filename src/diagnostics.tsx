@@ -3,6 +3,22 @@ import { CheckCircle2, Loader2, RefreshCw, XCircle } from "lucide-react";
 
 type DiagnosticStep = { name: string; ok: boolean; ms: number; detail: string };
 type DiagnosticReport = { id: string; title: string; ok: boolean; steps: DiagnosticStep[] };
+type RuntimeInfo = {
+  startedAt: string;
+  uptimeSec: number;
+  node: string;
+  memoryMb: number;
+  errors: { at: string; kind: string; where: string; message: string }[];
+};
+
+function formatUptime(seconds: number) {
+  if (seconds < 120) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 120) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ${minutes % 60}min`;
+  return `${Math.floor(hours / 24)} dias`;
+}
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
@@ -32,6 +48,7 @@ const HINTS: Record<string, string> = {
 export function DiagnosticsDashboard() {
   const [reports, setReports] = useState<DiagnosticReport[] | null>(null);
   const [checkedAt, setCheckedAt] = useState("");
+  const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -44,6 +61,7 @@ export function DiagnosticsDashboard() {
       if (!response.ok) throw new Error(payload.message || `Servidor respondeu ${response.status}.`);
       setReports(payload.reports || []);
       setCheckedAt(payload.checkedAt || "");
+      setRuntime(payload.runtime || null);
     } catch (runError) {
       setError(runError instanceof Error ? `${runError.message} — a própria API pode estar fora do ar ou reiniciando.` : "Falha ao testar.");
     } finally {
@@ -69,6 +87,35 @@ export function DiagnosticsDashboard() {
       </div>
 
       {error ? <div className="view-error" role="alert"><XCircle size={22} /><div><strong>{error}</strong></div></div> : null}
+
+      {runtime ? (
+        <section className={`dg-card dg-runtime ${runtime.uptimeSec < 300 || runtime.errors.length ? "fail" : "ok"}`}>
+          <header>
+            {runtime.uptimeSec < 300 || runtime.errors.length ? <XCircle size={22} /> : <CheckCircle2 size={22} />}
+            <h3>Servidor do portal</h3>
+            <span>No ar há {formatUptime(runtime.uptimeSec)}</span>
+          </header>
+          <div className="dg-runtime-body">
+            <p>
+              Iniciado em {new Date(runtime.startedAt).toLocaleString("pt-BR")} · Node {runtime.node} · {runtime.memoryMb} MB de memória.
+              {runtime.uptimeSec < 300 ? <b> Reiniciou há pouco: se isso se repete, o container está caindo (veja os erros abaixo e o log no Portainer).</b> : null}
+            </p>
+            {runtime.errors.length ? (
+              <ol className="dg-errors">
+                {runtime.errors.map((item, index) => (
+                  <li key={`${item.at}-${index}`}>
+                    <time>{new Date(item.at).toLocaleString("pt-BR")}</time>
+                    <strong>{item.where}</strong>
+                    <span>{item.kind}: {item.message}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="dg-noerrors">Nenhum erro registrado desde que o servidor iniciou.</p>
+            )}
+          </div>
+        </section>
+      ) : null}
 
       <div className="dg-grid">
         {(reports || []).map((report) => (

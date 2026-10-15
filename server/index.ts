@@ -108,6 +108,7 @@ import {
 } from "./ipInventoryClient";
 import { getTopology, saveTopology } from "./topologyStore";
 import { diagnoseAd, diagnoseIntune } from "./diagnostics";
+import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
 import {
   addTaskComment,
   checklistAction,
@@ -121,6 +122,8 @@ import {
 } from "./projectStore";
 import type { AuthUser } from "./auth";
 import type { ProjectAccess } from "./projectStore";
+
+installCrashGuards();
 
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
@@ -165,6 +168,7 @@ function asyncRoute<T>(handler: (req: express.Request) => Promise<T>) {
     } catch (error) {
       const message = formatApiError(error);
       const status = error && typeof error === "object" && "status" in error ? Number((error as { status?: unknown }).status) || 500 : 500;
+      if (status >= 500) recordError(`erro ${status}`, `${req.method} ${req.originalUrl.split("?")[0]}`, message);
       res.status(status).json({ ok: false, message });
     }
   };
@@ -243,7 +247,7 @@ async function pingHost(ip: string) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "rede-clube-api" });
+  res.json({ ok: true, service: "rede-clube-api", startedAt, uptimeSec: Math.round(process.uptime()) });
 });
 
 app.get("/api/diagnostics/ad", requireAuth, requireViews(["ad"]), async (_req, res) => {
@@ -388,6 +392,7 @@ app.post("/api/access/claim", requireAuth, asyncRoute((req) => claimAdmin(req.re
 // Diagnostico das integracoes, executado a partir do servidor (somente gestor).
 app.get("/api/diagnostics/integrations", requireAuth, requireAdmin, asyncRoute(async () => ({
   checkedAt: new Date().toISOString(),
+  runtime: runtimeInfo(),
   reports: await Promise.all([diagnoseAd(formatApiError), diagnoseIntune(formatApiError)]),
 })));
 app.put("/api/access/admins/:login", requireAuth, requireAdmin, asyncRoute((req) =>

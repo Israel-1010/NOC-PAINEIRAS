@@ -8696,3 +8696,60 @@ thead .ac-person-col {
   font-style: normal;
   font-weight: 600;
 }
+.dg-runtime-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px 16px 16px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.dg-runtime-body b {
+  color: var(--danger);
+}
+
+.dg-noerrors {
+  color: var(--success-ink);
+  font-weight: 600;
+}
+
+.dg-errors {
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.dg-errors li {
+  display: grid;
+  grid-template-columns: 150px 220px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--danger-soft);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.dg-errors time {
+  color: var(--muted);
+}
+
+.dg-errors strong {
+  color: var(--heading);
+  overflow-wrap: anywhere;
+}
+
+.dg-errors span {
+  color: var(--danger-ink);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .dg-errors li {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
