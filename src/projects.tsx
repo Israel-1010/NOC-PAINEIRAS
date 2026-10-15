@@ -299,6 +299,14 @@ function calendarSpan(startIso: string, endIso: string, now: number) {
   return days === 1 ? "1 dia" : `${days} dias`;
 }
 
+// Finalizados sempre no topo, na ordem em que foram finalizados; o resto mantem a ordem cadastrada.
+function orderedChecklist(items: ChecklistItem[]) {
+  const done = items
+    .filter((item) => item.state === "concluido")
+    .sort((a, b) => (a.completedAt || "").localeCompare(b.completedAt || ""));
+  return [...done, ...items.filter((item) => item.state !== "concluido")];
+}
+
 // Inicio e fim reais de um item do checklist.
 function itemStartedAt(item: ChecklistItem) {
   const values = [item.runningSince, ...(item.sessions || []).map((session) => session.start)].filter(Boolean).sort();
@@ -1714,7 +1722,7 @@ function TaskDrawer({
               <div className="pm-progress" aria-hidden="true"><span style={{ width: `${(doneItems / task.checklist.length) * 100}%` }} /></div>
             ) : null}
             <ul className="pm-checklist timed">
-              {task.checklist.map((item) => {
+              {orderedChecklist(task.checklist).map((item) => {
                 const running = item.state === "em_andamento";
                 const elapsed = itemMs(item, now);
                 const mineRunning = running && sameUser(item.runningBy, currentUser.login);
