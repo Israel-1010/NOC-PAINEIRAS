@@ -62,6 +62,7 @@ import {
   YAxis,
 } from "recharts";
 import { ProjectsDashboard } from "./projects";
+import { AccessDashboard } from "./access";
 import "./styles.css";
 
 type Status = "online" | "warning" | "offline";
@@ -781,7 +782,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1241,9 +1242,15 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
       { label: "Procedimentos (POP)", icon: BookOpen, view: "pop" },
     ],
   },
+  {
+    title: "Administração",
+    items: [
+      { label: "Acessos", icon: UserCheck, view: "access" },
+    ],
+  },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects";
+type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access";
 
 function statusLabel(status: Status) {
   return {
@@ -1264,6 +1271,7 @@ function viewEyebrow(view: View) {
   if (view === "wifi") return "Portal WiFi";
   if (view === "pop") return "Procedimento operacional padrao";
   if (view === "projects") return "Gestão de projetos da TI";
+  if (view === "access") return "Administração do portal";
   if (view === "topology") return "Mapa e monitoramento";
   return "Administracao de identidade";
 }
@@ -1279,6 +1287,7 @@ function viewTitle(view: View) {
   if (view === "wifi") return "WiFi";
   if (view === "pop") return "POP";
   if (view === "projects") return "Projetos";
+  if (view === "access") return "Acessos";
   if (view === "topology") return "Topologia";
   return "Active Directory";
 }
@@ -1295,7 +1304,59 @@ function App() {
   const [activeView, setActiveView] = useState<View>(() => getStoredView());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => getStoredSidebarCollapsed());
   const [session, setSession] = useState<AuthSession | null>(() => getStoredSession());
-  const [adSummaryState, setAdSummaryState] = useState<AdSummary>(fallbackAdSummary);
+  const [access, setAccess] = useState<{ isAdmin: boolean; views: string[] } | null>(null);
+
+  // Permissoes do usuario (o servidor tambem bloqueia; aqui so evita chamadas e esconde o menu).
+  useEffect(() => {
+    if (!session) {
+      setAccess(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const loadAccess = async () => {
+      try {
+        const response = await authFetch("/api/access/me");
+        if (!response.ok) return;
+        const payload = await parseApiPayload<{ isAdmin?: boolean; views?: string[] }>(response, {});
+        if (!cancelled) setAccess({ isAdmin: Boolean(payload.isAdmin), views: payload.views || [] });
+      } catch {
+        /* tenta de novo no proximo ciclo */
+      }
+    };
+    loadAccess();
+    const timer = window.setInterval(loadAccess, 60000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [session]);
+
+  const canView = useCallback((view: string) => {
+    if (!access) return false;
+    if (view === "access") return access.isAdmin;
+    return access.views.includes(view === "tickets" ? "milvusPortal" : view);
+  }, [access]);
+
+  // Quais telas usam cada conjunto de dados.
+  const canLoad = useCallback((kind: string) => {
+    const needs: Record<string, string[]> = {
+      ad: ["ad", "tv"],
+      intune: ["intune", "tv"],
+      office365: ["office365", "tv"],
+      snmp: ["snmp", "tv", "topology"],
+      tickets: ["milvusPortal", "tv"],
+      ips: ["ips", "topology", "tv"],
+      topology: ["topology", "tv"],
+    };
+    return (needs[kind] || []).some((view) => canView(view));
+  }, [canView]);
+
+  // Tela salva sem permissao (ou permissao retirada): vai para a primeira liberada.
+  useEffect(() => {
+    if (!access || canView(activeView)) return;
+    const first = navSections.flatMap((section) => section.items).find((item) => canView(item.view));
+    if (first) setActiveView(first.view);
+  }, [access, activeView, canView]);  const [adSummaryState, setAdSummaryState] = useState<AdSummary>(fallbackAdSummary);
   const [adDetails, setAdDetails] = useState<AdDetails>(fallbackAdDetails);
   const [adStatus, setAdStatus] = useState<AdStatus>({
     ok: true,
@@ -1362,6 +1423,10 @@ function App() {
 
     async function loadMyTasks() {
       try {
+        if (!canView("projects")) {
+          setMyOpenTasks(0);
+          return;
+        }
         const response = await authFetch("/api/projects");
         if (!response.ok) return;
         const payload = await parseApiPayload<{ tasks?: { assignee: string; status: string; collaborators?: { login: string }[]; checklist?: { assignee?: string }[] }[]; me?: { isAdmin: boolean } }>(response, {});
@@ -1387,7 +1452,7 @@ function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [session, activeView]);
+  }, [session, activeView, canView]);
 
   const loadAd = useCallback(async () => {
     if (!session) {
@@ -1747,72 +1812,72 @@ function App() {
   }, [clearSession, session]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || !canLoad("ad")) {
       return undefined;
     }
 
     loadAd();
     const interval = window.setInterval(loadAd, 30000);
     return () => window.clearInterval(interval);
-  }, [loadAd, session]);
+  }, [loadAd, session, canLoad]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || !canLoad("intune")) {
       return undefined;
     }
 
     loadIntune();
     const interval = window.setInterval(loadIntune, 60000);
     return () => window.clearInterval(interval);
-  }, [loadIntune, session]);
+  }, [loadIntune, session, canLoad]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || !canLoad("office365")) {
       return undefined;
     }
 
     loadOffice365();
     const interval = window.setInterval(loadOffice365, 60000);
     return () => window.clearInterval(interval);
-  }, [loadOffice365, session]);
+  }, [loadOffice365, session, canLoad]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || !canLoad("snmp")) {
       return undefined;
     }
 
     loadSnmp();
     const interval = window.setInterval(loadSnmp, 60000);
     return () => window.clearInterval(interval);
-  }, [loadSnmp, session]);
+  }, [loadSnmp, session, canLoad]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || !canLoad("tickets")) {
       return undefined;
     }
 
     loadTickets();
     const interval = window.setInterval(loadTickets, 30000);
     return () => window.clearInterval(interval);
-  }, [loadTickets, session]);
+  }, [loadTickets, session, canLoad]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || !canLoad("ips")) {
       return undefined;
     }
 
     loadIps();
     const interval = window.setInterval(loadIps, 60000);
     return () => window.clearInterval(interval);
-  }, [loadIps, session]);
+  }, [loadIps, session, canLoad]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || !canLoad("topology")) {
       return;
     }
 
     loadTopology();
-  }, [loadTopology, session]);
+  }, [loadTopology, session, canLoad]);
 
   useEffect(() => {
     window.addEventListener(AUTH_EXPIRED_EVENT, clearSession);
@@ -1904,7 +1969,10 @@ function App() {
         </div>
 
         <nav className="nav-list" aria-label="Seções do portal">
-          {navSections.map((section) => (
+          {navSections
+            .map((section) => ({ ...section, items: section.items.filter((item) => canView(item.view)) }))
+            .filter((section) => section.items.length)
+            .map((section) => (
             <div className="nav-section" key={section.title}>
               <p className="nav-section-title">{section.title}</p>
               {section.items.map((item) => {
@@ -1948,10 +2016,12 @@ function App() {
           </div>
 
           <div className="topbar-actions">
-            <button className="action-button" type="button" onClick={() => setActiveView("milvusPortal")}>
-              <Plus size={17} />
-              Abrir chamado
-            </button>
+            {canView("milvusPortal") ? (
+              <button className="action-button" type="button" onClick={() => setActiveView("milvusPortal")}>
+                <Plus size={17} />
+                Abrir chamado
+              </button>
+            ) : null}
             <div className="session-chip" title={`${session.user.login}${session.user.domain ? ` · ${session.user.domain}` : ""}`}>
               <span className="session-avatar" aria-hidden="true">{userInitials(session.user.name || session.user.login)}</span>
               <span>{session.user.name || session.user.login}</span>
@@ -1963,7 +2033,19 @@ function App() {
         </header>
 
         <ViewErrorBoundary key={activeView}>
-        {activeView === "tv" ? (
+        {!access ? (
+          <div className="view-loading">Carregando suas permissões...</div>
+        ) : !canView(activeView) ? (
+          <div className="view-error" role="alert">
+            <LockKeyhole size={24} />
+            <div>
+              <strong>Você não tem acesso a esta área.</strong>
+              <p>Peça ao gestor do portal para liberar em Administração → Acessos.</p>
+            </div>
+          </div>
+        ) : activeView === "access" ? (
+          <AccessDashboard />
+        ) : activeView === "tv" ? (
           <TvDashboard
             adSummary={adSummaryState}
             adStatus={adStatus}

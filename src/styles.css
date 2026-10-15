@@ -8244,3 +8244,263 @@ h1 {
   justify-items: start;
   gap: 4px;
 }
+/* ===================== Acessos (Administracao) ===================== */
+.view-loading {
+  padding: 40px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.ac-page {
+  display: grid;
+  gap: 14px;
+}
+
+.ac-intro {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.ac-intro-item {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--brand);
+  border-radius: 12px;
+}
+
+.ac-intro-item svg {
+  flex: none;
+  color: var(--accent);
+}
+
+.ac-intro-item strong {
+  display: block;
+  color: var(--heading);
+  font-size: 14px;
+}
+
+.ac-intro-item span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ac-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 0 2px;
+  background: var(--warning);
+  border-radius: 50%;
+}
+
+.ac-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.ac-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ac-table-wrap {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.ac-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ac-table th,
+.ac-table td {
+  padding: 10px 8px;
+  text-align: center;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ac-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  vertical-align: bottom;
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.ac-table thead th span {
+  display: inline-block;
+  max-width: 86px;
+  line-height: 1.25;
+}
+
+.ac-table th.sensitive span::after {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 4px;
+  content: "";
+  background: var(--warning);
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.ac-table td.sensitive {
+  background: rgba(224, 147, 31, 0.05);
+}
+
+.ac-table input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.ac-table input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ac-person-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 260px;
+  text-align: left !important;
+  background: var(--surface);
+}
+
+thead .ac-person-col {
+  z-index: 2;
+  background: var(--surface-2);
+}
+
+.ac-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ac-person strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--heading);
+  font-size: 14px;
+}
+
+.ac-person small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ac-avatar {
+  display: grid;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: var(--on-brand);
+  background: var(--brand);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ac-avatar.defaults {
+  background: var(--accent);
+}
+
+.ac-badge {
+  padding: 1px 8px;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.ac-badge.admin {
+  color: var(--on-brand);
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.ac-badge.custom {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-color: rgba(224, 23, 131, 0.3);
+}
+
+.ac-defaults-row td {
+  background: var(--accent-soft);
+}
+
+.ac-defaults-row .ac-person-col {
+  background: var(--accent-soft);
+}
+
+.ac-table tbody tr:hover td {
+  background: var(--surface-2);
+}
+
+.ac-actions-col {
+  min-width: 170px;
+  text-align: right !important;
+}
+
+.ac-row-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.ac-row-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 26px;
+  padding: 0 8px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ac-row-actions button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.ac-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 700;
+}

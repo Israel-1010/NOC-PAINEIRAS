@@ -5,7 +5,17 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { adConfig, allowedLoginGroups, isAdConfigured, isProduction, port, projectsConfig } from "./config";
+import { adConfig, allowedLoginGroups, isAdConfigured, isProduction, loginAllowedOu, port, projectsConfig } from "./config";
+import {
+  getMyAccess,
+  isPortalAdmin,
+  listAccess,
+  requireAdmin,
+  requireViews,
+  resetUserViews,
+  setDefaultViews,
+  setUserViews,
+} from "./accessStore";
 import {
   auditMutations,
   checkLoginThrottle,
@@ -223,7 +233,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "rede-clube-api" });
 });
 
-app.get("/api/diagnostics/ad", requireAuth, async (_req, res) => {
+app.get("/api/diagnostics/ad", requireAuth, requireViews(["ad"]), async (_req, res) => {
   let urlInfo = { protocol: "", host: "", port: "" };
 
   try {
@@ -277,9 +287,20 @@ app.get("/api/diagnostics/ad", requireAuth, async (_req, res) => {
 });
 
 async function isUserAllowed(login: string) {
-  if (!allowedLoginGroups.length || adConfig.useMock || !isAdConfigured()) return true;
-  const details = await getAdUserDetails(login);
-  return details.groups.some((group) => allowedLoginGroups.includes(String(group.name).toLowerCase()));
+  if (adConfig.useMock || !isAdConfigured()) return true;
+  // Gestores sempre entram (evita trancar o portal se a OU mudar de nome).
+  if (isPortalAdmin(login)) return true;
+
+  if (loginAllowedOu) {
+    const team = await listAdUsersInOu(loginAllowedOu);
+    if (!team.items.some((member) => member.login.toLowerCase() === login.toLowerCase())) return false;
+  }
+
+  if (allowedLoginGroups.length) {
+    const details = await getAdUserDetails(login);
+    return details.groups.some((group) => allowedLoginGroups.includes(String(group.name).toLowerCase()));
+  }
+  return true;
 }
 
 app.post("/api/auth/login", async (req, res) => {
@@ -296,14 +317,14 @@ app.post("/api/auth/login", async (req, res) => {
 
     if (!(await isUserAllowed(user.login))) {
       writeAudit({ event: "login-negado-grupo", user: user.login, ip: req.ip });
-      res.status(403).json({ ok: false, message: "Seu usuario nao tem permissao para acessar o portal. Solicite inclusao no grupo autorizado." });
+      res.status(403).json({ ok: false, message: "Acesso restrito a equipe de Tecnologia. Se voce faz parte da equipe, fale com o gestor do portal." });
       return;
     }
 
     clearLoginFailures(req);
     writeAudit({ event: "login", user: user.login, ip: req.ip });
     const token = createSessionToken(user);
-    res.json({ ok: true, token, user });
+    res.json({ ok: true, token, user, access: await getMyAccess(user) });
   } catch (error) {
     const message = formatApiError(error);
     const isValidation = message.includes("Informe");
@@ -331,7 +352,26 @@ app.get("/api/auth/me", (req, res) => {
   res.json({ ok: true, user });
 });
 
-app.use("/api/ad", requireAuth);
+/* ---------- Controle de acesso ao menu ---------- */
+
+app.get("/api/access/me", requireAuth, asyncRoute((req) => getMyAccess(req.res?.locals.user)));
+app.get("/api/access", requireAuth, requireAdmin, asyncRoute(async () => {
+  let people: { login: string; name: string; title?: string }[] = [];
+  let teamError = "";
+  try {
+    const team = await listAdUsersInOu(loginAllowedOu || projectsConfig.teamOu);
+    people = team.items.filter((member) => !projectsConfig.teamExclude.includes(member.login.toLowerCase()));
+  } catch (error) {
+    teamError = error instanceof Error ? error.message : "Equipe indisponivel.";
+  }
+  return { ...(await listAccess(people)), teamError, loginAllowedOu };
+}));
+app.put("/api/access/users/:login", requireAuth, requireAdmin, asyncRoute((req) =>
+  setUserViews(String(req.params.login), String(req.body?.name || ""), req.body?.views, req.res?.locals.user)));
+app.delete("/api/access/users/:login", requireAuth, requireAdmin, asyncRoute((req) => resetUserViews(String(req.params.login))));
+app.put("/api/access/defaults", requireAuth, requireAdmin, asyncRoute((req) => setDefaultViews(req.body?.views)));
+
+app.use("/api/ad", requireAuth, requireViews(["ad", "tv"], ["ad"]));
 
 app.get("/api/ad/status", asyncRoute(() => getAdStatus()));
 app.get("/api/ad/summary", asyncRoute(() => getAdSummary()));
@@ -384,25 +424,25 @@ app.post("/api/ad/groups/:group/members", (_req, res) => {
   });
 });
 
-app.use("/api/intune", requireAuth);
+app.use("/api/intune", requireAuth, requireViews(["intune", "tv"], ["intune"]));
 
 app.get("/api/intune/status", asyncRoute(() => getIntuneStatus()));
 app.get("/api/intune/summary", asyncRoute(() => getIntuneSummary()));
 app.get("/api/intune/devices", asyncRoute((req) => listIntuneDevices(String(req.query.search || ""), String(req.query.limit || ""))));
-app.get("/api/intune/devices/:id/laps", (req, res, next) => {
+app.get("/api/intune/devices/:id/laps", requireViews(["intune"]), (req, res, next) => {
   writeAudit({ event: "laps-consultado", user: res.locals.user?.login, ip: req.ip, deviceId: String(req.params.id) });
   next();
 }, asyncRoute((req) => getIntuneDeviceLapsCredential(String(req.params.id))));
 app.get("/api/intune/devices/:id", asyncRoute((req) => getIntuneDeviceDetails(String(req.params.id))));
 
-app.use("/api/office365", requireAuth);
+app.use("/api/office365", requireAuth, requireViews(["office365", "tv"], ["office365"]));
 
 app.get("/api/office365/status", asyncRoute(() => getOffice365Status()));
 app.get("/api/office365/summary", asyncRoute(() => getOffice365Summary()));
 app.get("/api/office365/details", asyncRoute(() => getOffice365Details()));
 app.patch("/api/office365/users/:id/licenses", asyncRoute((req) => updateOffice365UserLicenses(String(req.params.id), req.body?.skuIds)));
 
-app.use("/api/wifi", requireAuth);
+app.use("/api/wifi", requireAuth, requireViews(["wifi"]));
 
 app.get("/api/wifi/status", asyncRoute((req) => getWifiStatus(String(req.query.kind || ""))));
 app.get("/api/wifi/:kind/schema", asyncRoute((req) => getWifiSchema(String(req.params.kind))));
@@ -415,11 +455,11 @@ app.post("/api/wifi/:kind", asyncRoute((req) => createWifiRecord(String(req.para
 app.patch("/api/wifi/:kind/:id", asyncRoute((req) => updateWifiRecord(String(req.params.kind), String(req.params.id), req.body || {})));
 app.delete("/api/wifi/:kind/:id", asyncRoute((req) => deleteWifiRecord(String(req.params.kind), String(req.params.id))));
 
-app.use("/api/pop", requireAuth);
+app.use("/api/pop", requireAuth, requireViews(["pop"]));
 
 app.get("/api/pop/documents", asyncRoute((req) => listPopDocuments(String(req.query.search || ""))));
 
-app.use("/api/snmp", requireAuth);
+app.use("/api/snmp", requireAuth, requireViews(["snmp", "tv", "topology"], ["snmp"]));
 
 app.get("/api/snmp/summary", asyncRoute(() => getSnmpSummary()));
 app.get("/api/snmp", asyncRoute(() => listSnmp()));
@@ -442,7 +482,7 @@ app.post("/api/snmp/devices/:id/collect", asyncRoute(async (req) => ({
   metric: await collectSnmpDevice(String(req.params.id)),
 })));
 
-app.use("/api/tickets", requireAuth);
+app.use("/api/tickets", requireAuth, requireViews(["milvusPortal", "tv"], ["milvusPortal"]));
 
 app.get("/api/tickets/status", asyncRoute(() => getMilvusStatus()));
 app.get("/api/tickets/summary", asyncRoute(() => getMilvusSummary()));
@@ -452,7 +492,7 @@ app.post("/api/tickets", asyncRoute((req) => createMilvusTicket(req.body || {}))
 app.post("/api/tickets/:id/close", asyncRoute((req) => closeMilvusTicket(String(req.params.id), req.body || {})));
 app.get("/api/tickets/:id", asyncRoute((req) => getMilvusTicketDetails(String(req.params.id))));
 
-app.use("/api/ips", requireAuth);
+app.use("/api/ips", requireAuth, requireViews(["ips", "topology", "tv"], ["ips"]));
 
 app.get("/api/ips/summary", asyncRoute(() => getIpSummary()));
 app.get("/api/ips", asyncRoute((req) => listIps(String(req.query.search || ""), String(req.query.status || ""), String(req.query.category || ""))));
@@ -467,7 +507,7 @@ app.patch("/api/ips/categories", asyncRoute((req) => renameIpCategory(req.body |
 app.patch("/api/ips/:id", asyncRoute((req) => updateIp(String(req.params.id), req.body || {})));
 app.delete("/api/ips/:id", asyncRoute((req) => deleteIp(String(req.params.id))));
 
-app.use("/api/topology", requireAuth);
+app.use("/api/topology", requireAuth, requireViews(["topology", "tv"], ["topology"]));
 
 app.get("/api/topology", asyncRoute(async () => ({
   ok: true,
@@ -487,7 +527,7 @@ app.post("/api/topology/ping", asyncRoute(async (req) => {
   return { ok: true, items };
 }));
 
-app.use("/api/projects", requireAuth);
+app.use("/api/projects", requireAuth, requireViews(["projects"]));
 
 function projectAccess(req: express.Request): ProjectAccess {
   const user = (req.res?.locals.user || {}) as AuthUser;

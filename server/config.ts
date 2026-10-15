@@ -107,6 +107,14 @@ export const projectsConfig = {
   teamExclude: loginList(process.env.PROJECTS_TEAM_EXCLUDE),
 };
 
+// Gestores do portal: veem tudo e controlam o acesso dos demais.
+// APP_ADMINS; se vazio, usa PROJECTS_ADMINS.
+export const portalAdmins = loginList(process.env.APP_ADMINS).length ? loginList(process.env.APP_ADMINS) : projectsConfig.admins;
+
+// So entra no portal quem estiver nesta OU do AD (nome ou DN). Padrao: Tecnologia.
+// Defina LOGIN_ALLOWED_OU= (vazio) para desligar. Gestores sempre entram.
+export const loginAllowedOu = process.env.LOGIN_ALLOWED_OU === undefined ? "Tecnologia" : process.env.LOGIN_ALLOWED_OU.trim();
+
 if (!projectsConfig.admins.length) {
   console.warn("[projetos] PROJECTS_ADMINS vazio: todos os usuarios enxergam e gerenciam todos os projetos.");
 }
