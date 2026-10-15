@@ -8114,3 +8114,133 @@ h1 {
   letter-spacing: 0;
   text-transform: none;
 }
+/* Participantes e dono de item */
+.pm-task-people .pm-avatar {
+  width: 26px;
+  height: 26px;
+  font-size: 10px;
+}
+
+.pm-avatar.owner {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--accent) !important;
+}
+
+.pm-collaborators {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pm-collab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 2px 2px;
+  color: var(--heading);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pm-collab-chip .pm-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.pm-collab-chip button {
+  display: grid;
+  padding: 2px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+}
+
+.pm-collab-chip button:hover {
+  color: var(--danger);
+}
+
+.pm-collab-add {
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pm-item-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-item-owner {
+  max-width: 140px;
+  min-height: 22px;
+  padding: 0 4px;
+  color: var(--muted-2);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.pm-item-owner.set {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-border);
+}
+
+/* Progresso em % no card da tarefa */
+.pm-task-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 220px;
+}
+
+.pm-task-progress-bar {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  background: var(--border-soft);
+  border-radius: 999px;
+}
+
+.pm-task-progress-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--success));
+  border-radius: 999px;
+}
+
+.pm-task-progress b {
+  color: var(--heading);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-card-open .pm-task-progress {
+  max-width: none;
+  margin-top: 2px;
+}
+
+.pm-row-badges .pm-task-progress {
+  width: 150px;
+}
+.pm-checklist.timed .pm-item-text {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}

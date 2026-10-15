@@ -60,6 +60,8 @@ type ChecklistItem = {
   sessions: WorkSession[];
   completedAt: string;
   completedBy: string;
+  assignee: string;
+  assigneeName: string;
 };
 type ChecklistAction = "start" | "pause" | "finish" | "reopen";
 type TaskComment = { id: string; author: string; authorName: string; text: string; at: string };
@@ -73,6 +75,7 @@ type ProjectTask = {
   priority: TaskPriority;
   assignee: string;
   assigneeName: string;
+  collaborators: SpaceMember[];
   startDate: string;
   dueDate: string;
   tags: string[];
@@ -375,7 +378,7 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
   const activeSpace = spaceById.get(spaceFilter);
 
   const scopedTasks = useMemo(() => {
-    if (spaceFilter === "mine") return data.tasks.filter((task) => sameUser(task.assignee, currentUser.login));
+    if (spaceFilter === "mine") return data.tasks.filter((task) => involves(task, currentUser.login));
     if (spaceFilter === "all") return data.tasks;
     return data.tasks.filter((task) => task.spaceId === spaceFilter);
   }, [currentUser.login, data.tasks, spaceFilter]);
@@ -384,7 +387,7 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
     const term = search.trim().toLowerCase();
     return scopedTasks
       .filter((task) => !priorityFilter || task.priority === priorityFilter)
-      .filter((task) => assigneeFilter === "all" || (assigneeFilter === "me" ? sameUser(task.assignee, currentUser.login) : !task.assignee))
+      .filter((task) => assigneeFilter === "all" || (assigneeFilter === "me" ? involves(task, currentUser.login) : !task.assignee))
       .filter((task) => showDone || task.status !== "concluido")
       .filter((task) => !term || [task.title, task.description, task.assigneeName, task.assignee, ...task.tags].join(" ").toLowerCase().includes(term))
       .sort((a, b) => a.order - b.order);
@@ -396,7 +399,7 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
   // Gestor ve os numeros da equipe; analista ve so as tarefas atribuidas a ele.
   const teamView = Boolean(data.me?.isAdmin || activeSpace?.canManage);
   const statTasks = useMemo(
-    () => (teamView ? scopedTasks : scopedTasks.filter((task) => sameUser(task.assignee, currentUser.login))),
+    () => (teamView ? scopedTasks : scopedTasks.filter((task) => involves(task, currentUser.login))),
     [currentUser.login, scopedTasks, teamView],
   );
 
@@ -539,7 +542,7 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
         <button className={`pm-space-item ${spaceFilter === "mine" ? "active" : ""}`} type="button" onClick={() => setSpaceFilter("mine")}>
           <User size={16} />
           <span>Minhas tarefas</span>
-          <small>{data.tasks.filter((task) => task.status !== "concluido" && sameUser(task.assignee, currentUser.login)).length}</small>
+          <small>{data.tasks.filter((task) => task.status !== "concluido" && involves(task, currentUser.login)).length}</small>
         </button>
 
         <p className="pm-spaces-title">Projetos</p>
@@ -945,6 +948,7 @@ function ProjectCards({
         }
         if (task.assignee && (task.status === "em_andamento" || task.status === "revisao")) {
           person(task.assignee, task.assigneeName).tasks.push({ id: task.id, title: task.title, status: task.status });
+          for (const member of task.collaborators) person(member.login, member.name).tasks.push({ id: task.id, title: task.title, status: task.status });
         }
       }
       const working = Array.from(people.values()).sort((a, b) => Number(b.live) - Number(a.live) || a.name.localeCompare(b.name, "pt-BR"));
@@ -1116,6 +1120,38 @@ function PriorityFlag({ priority, withLabel = false }: { priority: TaskPriority;
   );
 }
 
+// Envolvido na tarefa: responsavel, participante ou dono de algum item.
+function involves(task: ProjectTask, login: string) {
+  return sameUser(task.assignee, login)
+    || task.collaborators.some((member) => sameUser(member.login, login))
+    || task.checklist.some((item) => sameUser(item.assignee, login));
+}
+
+// Responsavel (com anel) + participantes empilhados.
+function TaskPeople({ task }: { task: ProjectTask }) {
+  if (!task.collaborators.length) return <Assignee task={task} />;
+  const extra = task.collaborators.slice(0, 2);
+  const names = [task.assigneeName || task.assignee, ...task.collaborators.map((member) => member.name)].filter(Boolean).join(", ");
+  return (
+    <span className="pm-avatar-stack pm-task-people" title={names}>
+      {task.assignee ? <span className="pm-avatar owner" style={avatarStyle(task.assignee)}>{initials(task.assigneeName || task.assignee)}</span> : null}
+      {extra.map((member) => <span className="pm-avatar" key={member.login} style={avatarStyle(member.login)}>{initials(member.name)}</span>)}
+      {task.collaborators.length > 2 ? <span className="pm-avatar more">+{task.collaborators.length - 2}</span> : null}
+    </span>
+  );
+}
+
+function TaskProgress({ task }: { task: ProjectTask }) {
+  if (!task.checklist.length) return null;
+  const percent = Math.round(taskProgress(task) * 100);
+  return (
+    <span className="pm-task-progress" title={`${percent}% dos itens finalizados`}>
+      <span className="pm-task-progress-bar"><span style={{ width: `${percent}%` }} /></span>
+      <b>{percent}%</b>
+    </span>
+  );
+}
+
 function Assignee({ task }: { task: ProjectTask }) {
   if (!task.assignee) return <span className="pm-avatar empty" title="Sem responsável"><User size={13} /></span>;
   const name = task.assigneeName || task.assignee;
@@ -1147,13 +1183,13 @@ function TaskMeta({ task, now }: { task: ProjectTask; now: number }) {
       {task.startedAt ? (
         <span className="pm-meta" title={`Iniciada em ${dateTime(task.startedAt)}${task.completedAt ? ` · finalizada em ${dateTime(task.completedAt)}` : ""}`}>
           <CalendarDays size={13} />
-          {shortDate(task.startedAt)} → {task.completedAt ? shortDate(task.completedAt) : "em andamento"}
+          {shortDate(task.startedAt)} → {task.completedAt ? shortDate(task.completedAt) : task.status === "a_fazer" ? "em aberto" : "em andamento"}
         </span>
       ) : null}
       {task.checklist.length ? (
         <span className={`pm-meta ${done === task.checklist.length ? "complete" : ""}`} title="Itens do checklist finalizados">
           <ListChecks size={13} />
-          {done}/{task.checklist.length} · {Math.round(taskProgress(task) * 100)}%
+          {done}/{task.checklist.length}
         </span>
       ) : null}
       {worked > 0 && !running ? (
@@ -1259,10 +1295,11 @@ function TaskList({ tasks, spaceById, showSpace, onOpen, onPatch, onQuickAdd, fi
                         <span className="pm-row-badges">
                           {showSpace && space ? <span className="pm-space-badge"><i className="pm-space-dot" style={{ background: space.color }} />{space.name}</span> : null}
                           {task.tags.map((tag) => <span className="pm-tag" key={tag}>{tag}</span>)}
+                          <TaskProgress task={task} />
                           <TaskMeta task={task} now={now} />
                         </span>
                       </button>
-                      <Assignee task={task} />
+                      <TaskPeople task={task} />
                       <span className="pm-row-due"><DueDate task={task} /></span>
                       <PriorityFlag priority={task.priority} />
                     </div>
@@ -1330,9 +1367,10 @@ function TaskBoard({ tasks, spaceById, showSpace, onOpen, onPatch, onQuickAdd, n
                       {showSpace && space ? <span className="pm-space-badge"><i className="pm-space-dot" style={{ background: space.color }} />{space.name}</span> : null}
                       <strong>{task.title}</strong>
                       {task.tags.length ? <span className="pm-row-badges">{task.tags.map((tag) => <span className="pm-tag" key={tag}>{tag}</span>)}</span> : null}
+                      <TaskProgress task={task} />
                     </button>
                     <footer>
-                      <Assignee task={task} />
+                      <TaskPeople task={task} />
                       <DueDate task={task} />
                       <TaskMeta task={task} now={now} />
                       <PriorityFlag priority={task.priority} />
@@ -1406,6 +1444,16 @@ function TaskDrawer({
   const otherPeople = team.filter((person) => !memberLogins.has(person.login.toLowerCase()));
   const knownLogins = new Set([...projectPeople, ...otherPeople].map((person) => person.login.toLowerCase()));
 
+  // Donos possiveis de itens: responsavel, participantes e membros do projeto.
+  const itemPeople = (() => {
+    const map = new Map<string, { login: string; name: string }>();
+    const add = (login: string, name: string) => login && !map.has(login.toLowerCase()) && map.set(login.toLowerCase(), { login, name: name || login });
+    add(task.assignee, task.assigneeName);
+    task.collaborators.forEach((member) => add(member.login, member.name));
+    projectPeople.forEach((person) => add(person.login, person.name));
+    return Array.from(map.values());
+  })();
+
   function changeAssignee(login: string) {
     if (!login) {
       onPatch({ assignee: "", assigneeName: "" });
@@ -1437,6 +1485,8 @@ function TaskDrawer({
       sessions: [],
       completedAt: "",
       completedBy: "",
+      assignee: "",
+      assigneeName: "",
     };
     onPatch({ checklist: [...task.checklist, item] });
   }
@@ -1525,6 +1575,40 @@ function TaskDrawer({
               ) : null}
             </dd>
 
+            <dt>Participantes</dt>
+            <dd>
+              <div className="pm-collaborators">
+                {task.collaborators.map((member) => (
+                  <span className="pm-collab-chip" key={member.login}>
+                    <span className="pm-avatar" style={avatarStyle(member.login)}>{initials(member.name)}</span>
+                    {firstName(member.name)}
+                    <button
+                      type="button"
+                      aria-label={`Remover ${member.name}`}
+                      onClick={() => onPatch({ collaborators: task.collaborators.filter((item) => item.login !== member.login) })}
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+                <select
+                  className="pm-collab-add"
+                  value=""
+                  aria-label="Adicionar participante"
+                  onChange={(event) => {
+                    const login = event.target.value;
+                    const person = [...projectPeople, ...otherPeople].find((item) => item.login === login);
+                    if (person) onPatch({ collaborators: [...task.collaborators, { login: person.login, name: person.name }] });
+                  }}
+                >
+                  <option value="">+ Adicionar participante</option>
+                  {[...projectPeople, ...otherPeople]
+                    .filter((person) => !sameUser(person.login, task.assignee) && !task.collaborators.some((member) => sameUser(member.login, person.login)))
+                    .map((person) => <option key={person.login} value={person.login}>{person.name}</option>)}
+                </select>
+              </div>
+            </dd>
+
             <dt>Prioridade</dt>
             <dd>
               <div className="pm-priority-picker" role="radiogroup" aria-label="Prioridade">
@@ -1564,13 +1648,13 @@ function TaskDrawer({
                 </div>
                 <div>
                   <span>Finalizada em</span>
-                  <strong>{task.completedAt ? dateTime(task.completedAt) : task.startedAt ? "Em andamento" : "—"}</strong>
+                  <strong>{task.completedAt ? dateTime(task.completedAt) : !task.startedAt ? "—" : task.status === "a_fazer" ? "Em aberto" : "Em andamento"}</strong>
                 </div>
                 <div>
                   <span>Duração</span>
                   <strong>
                     {task.startedAt ? calendarSpan(task.startedAt, task.completedAt, now) : "—"}
-                    {task.startedAt && !task.completedAt ? " até agora" : ""}
+                    {task.startedAt && !task.completedAt && task.status !== "a_fazer" ? " até agora" : ""}
                   </strong>
                 </div>
                 <div>
@@ -1642,7 +1726,30 @@ function TaskDrawer({
                       {item.state === "concluido" ? <CircleCheck size={18} /> : running ? <span className="pm-live-dot big" /> : <Circle size={18} />}
                     </span>
                     <div className="pm-item-body">
-                      <span className="pm-item-text">{item.text}</span>
+                      <span className="pm-item-text">
+                        {item.text}
+                        <select
+                          className={`pm-item-owner ${item.assignee ? "set" : ""}`}
+                          value={item.assignee}
+                          title="Dono deste item"
+                          aria-label={`Dono do item ${item.text}`}
+                          onChange={(event) => {
+                            const login = event.target.value;
+                            const person = itemPeople.find((entry) => entry.login === login);
+                            onPatch({
+                              checklist: task.checklist.map((entry) => (entry.id === item.id
+                                ? { ...entry, assignee: login, assigneeName: person?.name || login }
+                                : entry)),
+                            });
+                          }}
+                        >
+                          <option value="">👤 sem dono</option>
+                          {item.assignee && !itemPeople.some((entry) => sameUser(entry.login, item.assignee)) ? (
+                            <option value={item.assignee}>{firstName(item.assigneeName || item.assignee)}</option>
+                          ) : null}
+                          {itemPeople.map((person) => <option key={person.login} value={person.login}>{firstName(person.name)}</option>)}
+                        </select>
+                      </span>
                       <small>
                         {CHECKLIST_LABEL[item.state]}
                         {running && item.runningByName ? ` por ${firstName(item.runningByName)}` : ""}

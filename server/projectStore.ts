@@ -42,6 +42,9 @@ export type ChecklistItem = {
   sessions: WorkSession[];
   completedAt: string;
   completedBy: string;
+  // Dono do item (opcional): divide o trabalho da tarefa entre pessoas.
+  assignee: string;
+  assigneeName: string;
 };
 
 export type TaskComment = { id: string; author: string; authorName: string; text: string; at: string };
@@ -55,6 +58,8 @@ export type ProjectTask = {
   priority: TaskPriority;
   assignee: string;
   assigneeName: string;
+  // Participantes: ajudam na tarefa (o responsavel continua sendo um so).
+  collaborators: SpaceMember[];
   startDate: string;
   dueDate: string;
   tags: string[];
@@ -169,6 +174,8 @@ function normalizeChecklistItem(input: unknown): ChecklistItem {
     sessions: normalizeSessions(source.sessions),
     completedAt: state === "concluido" ? text(source.completedAt, 30) : "",
     completedBy: state === "concluido" ? text(source.completedBy, 120) : "",
+    assignee: text(source.assignee, 120),
+    assigneeName: text(source.assignee, 120) ? text(source.assigneeName, 160) || text(source.assignee, 120) : "",
   };
 }
 
@@ -186,8 +193,11 @@ function mergeClientChecklist(current: ChecklistItem[], incoming: unknown): Chec
     const source = (raw && typeof raw === "object" ? raw : {}) as Partial<ChecklistItem>;
     const existing = source.id ? byId.get(String(source.id)) : undefined;
     const label = text(source.text, 300);
-    if (existing) return { ...existing, text: label || existing.text };
-    return normalizeChecklistItem({ id: source.id, text: label });
+    const owner = "assignee" in source
+      ? { assignee: text(source.assignee, 120), assigneeName: text(source.assignee, 120) ? text(source.assigneeName, 160) || text(source.assignee, 120) : "" }
+      : {};
+    if (existing) return { ...existing, text: label || existing.text, ...owner };
+    return normalizeChecklistItem({ id: source.id, text: label, ...owner });
   }).filter((item) => item.text);
 }
 
@@ -227,6 +237,7 @@ function normalizeTask(input: unknown): ProjectTask {
     priority: oneOf(source.priority, taskPriorities, "normal"),
     assignee: text(source.assignee, 120),
     assigneeName: text(source.assigneeName, 160),
+    collaborators: normalizeMembers(source.collaborators).filter((member) => member.login.toLowerCase() !== text(source.assignee, 120).toLowerCase()),
     startDate: isoDate(source.startDate),
     dueDate: isoDate(source.dueDate),
     tags: normalizeTags(source.tags),
@@ -330,6 +341,8 @@ function canSeeSpace(space: ProjectSpace, access: ProjectAccess) {
 
 function canSeeTask(store: ProjectStore, task: ProjectTask, access: ProjectAccess) {
   if (sameLogin(task.assignee, access.user.login)) return true;
+  if (task.collaborators.some((member) => sameLogin(member.login, access.user.login))) return true;
+  if (task.checklist.some((item) => sameLogin(item.assignee, access.user.login))) return true;
   const space = store.spaces.find((item) => item.id === task.spaceId);
   return Boolean(space && canSeeSpace(space, access));
 }
@@ -380,6 +393,20 @@ export function viewTask(store: ProjectStore, task: ProjectTask, access: Project
       };
     }),
   };
+}
+
+// Todos os envolvidos na tarefa (responsavel, participantes e donos de itens).
+function taskPeople(task: ProjectTask) {
+  const people: SpaceMember[] = [];
+  if (task.assignee) people.push({ login: task.assignee, name: task.assigneeName || task.assignee });
+  people.push(...task.collaborators);
+  for (const item of task.checklist) if (item.assignee) people.push({ login: item.assignee, name: item.assigneeName || item.assignee });
+  return people;
+}
+
+// Quem e envolvido na tarefa passa a ser membro do projeto (para enxergar ao logar).
+function ensureTaskPeople(store: ProjectStore, task: ProjectTask) {
+  for (const person of taskPeople(task)) ensureMember(store, task.spaceId, person.login, person.name);
 }
 
 export function getProjects(access: ProjectAccess) {
@@ -459,14 +486,14 @@ export function createTask(input: unknown, access: ProjectAccess) {
       updatedAt: undefined,
       order: Date.now(),
     });
-    ensureMember(store, task.spaceId, task.assignee, task.assigneeName);
+    ensureTaskPeople(store, task);
     store.tasks.push(task);
     return viewTask(store, task, access);
   });
 }
 
 const editableTaskFields = [
-  "spaceId", "title", "description", "status", "priority", "assignee", "assigneeName",
+  "spaceId", "title", "description", "status", "priority", "assignee", "assigneeName", "collaborators",
   "startDate", "dueDate", "tags", "checklist", "order",
 ] as const;
 
@@ -504,10 +531,13 @@ export function updateTask(id: string, input: unknown, access: ProjectAccess) {
       ...patch,
       updatedAt: stamp,
       // Saiu de "A fazer" pela primeira vez: registra o inicio real.
-      startedAt: current.startedAt || (nextStatus !== "a_fazer" ? stamp : ""),
+      // Voltou para "A fazer" sem nenhuma hora registrada: e como se nao tivesse comecado.
+      startedAt: nextStatus === "a_fazer" && !firstWorkAt(current.checklist)
+        ? ""
+        : current.startedAt || (nextStatus !== "a_fazer" ? stamp : ""),
       completedAt: nextStatus === "concluido" ? current.completedAt || stamp : "",
     });
-    ensureMember(store, next.spaceId, next.assignee, next.assigneeName);
+    ensureTaskPeople(store, next);
     store.tasks = store.tasks.map((task) => (task.id === id ? next : task));
     return viewTask(store, next, access);
   });

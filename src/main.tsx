@@ -1364,10 +1364,14 @@ function App() {
       try {
         const response = await authFetch("/api/projects");
         if (!response.ok) return;
-        const payload = await parseApiPayload<{ tasks?: { assignee: string; status: string }[]; me?: { isAdmin: boolean } }>(response, {});
+        const payload = await parseApiPayload<{ tasks?: { assignee: string; status: string; collaborators?: { login: string }[]; checklist?: { assignee?: string }[] }[]; me?: { isAdmin: boolean } }>(response, {});
         if (cancelled) return;
         const login = session!.user.login.toLowerCase();
-        setMyOpenTasks((payload.tasks || []).filter((task) => task.assignee?.toLowerCase() === login && task.status !== "concluido").length);
+        const involved = (task: { assignee: string; collaborators?: { login: string }[]; checklist?: { assignee?: string }[] }) =>
+          task.assignee?.toLowerCase() === login
+          || Boolean(task.collaborators?.some((member) => member.login.toLowerCase() === login))
+          || Boolean(task.checklist?.some((item) => item.assignee?.toLowerCase() === login));
+        setMyOpenTasks((payload.tasks || []).filter((task) => involved(task) && task.status !== "concluido").length);
         if (freshLoginRef.current) {
           freshLoginRef.current = false;
           if (payload.me && !payload.me.isAdmin) setActiveView("projects");
