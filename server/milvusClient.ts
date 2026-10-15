@@ -302,6 +302,7 @@ async function milvusFetch<T>(path: string, init: RequestInit = {}) {
   headers.set(milvusConfig.authHeader, tokenValue);
 
   const response = await fetch(`${baseUrl}${nextPath}`, {
+    signal: AbortSignal.timeout(20000),
     ...init,
     headers,
   });

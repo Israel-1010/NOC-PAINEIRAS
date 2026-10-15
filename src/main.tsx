@@ -63,6 +63,7 @@ import {
 } from "recharts";
 import { ProjectsDashboard } from "./projects";
 import { AccessDashboard } from "./access";
+import { DiagnosticsDashboard } from "./diagnostics";
 import "./styles.css";
 
 type Status = "online" | "warning" | "offline";
@@ -782,7 +783,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1246,11 +1247,12 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
     title: "Administração",
     items: [
       { label: "Acessos", icon: UserCheck, view: "access" },
+      { label: "Diagnóstico", icon: Activity, view: "diagnostics" },
     ],
   },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access";
+type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics";
 
 function statusLabel(status: Status) {
   return {
@@ -1272,6 +1274,7 @@ function viewEyebrow(view: View) {
   if (view === "pop") return "Procedimento operacional padrao";
   if (view === "projects") return "Gestão de projetos da TI";
   if (view === "access") return "Administração do portal";
+  if (view === "diagnostics") return "Administração do portal";
   if (view === "topology") return "Mapa e monitoramento";
   return "Administracao de identidade";
 }
@@ -1288,6 +1291,7 @@ function viewTitle(view: View) {
   if (view === "pop") return "POP";
   if (view === "projects") return "Projetos";
   if (view === "access") return "Acessos";
+  if (view === "diagnostics") return "Diagnóstico das integrações";
   if (view === "topology") return "Topologia";
   return "Active Directory";
 }
@@ -1333,7 +1337,7 @@ function App() {
 
   const canView = useCallback((view: string) => {
     if (!access) return false;
-    if (view === "access") return access.isAdmin;
+    if (view === "access" || view === "diagnostics") return access.isAdmin;
     return access.views.includes(view === "tickets" ? "milvusPortal" : view);
   }, [access]);
 
@@ -1525,12 +1529,12 @@ function App() {
         directoryTask,
         eventTask,
       ]);
-    } catch {
+    } catch (error) {
       setAdStatus({
         ok: false,
         source: "offline",
         configured: false,
-        message: "API AD offline. Exibindo dados mockados.",
+        message: `Sem resposta da API do AD (${error instanceof Error ? error.message : "erro de rede"}). Os números abaixo são de exemplo. Gestor: veja Administração → Diagnóstico.`,
       });
     }
   }, [clearSession, session]);
@@ -1706,7 +1710,7 @@ function App() {
         ok: false,
         source: "offline",
         configured: false,
-        message: error instanceof Error ? error.message : "API Intune offline.",
+        message: `Sem resposta da API do Intune (${error instanceof Error ? error.message : "erro de rede"}). Gestor: veja Administração → Diagnóstico.`,
       });
     }
   }, [clearSession, session]);
@@ -2064,6 +2068,8 @@ function App() {
           </div>
         ) : activeView === "access" ? (
           <AccessDashboard />
+        ) : activeView === "diagnostics" ? (
+          <DiagnosticsDashboard />
         ) : activeView === "tv" ? (
           <TvDashboard
             adSummary={adSummaryState}

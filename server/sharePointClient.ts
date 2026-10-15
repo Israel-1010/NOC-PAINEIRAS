@@ -175,6 +175,7 @@ async function getAccessToken() {
     scope: "https://graph.microsoft.com/.default",
   });
   const response = await fetch(`https://login.microsoftonline.com/${sharePointConfig.tenantId}/oauth2/v2.0/token`, {
+    signal: AbortSignal.timeout(20000),
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -196,6 +197,7 @@ async function graphGet<T>(pathOrUrl: string) {
   const token = await getAccessToken();
   const url = pathOrUrl.startsWith("https://") ? pathOrUrl : `https://graph.microsoft.com/v1.0${pathOrUrl}`;
   const response = await fetch(url, {
+    signal: AbortSignal.timeout(20000),
     headers: { Authorization: `Bearer ${token}` },
   });
   const payload = await response.json().catch(() => ({}));

@@ -82,6 +82,7 @@ async function getAccessToken() {
   });
 
   const response = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(intuneConfig.tenantId!)}/oauth2/v2.0/token`, {
+    signal: AbortSignal.timeout(20000),
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -103,6 +104,7 @@ async function getAccessToken() {
 async function graphGet<T>(path: string, retryOnAuthFailure = true): Promise<T> {
   const token = await getAccessToken();
   const response = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    signal: AbortSignal.timeout(20000),
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
@@ -129,6 +131,7 @@ async function graphGet<T>(path: string, retryOnAuthFailure = true): Promise<T> 
 async function graphPost<T>(path: string, body: unknown, retryOnAuthFailure = true): Promise<T> {
   const token = await getAccessToken();
   const response = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    signal: AbortSignal.timeout(20000),
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

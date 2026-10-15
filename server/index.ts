@@ -107,6 +107,7 @@ import {
   updateIp,
 } from "./ipInventoryClient";
 import { getTopology, saveTopology } from "./topologyStore";
+import { diagnoseAd, diagnoseIntune } from "./diagnostics";
 import {
   addTaskComment,
   checklistAction,
@@ -192,8 +193,18 @@ function formatApiError(error: unknown) {
     return "O AD recusou a alteracao porque o atributo/conta e protegido ou o valor nao e permitido. Em contas internas como krbtgt, nao ative/desative pelo painel.";
   }
 
+  // Falhas de rede em chamadas externas (Microsoft Graph, Milvus...).
+  const cause = error && typeof error === "object" && "cause" in error ? (error as { cause?: { code?: string; message?: string } }).cause : undefined;
+  if (/aborted due to timeout|TimeoutError/i.test(message) || (error instanceof Error && error.name === "TimeoutError")) {
+    return "Tempo esgotado (20s) ao acessar servico externo. Verifique se o servidor tem acesso a internet (proxy, firewall ou DNS).";
+  }
+  if (message === "fetch failed") {
+    return `Falha de rede ao acessar servico externo (${cause?.code || cause?.message || "sem detalhe"}). Verifique DNS, proxy e firewall do servidor.`;
+  }
+
   return message.replace(/\u0000/g, "");
 }
+
 
 function parsePingLatency(output: string) {
   const match = /time[=<]\s*(\d+(?:[.,]\d+)?)\s*ms/i.exec(output) || /tempo[=<]\s*(\d+(?:[.,]\d+)?)\s*ms/i.exec(output);
@@ -373,6 +384,12 @@ app.put("/api/access/users/:login", requireAuth, requireAdmin, asyncRoute((req) 
 app.delete("/api/access/users/:login", requireAuth, requireAdmin, asyncRoute((req) => resetUserViews(String(req.params.login))));
 app.put("/api/access/defaults", requireAuth, requireAdmin, asyncRoute((req) => setDefaultViews(req.body?.views)));
 app.post("/api/access/claim", requireAuth, asyncRoute((req) => claimAdmin(req.res?.locals.user)));
+
+// Diagnostico das integracoes, executado a partir do servidor (somente gestor).
+app.get("/api/diagnostics/integrations", requireAuth, requireAdmin, asyncRoute(async () => ({
+  checkedAt: new Date().toISOString(),
+  reports: await Promise.all([diagnoseAd(formatApiError), diagnoseIntune(formatApiError)]),
+})));
 app.put("/api/access/admins/:login", requireAuth, requireAdmin, asyncRoute((req) =>
   setPanelAdmin(String(req.params.login), Boolean(req.body?.admin), req.res?.locals.user)));
 
