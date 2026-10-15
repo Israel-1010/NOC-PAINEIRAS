@@ -7,6 +7,7 @@ type AccessUser = {
   name: string;
   title: string;
   isAdmin: boolean;
+  adminSource: "servidor" | "painel" | "";
   custom: boolean;
   views: string[];
   updatedAt: string;
@@ -92,6 +93,17 @@ export function AccessDashboard() {
       flash(user.login);
     } catch (resetError) {
       setError(resetError instanceof Error ? resetError.message : "Nao foi possivel restaurar o padrao.");
+    }
+  }
+
+  async function setAdmin(user: AccessUser, admin: boolean) {
+    if (admin && !window.confirm(`Tornar ${user.name} gestor? Gestores veem tudo e controlam os acessos.`)) return;
+    try {
+      await api(`/api/access/admins/${encodeURIComponent(user.login)}`, "PUT", { admin });
+      await load();
+      flash(user.login);
+    } catch (adminError) {
+      setError(adminError instanceof Error ? adminError.message : "Nao foi possivel alterar o gestor.");
     }
   }
 
@@ -239,13 +251,22 @@ export function AccessDashboard() {
                 <td className="ac-actions-col">
                   {savedLogin === user.login ? (
                     <span className="ac-saved"><Check size={14} /> Salvo</span>
-                  ) : user.isAdmin ? null : (
+                  ) : user.isAdmin ? (
+                    <div className="ac-row-actions">
+                      {user.adminSource === "painel" ? (
+                        <button type="button" onClick={() => setAdmin(user, false)} title="Tirar o papel de gestor">Remover gestor</button>
+                      ) : user.adminSource === "servidor" ? (
+                        <span className="ac-note">definido no servidor</span>
+                      ) : null}
+                    </div>
+                  ) : (
                     <div className="ac-row-actions">
                       <button type="button" onClick={() => saveUser(user, allIds)} title="Liberar todos os itens">Tudo</button>
                       <button type="button" onClick={() => saveUser(user, [])} title="Bloquear todos os itens">Nada</button>
                       {user.custom ? (
                         <button type="button" onClick={() => resetUser(user)} title="Voltar a usar o padrão"><RotateCcw size={12} /> Padrão</button>
                       ) : null}
+                      <button type="button" onClick={() => setAdmin(user, true)} title="Tornar gestor do portal"><ShieldCheck size={12} /> Gestor</button>
                     </div>
                   )}
                 </td>

@@ -2036,9 +2036,19 @@ function App() {
           <div className="open-mode-banner" role="alert">
             <AlertTriangle size={18} />
             <span>
-              <strong>Modo aberto:</strong> nenhum gestor configurado no servidor. Todos os usuários estão vendo todos os projetos e todo o menu.
-              Adicione <code>PROJECTS_ADMINS=&lt;seu login&gt;</code> nas variáveis do container e reinicie.
+              <strong>Modo aberto:</strong> nenhum gestor definido, por isso todos os usuários estão vendo todos os projetos e todo o menu.
+              Se você é o gestor, assuma agora; os demais passam a ver só o que for liberado.
             </span>
+            <button
+              className="open-mode-claim"
+              type="button"
+              onClick={async () => {
+                const response = await authFetch("/api/access/claim", { method: "POST" });
+                if (response.ok) window.location.reload();
+              }}
+            >
+              Assumir como gestor do portal
+            </button>
           </div>
         ) : null}
         <ViewErrorBoundary key={activeView}>

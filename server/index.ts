@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { adConfig, allowedLoginGroups, isAdConfigured, isProduction, loginAllowedOu, port, projectsConfig } from "./config";
 import {
+  claimAdmin,
   getMyAccess,
   isPortalAdmin,
   listAccess,
@@ -14,6 +15,7 @@ import {
   requireViews,
   resetUserViews,
   setDefaultViews,
+  setPanelAdmin,
   setUserViews,
 } from "./accessStore";
 import {
@@ -370,6 +372,9 @@ app.put("/api/access/users/:login", requireAuth, requireAdmin, asyncRoute((req) 
   setUserViews(String(req.params.login), String(req.body?.name || ""), req.body?.views, req.res?.locals.user)));
 app.delete("/api/access/users/:login", requireAuth, requireAdmin, asyncRoute((req) => resetUserViews(String(req.params.login))));
 app.put("/api/access/defaults", requireAuth, requireAdmin, asyncRoute((req) => setDefaultViews(req.body?.views)));
+app.post("/api/access/claim", requireAuth, asyncRoute((req) => claimAdmin(req.res?.locals.user)));
+app.put("/api/access/admins/:login", requireAuth, requireAdmin, asyncRoute((req) =>
+  setPanelAdmin(String(req.params.login), Boolean(req.body?.admin), req.res?.locals.user)));
 
 app.use("/api/ad", requireAuth, requireViews(["ad", "tv"], ["ad"]));
 
@@ -531,7 +536,8 @@ app.use("/api/projects", requireAuth, requireViews(["projects"]));
 
 function projectAccess(req: express.Request): ProjectAccess {
   const user = (req.res?.locals.user || {}) as AuthUser;
-  const isAdmin = !projectsConfig.admins.length || projectsConfig.admins.includes(String(user.login || "").toLowerCase());
+  // Mesmo gestor do portal (variavel ou definido pelo painel); modo aberto = todos.
+  const isAdmin = isPortalAdmin(String(user.login || ""));
   return { user, isAdmin };
 }
 

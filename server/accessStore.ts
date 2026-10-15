@@ -1,4 +1,5 @@
 import express from "express";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { portalAdmins } from "./config";
@@ -23,12 +24,14 @@ export type PortalView = (typeof portalViews)[number]["id"];
 const allViewIds = portalViews.map((view) => view.id) as PortalView[];
 const initialDefaults: PortalView[] = ["tv", "projects", "milvusPortal", "pop"];
 
+class AccessDenied extends Error {
+  status = 403;
+}
 type UserAccess = { views: PortalView[]; name: string; updatedAt: string; updatedBy: string };
-type AccessStore = { defaults: PortalView[]; users: Record<string, UserAccess> };
+type AccessStore = { defaults: PortalView[]; users: Record<string, UserAccess>; admins: string[] };
 
 const dataDir = path.resolve(process.cwd(), "data");
 const storePath = path.join(dataDir, "access.json");
-let cache: AccessStore | null = null;
 let writeQueue: Promise<unknown> = Promise.resolve();
 
 function cleanViews(input: unknown): PortalView[] {
@@ -36,47 +39,99 @@ function cleanViews(input: unknown): PortalView[] {
   return allViewIds.filter((id) => input.includes(id));
 }
 
-async function readStore(): Promise<AccessStore> {
-  if (cache) return cache;
+function parseStore(raw: Partial<AccessStore>): AccessStore {
+  const users: Record<string, UserAccess> = {};
+  for (const [login, entry] of Object.entries(raw.users || {})) {
+    users[login.toLowerCase()] = {
+      views: cleanViews(entry?.views),
+      name: String(entry?.name || ""),
+      updatedAt: String(entry?.updatedAt || ""),
+      updatedBy: String(entry?.updatedBy || ""),
+    };
+  }
+  const admins = Array.isArray(raw.admins) ? Array.from(new Set(raw.admins.map((login) => String(login).trim().toLowerCase()).filter(Boolean))) : [];
+  return { defaults: Array.isArray(raw.defaults) ? cleanViews(raw.defaults) : initialDefaults, users, admins };
+}
+
+// Carregado de forma sincrona na inicializacao: o servidor nunca sobe sem saber quem e gestor.
+function loadSync(): AccessStore {
   try {
-    const raw = JSON.parse(await fs.readFile(storePath, "utf8")) as Partial<AccessStore>;
-    const users: Record<string, UserAccess> = {};
-    for (const [login, entry] of Object.entries(raw.users || {})) {
-      users[login.toLowerCase()] = {
-        views: cleanViews(entry?.views),
-        name: String(entry?.name || ""),
-        updatedAt: String(entry?.updatedAt || ""),
-        updatedBy: String(entry?.updatedBy || ""),
-      };
-    }
-    cache = { defaults: Array.isArray(raw.defaults) ? cleanViews(raw.defaults) : initialDefaults, users };
+    return parseStore(JSON.parse(fsSync.readFileSync(storePath, "utf8")) as Partial<AccessStore>);
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "";
     if (code !== "ENOENT") throw error;
-    cache = { defaults: initialDefaults, users: {} };
+    return { defaults: initialDefaults, users: {}, admins: [] };
   }
+}
+
+let cache: AccessStore = loadSync();
+
+async function readStore(): Promise<AccessStore> {
   return cache;
 }
 
 function mutate<T>(change: (store: AccessStore) => T) {
   const task = writeQueue.then(async () => {
-    const store = await readStore();
-    const result = change(store);
+    const draft: AccessStore = JSON.parse(JSON.stringify(cache));
+    const result = change(draft);
     await fs.mkdir(dataDir, { recursive: true });
     const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
-    await fs.writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+    await fs.writeFile(tempPath, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
     await fs.rename(tempPath, storePath);
+    cache = draft;
     return result;
   });
   writeQueue = task.catch(() => undefined);
   return task;
 }
 
-// Modo aberto (nenhum gestor configurado): todos sao gestores, como antes.
-export function isPortalAdmin(login: string) {
-  return !portalAdmins.length || portalAdmins.includes(String(login || "").toLowerCase());
+function allAdmins() {
+  return new Set([...portalAdmins, ...cache.admins]);
 }
 
+// Modo aberto: nenhum gestor (nem por variavel, nem pelo painel) -> todos sao gestores.
+export function isOpenMode() {
+  return allAdmins().size === 0;
+}
+
+export function isPortalAdmin(login: string) {
+  return isOpenMode() || allAdmins().has(String(login || "").toLowerCase());
+}
+
+function adminSource(login: string): "servidor" | "painel" | "" {
+  const key = login.toLowerCase();
+  if (portalAdmins.includes(key)) return "servidor";
+  if (cache.admins.includes(key)) return "painel";
+  return "";
+}
+
+// Em modo aberto, quem estiver logado assume como gestor (fecha o modo aberto).
+export function claimAdmin(user: AuthUser) {
+  if (!isOpenMode()) throw new AccessDenied("Ja existe gestor configurado.");
+  return mutate((store) => {
+    store.admins = [user.login.toLowerCase()];
+    return { ok: true };
+  });
+}
+
+export function setPanelAdmin(login: string, admin: boolean, by: AuthUser) {
+  const key = String(login || "").trim().toLowerCase();
+  if (!key) throw new Error("Usuario invalido.");
+  if (portalAdmins.includes(key)) throw new Error("Este gestor e definido no servidor (variavel de ambiente).");
+  return mutate((store) => {
+    const next = new Set(store.admins);
+    if (admin) next.add(key);
+    else next.delete(key);
+    if (!admin && next.size === 0 && portalAdmins.length === 0) {
+      throw new Error("Precisa existir pelo menos um gestor.");
+    }
+    if (!admin && key === by.login.toLowerCase() && next.size === 0) {
+      throw new Error("Voce e o unico gestor.");
+    }
+    store.admins = Array.from(next);
+    return { ok: true };
+  });
+}
 export async function getUserViews(login: string): Promise<PortalView[]> {
   if (isPortalAdmin(login)) return allViewIds;
   const store = await readStore();
@@ -85,7 +140,7 @@ export async function getUserViews(login: string): Promise<PortalView[]> {
 
 export async function getMyAccess(user: AuthUser) {
   // openMode: nenhum gestor configurado -> todos enxergam tudo (aviso no painel).
-  return { isAdmin: isPortalAdmin(user.login), views: await getUserViews(user.login), openMode: !portalAdmins.length };
+  return { isAdmin: isPortalAdmin(user.login), views: await getUserViews(user.login), openMode: isOpenMode() };
 }
 
 export async function listAccess(people: { login: string; name: string; title?: string }[]) {
@@ -107,6 +162,7 @@ export async function listAccess(people: { login: string; name: string; title?: 
         return {
           ...person,
           isAdmin: admin,
+          adminSource: isOpenMode() ? "" : adminSource(person.login),
           custom: Boolean(custom) && !admin,
           views: admin ? allViewIds : custom?.views ?? store.defaults,
           updatedAt: custom?.updatedAt || "",
@@ -140,9 +196,6 @@ export function setDefaultViews(views: unknown) {
   });
 }
 
-class AccessDenied extends Error {
-  status = 403;
-}
 
 // Bloqueio no servidor: leitura liberada para qualquer uma das telas que usa o dado;
 // alteracoes so para quem tem a tela "dona" do dado.

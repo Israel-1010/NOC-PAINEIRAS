@@ -109,7 +109,8 @@ export const projectsConfig = {
 
 // Gestores do portal: veem tudo e controlam o acesso dos demais.
 // APP_ADMINS; se vazio, usa PROJECTS_ADMINS.
-export const portalAdmins = loginList(process.env.APP_ADMINS).length ? loginList(process.env.APP_ADMINS) : projectsConfig.admins;
+// Gestores definidos por variavel (APP_ADMINS e PROJECTS_ADMINS). Tambem podem ser definidos pelo painel (data/access.json).
+export const portalAdmins = Array.from(new Set([...loginList(process.env.APP_ADMINS), ...projectsConfig.admins]));
 
 // So entra no portal quem estiver nesta OU do AD (nome ou DN). Padrao: Tecnologia.
 // Defina LOGIN_ALLOWED_OU= (vazio) para desligar. Gestores sempre entram.

@@ -8527,3 +8527,29 @@ thead .ac-person-col {
   background: rgba(255, 255, 255, 0.2);
   border-radius: 4px;
 }
+.open-mode-banner span {
+  flex: 1;
+}
+
+.open-mode-claim {
+  flex: none;
+  align-self: center;
+  min-height: 36px;
+  padding: 0 14px;
+  color: var(--danger);
+  background: var(--surface);
+  border: 0;
+  border-radius: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ac-note {
+  color: var(--muted-2);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.ac-actions-col {
+  min-width: 250px;
+}
