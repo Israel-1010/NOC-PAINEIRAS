@@ -600,18 +600,7 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
       if (item.state === "concluido") throw new Error("Item ja finalizado. Reabra antes de iniciar.");
       if (item.state === "em_andamento") return { task: viewTask(store, task, access), pausedElsewhere };
 
-      // Um cronometro por pessoa: pausa o que esta rodando em outro item.
-      for (const other of store.tasks) {
-        for (const entry of other.checklist) {
-          if (entry !== item && entry.state === "em_andamento" && sameLogin(entry.runningBy, access.user.login)) {
-            closeRunning(entry, now);
-            entry.state = "pausado";
-            touchTask(other, now);
-            pausedElsewhere.push(other.id);
-          }
-        }
-      }
-
+      // Outros cronometros da pessoa continuam rodando: pausar e decisao do usuario.
       item.state = "em_andamento";
       item.done = false;
       item.runningSince = now.toISOString();

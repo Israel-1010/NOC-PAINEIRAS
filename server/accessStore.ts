@@ -84,7 +84,8 @@ export async function getUserViews(login: string): Promise<PortalView[]> {
 }
 
 export async function getMyAccess(user: AuthUser) {
-  return { isAdmin: isPortalAdmin(user.login), views: await getUserViews(user.login) };
+  // openMode: nenhum gestor configurado -> todos enxergam tudo (aviso no painel).
+  return { isAdmin: isPortalAdmin(user.login), views: await getUserViews(user.login), openMode: !portalAdmins.length };
 }
 
 export async function listAccess(people: { login: string; name: string; title?: string }[]) {

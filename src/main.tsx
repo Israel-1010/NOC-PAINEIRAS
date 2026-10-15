@@ -1304,7 +1304,7 @@ function App() {
   const [activeView, setActiveView] = useState<View>(() => getStoredView());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => getStoredSidebarCollapsed());
   const [session, setSession] = useState<AuthSession | null>(() => getStoredSession());
-  const [access, setAccess] = useState<{ isAdmin: boolean; views: string[] } | null>(null);
+  const [access, setAccess] = useState<{ isAdmin: boolean; views: string[]; openMode: boolean } | null>(null);
 
   // Permissoes do usuario (o servidor tambem bloqueia; aqui so evita chamadas e esconde o menu).
   useEffect(() => {
@@ -1317,8 +1317,8 @@ function App() {
       try {
         const response = await authFetch("/api/access/me");
         if (!response.ok) return;
-        const payload = await parseApiPayload<{ isAdmin?: boolean; views?: string[] }>(response, {});
-        if (!cancelled) setAccess({ isAdmin: Boolean(payload.isAdmin), views: payload.views || [] });
+        const payload = await parseApiPayload<{ isAdmin?: boolean; views?: string[]; openMode?: boolean }>(response, {});
+        if (!cancelled) setAccess({ isAdmin: Boolean(payload.isAdmin), views: payload.views || [], openMode: Boolean(payload.openMode) });
       } catch {
         /* tenta de novo no proximo ciclo */
       }
@@ -2032,6 +2032,15 @@ function App() {
           </div>
         </header>
 
+        {access?.openMode ? (
+          <div className="open-mode-banner" role="alert">
+            <AlertTriangle size={18} />
+            <span>
+              <strong>Modo aberto:</strong> nenhum gestor configurado no servidor. Todos os usuários estão vendo todos os projetos e todo o menu.
+              Adicione <code>PROJECTS_ADMINS=&lt;seu login&gt;</code> nas variáveis do container e reinicie.
+            </span>
+          </div>
+        ) : null}
         <ViewErrorBoundary key={activeView}>
         {!access ? (
           <div className="view-loading">Carregando suas permissões...</div>
