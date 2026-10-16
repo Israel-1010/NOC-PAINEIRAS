@@ -7,6 +7,10 @@ import {
   Circle,
   CircleCheck,
   Clock,
+  Download,
+  ImageIcon,
+  NotebookPen,
+  Upload,
   Pause,
   Play,
   RotateCcw,
@@ -63,6 +67,21 @@ type ChecklistItem = {
   completedBy: string;
   assignee: string;
   assigneeName: string;
+  notes?: ItemNote[];
+  images?: ItemImage[];
+};
+type ItemNote = { id: string; author: string; authorName: string; text: string; at: string };
+type ItemImage = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  storage: "sharepoint" | "local";
+  webUrl: string;
+  path: string;
+  uploadedBy: string;
+  uploadedByName: string;
+  at: string;
 };
 type ChecklistAction = "start" | "pause" | "finish" | "reopen";
 type TaskComment = { id: string; author: string; authorName: string; text: string; at: string };
@@ -1432,6 +1451,17 @@ function TaskDrawer({
 
   const [newTag, setNewTag] = useState("");
   const [newItem, setNewItem] = useState("");
+  const [expandedItem, setExpandedItem] = useState("");
+  const [expandedTab, setExpandedTab] = useState<"notes" | "images">("notes");
+
+  function toggleExtras(itemId: string, tab: "notes" | "images") {
+    if (expandedItem === itemId && expandedTab === tab) {
+      setExpandedItem("");
+      return;
+    }
+    setExpandedItem(itemId);
+    setExpandedTab(tab);
+  }
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
@@ -1496,6 +1526,8 @@ function TaskDrawer({
       completedBy: "",
       assignee: "",
       assigneeName: "",
+      notes: [],
+      images: [],
     };
     onPatch({ checklist: [...task.checklist, item] });
   }
@@ -1736,7 +1768,7 @@ function TaskDrawer({
                     </span>
                     <div className="pm-item-body">
                       <span className="pm-item-text">
-                        {item.text}
+                        <span className="pm-item-label">{item.text}</span>
                         <select
                           className={`pm-item-owner ${item.assignee ? "set" : ""}`}
                           value={item.assignee}
@@ -1767,6 +1799,22 @@ function TaskDrawer({
                         {itemStartedAt(item) ? ` · início ${dateTime(itemStartedAt(item))}` : ""}
                         {item.state === "concluido" && item.completedAt ? ` · fim ${dateTime(item.completedAt)}` : ""}
                       </small>
+                      <span className="pm-item-extras-toggles">
+                        <button
+                          type="button"
+                          className={`pm-extra-toggle ${expandedItem === item.id && expandedTab === "notes" ? "active" : ""} ${(item.notes || []).length ? "has" : ""}`}
+                          onClick={() => toggleExtras(item.id, "notes")}
+                        >
+                          <NotebookPen size={12} /> Observações{(item.notes || []).length ? ` (${(item.notes || []).length})` : ""}
+                        </button>
+                        <button
+                          type="button"
+                          className={`pm-extra-toggle ${expandedItem === item.id && expandedTab === "images" ? "active" : ""} ${(item.images || []).length ? "has" : ""}`}
+                          onClick={() => toggleExtras(item.id, "images")}
+                        >
+                          <ImageIcon size={12} /> Imagens{(item.images || []).length ? ` (${(item.images || []).length})` : ""}
+                        </button>
+                      </span>
                     </div>
                     <span className={`pm-item-clock ${running ? "running" : ""}`} title="Tempo trabalhado neste item">
                       {runningByOther ? "—" : elapsed > 0 || running ? formatClock(elapsed) : "--:--:--"}
@@ -1812,6 +1860,18 @@ function TaskDrawer({
                         <X size={13} />
                       </button>}
                     </div>
+                    {expandedItem === item.id ? (
+                      <ItemExtras
+                        taskId={task.id}
+                        item={item}
+                        tab={expandedTab}
+                        onTab={setExpandedTab}
+                        currentUser={currentUser}
+                        canManage={canManage}
+                        onTask={onCommented}
+                        onError={onError}
+                      />
+                    ) : null}
                   </li>
                 );
               })}
@@ -1866,5 +1926,256 @@ function TaskDrawer({
         </div>
       </aside>
     </>
+  );
+}
+
+/* ---------- Observacoes e imagens de cada item do checklist ---------- */
+
+// Reduz a foto no navegador (maximo 1600px, JPEG) antes de enviar.
+function shrinkImage(file: File): Promise<{ data: string; mimeType: string; name: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Nao foi possivel ler a imagem."));
+    reader.onload = () => {
+      const original = String(reader.result || "");
+      if (file.type === "image/gif") {
+        resolve({ data: original, mimeType: "image/gif", name: file.name });
+        return;
+      }
+      const img = new Image();
+      img.onerror = () => reject(new Error("Arquivo nao e uma imagem valida."));
+      img.onload = () => {
+        const max = 1600;
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const context = canvas.getContext("2d");
+        if (!context) {
+          resolve({ data: original, mimeType: file.type, name: file.name });
+          return;
+        }
+        context.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve({ data: canvas.toDataURL("image/jpeg", 0.82), mimeType: "image/jpeg", name: file.name.replace(/\.[^.]+$/, "") + ".jpg" });
+      };
+      img.src = original;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function imageUrl(taskId: string, itemId: string, imageId: string) {
+  return `${API_BASE}/api/projects/tasks/${encodeURIComponent(taskId)}/checklist/${encodeURIComponent(itemId)}/images/${encodeURIComponent(imageId)}`;
+}
+
+// <img> nao envia o token: baixa com autorizacao e mostra como blob.
+function AuthImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [blobUrl, setBlobUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let revoked = "";
+    let cancelled = false;
+    fetch(src, { headers: { Authorization: `Bearer ${authToken()}` } })
+      .then((response) => (response.ok ? response.blob() : Promise.reject(new Error(String(response.status)))))
+      .then((blob) => {
+        if (cancelled) return;
+        revoked = URL.createObjectURL(blob);
+        setBlobUrl(revoked);
+      })
+      .catch(() => !cancelled && setFailed(true));
+    return () => {
+      cancelled = true;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [src]);
+  if (failed) return <span className={`pm-img-placeholder ${className || ""}`}>Imagem indisponível</span>;
+  if (!blobUrl) return <span className={`pm-img-placeholder ${className || ""}`}>Carregando...</span>;
+  return <img className={className} src={blobUrl} alt={alt} />;
+}
+
+function ItemExtras({
+  taskId,
+  item,
+  tab,
+  onTab,
+  currentUser,
+  canManage,
+  onTask,
+  onError,
+}: {
+  taskId: string;
+  item: ChecklistItem;
+  tab: "notes" | "images";
+  onTab: (tab: "notes" | "images") => void;
+  currentUser: CurrentUser;
+  canManage: boolean;
+  onTask: (task: ProjectTask) => void;
+  onError: (message: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [viewer, setViewer] = useState<ItemImage | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const base = `/api/projects/tasks/${encodeURIComponent(taskId)}/checklist/${encodeURIComponent(item.id)}`;
+  const notes = item.notes || [];
+  const images = item.images || [];
+
+  async function sendNote() {
+    if (!note.trim()) return;
+    setBusy(true);
+    try {
+      onTask(await api<ProjectTask>(`${base}/notes`, "POST", { text: note }));
+      setNote("");
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Nao foi possivel salvar a observacao.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeNote(id: string) {
+    if (!window.confirm("Apagar esta observação?")) return;
+    try {
+      onTask(await api<ProjectTask>(`${base}/notes/${encodeURIComponent(id)}`, "DELETE"));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Nao foi possivel apagar.");
+    }
+  }
+
+  async function sendFiles(files: FileList | File[]) {
+    const list = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (!list.length) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      for (const file of list) {
+        const prepared = await shrinkImage(file);
+        const result = await api<{ task: ProjectTask; warning?: string }>(`${base}/images`, "POST", prepared);
+        onTask(result.task);
+        if (result.warning) setNotice(result.warning);
+      }
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Nao foi possivel enviar a imagem.");
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function removeImage(image: ItemImage) {
+    if (!window.confirm(`Remover a imagem "${image.name}"?`)) return;
+    try {
+      onTask(await api<ProjectTask>(`${base}/images/${encodeURIComponent(image.id)}`, "DELETE"));
+      setViewer(null);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Nao foi possivel remover a imagem.");
+    }
+  }
+
+  return (
+    <div className="pm-item-extras">
+      <div className="pm-extras-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={tab === "notes"} className={tab === "notes" ? "active" : ""} onClick={() => onTab("notes")}>
+          <NotebookPen size={14} /> Observações ({notes.length})
+        </button>
+        <button type="button" role="tab" aria-selected={tab === "images"} className={tab === "images" ? "active" : ""} onClick={() => onTab("images")}>
+          <ImageIcon size={14} /> Imagens ({images.length})
+        </button>
+      </div>
+
+      {tab === "notes" ? (
+        <div className="pm-notes">
+          {notes.length ? (
+            <ol>
+              {notes.map((entry) => (
+                <li key={entry.id}>
+                  <span className="pm-avatar" style={avatarStyle(entry.author)}>{initials(entry.authorName || entry.author)}</span>
+                  <div>
+                    <p className="pm-note-head">
+                      <strong>{entry.authorName || entry.author}</strong>
+                      <time>{dateTime(entry.at)}</time>
+                      {sameUser(entry.author, currentUser.login) || canManage ? (
+                        <button type="button" aria-label="Apagar observação" onClick={() => removeNote(entry.id)}><X size={12} /></button>
+                      ) : null}
+                    </p>
+                    <p className="pm-note-text">{entry.text}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="pm-extras-empty">Nenhuma observação ainda. Anote o que foi feito, pendências, números de série...</p>
+          )}
+          <div className="pm-note-form">
+            <textarea
+              value={note}
+              rows={2}
+              maxLength={4000}
+              onChange={(event) => setNote(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && (event.ctrlKey || event.metaKey) && sendNote()}
+              placeholder="Escreva uma observação (Ctrl+Enter salva)"
+            />
+            <button className="pm-btn primary" type="button" disabled={busy || !note.trim()} onClick={sendNote}>Salvar</button>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="pm-images"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            sendFiles(event.dataTransfer.files);
+          }}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData.files || []);
+            if (files.length) sendFiles(files);
+          }}
+        >
+          {images.length ? (
+            <div className="pm-image-grid">
+              {images.map((image) => (
+                <button type="button" key={image.id} className="pm-image-thumb" onClick={() => setViewer(image)} title={`${image.name} · ${image.uploadedByName}`}>
+                  <AuthImage src={imageUrl(taskId, item.id, image.id)} alt={image.name} />
+                  <span className={`pm-image-badge ${image.storage}`}>{image.storage === "sharepoint" ? "SharePoint" : "Servidor"}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="pm-extras-empty">Nenhuma imagem. Envie fotos do serviço (antes/depois, etiquetas, rack...).</p>
+          )}
+          <div className="pm-upload-row">
+            <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(event) => event.target.files && sendFiles(event.target.files)} />
+            <button className="pm-btn ghost" type="button" disabled={busy} onClick={() => fileRef.current?.click()}>
+              <Upload size={15} /> {busy ? "Enviando..." : "Enviar imagens"}
+            </button>
+            <small>ou arraste / cole (Ctrl+V) aqui · vai para POP › Projetos › projeto › tarefa</small>
+          </div>
+          {notice ? <p className="pm-upload-notice">{notice}</p> : null}
+        </div>
+      )}
+
+      {viewer ? (
+        <>
+          <div className="pm-drawer-backdrop pm-viewer-backdrop" onClick={() => setViewer(null)} />
+          <div className="pm-viewer" role="dialog" aria-modal="true" aria-label={viewer.name}>
+            <header>
+              <div>
+                <strong>{viewer.name}</strong>
+                <small>Enviada por {viewer.uploadedByName} em {dateTime(viewer.at)}{viewer.storage === "sharepoint" && viewer.path ? ` · ${viewer.path}` : " · servidor do portal"}</small>
+              </div>
+              <div className="pm-viewer-actions">
+                {viewer.webUrl ? <a className="pm-btn ghost" href={viewer.webUrl} target="_blank" rel="noreferrer"><Download size={14} /> Abrir no SharePoint</a> : null}
+                {sameUser(viewer.uploadedBy, currentUser.login) || canManage ? (
+                  <button className="pm-icon-btn danger" type="button" aria-label="Remover imagem" onClick={() => removeImage(viewer)}><Trash2 size={16} /></button>
+                ) : null}
+                <button className="pm-icon-btn" type="button" aria-label="Fechar" onClick={() => setViewer(null)}><X size={18} /></button>
+              </div>
+            </header>
+            <AuthImage className="pm-viewer-img" src={imageUrl(taskId, item.id, viewer.id)} alt={viewer.name} />
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }

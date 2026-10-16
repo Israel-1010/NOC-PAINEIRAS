@@ -108,10 +108,13 @@ import {
 } from "./ipInventoryClient";
 import { getTopology, saveTopology } from "./topologyStore";
 import { diagnoseAd, diagnoseIntune } from "./diagnostics";
+import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
 import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
 import {
+  addItemNote,
   addTaskComment,
   checklistAction,
+  deleteItemNote,
   createSpace,
   createTask,
   deleteSpace,
@@ -158,7 +161,10 @@ app.use(cors({
     callback(null, isAllowedOrigin(origin));
   },
 }));
-app.use(express.json({ limit: "2mb" }));
+// Envio de imagens aceita corpo maior; o resto fica limitado a 2 MB.
+const jsonSmall = express.json({ limit: "2mb" });
+const jsonImages = express.json({ limit: "12mb" });
+app.use((req, res, next) => (req.method === "POST" && /\/checklist\/[^/]+\/images$/.test(req.path) ? jsonImages : jsonSmall)(req, res, next));
 app.use("/api", auditMutations);
 
 function asyncRoute<T>(handler: (req: express.Request) => Promise<T>) {
@@ -579,6 +585,25 @@ app.post("/api/projects/tasks", projectRoute((req, access) => createTask(req.bod
 app.patch("/api/projects/tasks/:id", projectRoute((req, access) => updateTask(String(req.params.id), req.body, access)));
 app.delete("/api/projects/tasks/:id", projectRoute((req, access) => deleteTask(String(req.params.id), access)));
 app.post("/api/projects/tasks/:id/comments", projectRoute((req, access) => addTaskComment(String(req.params.id), req.body, access)));
+app.post("/api/projects/tasks/:id/checklist/:itemId/notes", projectRoute((req, access) =>
+  addItemNote(String(req.params.id), String(req.params.itemId), req.body, access)));
+app.delete("/api/projects/tasks/:id/checklist/:itemId/notes/:noteId", projectRoute((req, access) =>
+  deleteItemNote(String(req.params.id), String(req.params.itemId), String(req.params.noteId), access)));
+app.post("/api/projects/tasks/:id/checklist/:itemId/images", projectRoute((req, access) =>
+  uploadItemImage(String(req.params.id), String(req.params.itemId), req.body, access)));
+app.delete("/api/projects/tasks/:id/checklist/:itemId/images/:imageId", projectRoute((req, access) =>
+  removeItemImage(String(req.params.id), String(req.params.itemId), String(req.params.imageId), access)));
+app.get("/api/projects/tasks/:id/checklist/:itemId/images/:imageId", async (req, res) => {
+  try {
+    const { image, content } = await readItemImage(String(req.params.id), String(req.params.itemId), String(req.params.imageId), projectAccess(req));
+    res.setHeader("Content-Type", image.mimeType);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(content);
+  } catch (error) {
+    const status = error && typeof error === "object" && "status" in error ? Number((error as { status?: unknown }).status) || 500 : 500;
+    res.status(status).json({ ok: false, message: formatApiError(error) });
+  }
+});
 app.post(
   "/api/projects/tasks/:id/checklist/:itemId/:action",
   projectRoute((req, access) => checklistAction(String(req.params.id), String(req.params.itemId), String(req.params.action), access)),

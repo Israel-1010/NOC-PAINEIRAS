@@ -48,6 +48,26 @@ export type ChecklistItem = {
   // Dono do item (opcional): divide o trabalho da tarefa entre pessoas.
   assignee: string;
   assigneeName: string;
+  // Caderninho de observacoes e fotos do item.
+  notes: ItemNote[];
+  images: ItemImage[];
+};
+
+export type ItemNote = { id: string; author: string; authorName: string; text: string; at: string };
+export type ItemImage = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  // "sharepoint" = pasta do POP; "local" = volume do portal (sem permissao de gravacao no SharePoint).
+  storage: "sharepoint" | "local";
+  driveId: string;
+  driveItemId: string;
+  webUrl: string;
+  path: string;
+  uploadedBy: string;
+  uploadedByName: string;
+  at: string;
 };
 
 export type TaskComment = { id: string; author: string; authorName: string; text: string; at: string };
@@ -181,7 +201,44 @@ function normalizeChecklistItem(input: unknown): ChecklistItem {
     completedBy: state === "concluido" ? text(source.completedBy, 120) : "",
     assignee: text(source.assignee, 120),
     assigneeName: text(source.assignee, 120) ? text(source.assigneeName, 160) || text(source.assignee, 120) : "",
+    notes: normalizeNotes(source.notes),
+    images: normalizeImages(source.images),
   };
+}
+
+function normalizeNotes(input: unknown): ItemNote[] {
+  if (!Array.isArray(input)) return [];
+  return input.slice(-300).map((raw) => {
+    const source = (raw && typeof raw === "object" ? raw : {}) as Partial<ItemNote>;
+    return {
+      id: text(source.id, 40) || makeId("nota"),
+      author: text(source.author, 120),
+      authorName: text(source.authorName, 160),
+      text: text(source.text, 4000),
+      at: text(source.at, 30) || new Date().toISOString(),
+    };
+  }).filter((note) => note.text);
+}
+
+function normalizeImages(input: unknown): ItemImage[] {
+  if (!Array.isArray(input)) return [];
+  return input.slice(-60).map((raw) => {
+    const source = (raw && typeof raw === "object" ? raw : {}) as Partial<ItemImage>;
+    return {
+      id: text(source.id, 40) || makeId("img"),
+      name: text(source.name, 160) || "imagem.jpg",
+      mimeType: text(source.mimeType, 60) || "image/jpeg",
+      size: Math.max(0, Number(source.size) || 0),
+      storage: source.storage === "sharepoint" ? "sharepoint" : "local",
+      driveId: text(source.driveId, 200),
+      driveItemId: text(source.driveItemId, 200),
+      webUrl: text(source.webUrl, 1000),
+      path: text(source.path, 600),
+      uploadedBy: text(source.uploadedBy, 120),
+      uploadedByName: text(source.uploadedByName, 160),
+      at: text(source.at, 30) || new Date().toISOString(),
+    };
+  });
 }
 
 function normalizeChecklist(input: unknown): ChecklistItem[] {
@@ -676,4 +733,90 @@ export function checklistAction(taskId: string, itemId: string, action: string, 
     touchTask(task, now);
     return { task: viewTask(store, task, access), pausedElsewhere };
   });
+}
+/* ---------- Observacoes e imagens dos itens do checklist ---------- */
+
+function findItem(task: ProjectTask, itemId: string) {
+  const item = task.checklist.find((entry) => entry.id === itemId);
+  if (!item) throw new NotFoundError("Item do checklist nao encontrado.");
+  return item;
+}
+
+export function addItemNote(taskId: string, itemId: string, input: unknown, access: ProjectAccess) {
+  return mutate((store) => {
+    const task = findTask(store, taskId, access);
+    const item = findItem(task, itemId);
+    const body = text((input as { text?: unknown } | null)?.text, 4000);
+    if (!body) throw new Error("Escreva a observacao.");
+    item.notes.push({ id: makeId("nota"), author: access.user.login, authorName: access.user.name || access.user.login, text: body, at: new Date().toISOString() });
+    task.updatedAt = new Date().toISOString();
+    return viewTask(store, task, access);
+  });
+}
+
+export function deleteItemNote(taskId: string, itemId: string, noteId: string, access: ProjectAccess) {
+  return mutate((store) => {
+    const task = findTask(store, taskId, access);
+    const item = findItem(task, itemId);
+    const note = item.notes.find((entry) => entry.id === noteId);
+    if (!note) throw new NotFoundError("Observacao nao encontrada.");
+    if (!sameLogin(note.author, access.user.login) && !isTaskManager(store, task, access)) {
+      throw new ProjectAccessError("So quem escreveu ou o gestor pode apagar a observacao.");
+    }
+    item.notes = item.notes.filter((entry) => entry.id !== noteId);
+    return viewTask(store, task, access);
+  });
+}
+
+// Le a tarefa/projeto sem alterar (para montar o caminho no SharePoint antes do upload).
+export function getTaskContext(taskId: string, itemId: string, access: ProjectAccess) {
+  const task = writeQueue.then(async () => {
+    const store = await readStore();
+    const found = findTask(store, taskId, access);
+    const item = findItem(found, itemId);
+    const space = store.spaces.find((entry) => entry.id === found.spaceId);
+    return { projectName: space?.name || "Projeto", taskTitle: found.title, itemText: item.text, imageCount: item.images.length };
+  });
+  writeQueue = task.catch(() => undefined);
+  return task;
+}
+
+export function attachItemImage(taskId: string, itemId: string, image: ItemImage, access: ProjectAccess) {
+  return mutate((store) => {
+    const task = findTask(store, taskId, access);
+    const item = findItem(task, itemId);
+    item.images.push(image);
+    task.updatedAt = new Date().toISOString();
+    return viewTask(store, task, access);
+  });
+}
+
+export function findItemImage(taskId: string, itemId: string, imageId: string, access: ProjectAccess) {
+  const task = writeQueue.then(async () => {
+    const store = await readStore();
+    const found = findTask(store, taskId, access);
+    const image = findItem(found, itemId).images.find((entry) => entry.id === imageId);
+    if (!image) throw new NotFoundError("Imagem nao encontrada.");
+    return image;
+  });
+  writeQueue = task.catch(() => undefined);
+  return task;
+}
+
+export function detachItemImage(taskId: string, itemId: string, imageId: string, access: ProjectAccess) {
+  return mutate((store) => {
+    const task = findTask(store, taskId, access);
+    const item = findItem(task, itemId);
+    const image = item.images.find((entry) => entry.id === imageId);
+    if (!image) throw new NotFoundError("Imagem nao encontrada.");
+    if (!sameLogin(image.uploadedBy, access.user.login) && !isTaskManager(store, task, access)) {
+      throw new ProjectAccessError("So quem enviou ou o gestor pode remover a imagem.");
+    }
+    item.images = item.images.filter((entry) => entry.id !== imageId);
+    return { task: viewTask(store, task, access), image };
+  });
+}
+
+export function newImageId() {
+  return makeId("img");
 }

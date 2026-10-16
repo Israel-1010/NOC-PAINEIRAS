@@ -395,3 +395,75 @@ export async function listPopDocuments(search = "") {
     };
   }
 }
+
+/* ---------- Gravacao de arquivos na pasta do POP (imagens dos projetos) ---------- */
+
+export class SharePointWriteError extends Error {
+  permission = false;
+}
+
+let popDriveCache: { driveId: string; basePath: string; expiresAt: number } | null = null;
+
+function cleanSegment(value: string) {
+  // Caracteres proibidos no SharePoint e pontos/espacos no fim.
+  return value.replace(/["*:<>?/\\|#%~&{}]/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "").slice(0, 80) || "sem-nome";
+}
+
+async function graphRequest(method: string, pathOrUrl: string, body?: BodyInit, contentType?: string) {
+  const token = await getAccessToken();
+  const url = pathOrUrl.startsWith("https://") ? pathOrUrl : `https://graph.microsoft.com/v1.0${pathOrUrl}`;
+  const response = await fetch(url, {
+    method,
+    signal: AbortSignal.timeout(30000),
+    headers: { Authorization: `Bearer ${token}`, ...(contentType ? { "Content-Type": contentType } : {}) },
+    body,
+  });
+  return response;
+}
+
+// Biblioteca e caminho onde a pasta POP existe (mesma usada na tela POP).
+async function findPopFolder() {
+  if (popDriveCache && popDriveCache.expiresAt > Date.now()) return popDriveCache;
+  if (!isSharePointConfigured()) throw new Error("SharePoint nao configurado.");
+  const drive = await resolveDrive();
+  const folderPath = sharePointConfig.folderUrl
+    ? folderPathFromUrl(sharePointConfig.folderUrl) || sharePointConfig.folderPath || ""
+    : sharePointConfig.folderPath || "";
+  if (!folderPath) throw new Error("Pasta do POP nao configurada (SHAREPOINT_FOLDER_PATH).");
+
+  for (const candidateDrive of drive.drives.length ? drive.drives : [{ id: drive.driveId }]) {
+    for (const candidatePath of folderPathCandidates(folderPath)) {
+      const response = await graphRequest("GET", `/drives/${candidateDrive.id}/root:/${encodePath(candidatePath)}?$select=id,name`);
+      if (response.ok) {
+        popDriveCache = { driveId: candidateDrive.id, basePath: candidatePath, expiresAt: Date.now() + 30 * 60 * 1000 };
+        return popDriveCache;
+      }
+    }
+  }
+  throw new Error("Pasta do POP nao encontrada no SharePoint.");
+}
+
+export async function uploadProjectImage(projectName: string, taskName: string, fileName: string, content: Buffer, mimeType: string) {
+  const folder = await findPopFolder();
+  const subfolder = process.env.PROJECTS_IMAGES_FOLDER || "Projetos";
+  const relative = [folder.basePath, subfolder, cleanSegment(projectName), cleanSegment(taskName), cleanSegment(fileName)].join("/");
+  const response = await graphRequest("PUT", `/drives/${folder.driveId}/root:/${encodePath(relative)}:/content?@microsoft.graph.conflictBehavior=rename`, new Uint8Array(content), mimeType);
+  const payload = await response.json().catch(() => ({})) as { id?: string; webUrl?: string; error?: { message?: string } };
+  if (!response.ok || !payload.id) {
+    const error = new SharePointWriteError(payload.error?.message || `SharePoint recusou a gravacao (${response.status}).`);
+    error.permission = response.status === 401 || response.status === 403;
+    throw error;
+  }
+  return { driveId: folder.driveId, itemId: payload.id, webUrl: payload.webUrl || "", path: relative };
+}
+
+export async function downloadSharePointFile(driveId: string, itemId: string) {
+  const response = await graphRequest("GET", `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/content`);
+  if (!response.ok) throw new Error(`SharePoint nao entregou o arquivo (${response.status}).`);
+  return Buffer.from(await response.arrayBuffer());
+}
+
+export async function deleteSharePointFile(driveId: string, itemId: string) {
+  const response = await graphRequest("DELETE", `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}`);
+  if (!response.ok && response.status !== 404) throw new Error(`SharePoint nao removeu o arquivo (${response.status}).`);
+}
