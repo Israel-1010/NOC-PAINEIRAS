@@ -9060,3 +9060,77 @@ thead .ac-person-col {
   color: var(--muted-2);
   text-decoration: line-through;
 }
+/* ===== Quadro: colunas cabem na tela em qualquer navegador ===== */
+.pm-layout.board-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pm-layout.board-mode .pm-spaces {
+  position: static;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+}
+
+.pm-layout.board-mode .pm-spaces-title {
+  display: none;
+}
+
+.pm-layout.board-mode .pm-space-item {
+  min-height: 34px;
+  border: 1px solid var(--border);
+}
+
+.pm-layout.board-mode .pm-add-space {
+  margin-top: 0;
+}
+
+.pm-board {
+  grid-auto-columns: minmax(180px, 1fr);
+  padding: 0 4px 12px 0;
+  scroll-padding-inline: 4px;
+  overscroll-behavior-x: contain;
+  /* Barra de rolagem sempre visivel quando as colunas nao cabem. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.pm-board::-webkit-scrollbar {
+  height: 10px;
+}
+
+.pm-board::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+
+.pm-board::-webkit-scrollbar-track {
+  background: var(--border-soft);
+  border-radius: 999px;
+}
+
+.pm-column {
+  min-width: 0;
+}
+
+.pm-card,
+.pm-card-open,
+.pm-card footer {
+  min-width: 0;
+}
+
+.pm-card-open strong {
+  overflow-wrap: anywhere;
+}
+
+.pm-column-head {
+  gap: 8px;
+}
+
+.pm-column-head .pm-status-pill {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

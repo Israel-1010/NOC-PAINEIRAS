@@ -560,7 +560,7 @@ export function ProjectsDashboard({ currentUser }: { currentUser: CurrentUser })
   const hasFilters = Boolean(search || priorityFilter || assigneeFilter !== "all" || !showDone);
 
   return (
-    <div className="pm-layout">
+    <div className={`pm-layout ${view === "board" ? "board-mode" : ""}`}>
       <aside className="pm-spaces" aria-label="Projetos">
         <button className={`pm-space-item ${spaceFilter === "all" ? "active" : ""}`} type="button" onClick={() => setSpaceFilter("all")}>
           <FolderKanban size={16} />
