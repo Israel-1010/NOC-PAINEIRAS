@@ -11425,3 +11425,98 @@ thead .ac-person-col {
   flex: 1;
   min-height: 0;
 }
+
+/* NOC: pagina por controladora UniFi */
+.noc-ctrl-head {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.noc-ctrl-head small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--noc-muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.noc-ctrl-head > div[class*="tone-"] strong {
+  color: var(--tone);
+}
+
+.noc-ctrl-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.noc-ctrl-side > .noc-card {
+  flex: none;
+}
+
+.noc-ctrl-side > .noc-unifi-alarms {
+  flex: 1;
+  min-height: 0;
+}
+
+.noc-mini-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.noc-mini-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.92em;
+}
+
+.noc-mini-list li svg {
+  color: var(--tone);
+}
+
+.noc-mini-list li span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.noc-mini-list li b {
+  color: var(--noc-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.noc-ctrl-down {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  height: 100%;
+  color: var(--noc-critical);
+  text-align: center;
+}
+
+.noc-ctrl-down h3 {
+  justify-content: center;
+  color: var(--noc-ink);
+  font-size: 1.6em;
+}
+
+.noc-ctrl-down p {
+  max-width: 60ch;
+  margin: 0;
+  color: var(--noc-ink);
+  font-size: 1.15em;
+}
+
+.noc-ctrl-down small {
+  color: var(--noc-muted);
+}

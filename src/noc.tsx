@@ -81,6 +81,7 @@ type NocLink = {
 type TrafficLink = { id: string; name: string; series: { t: number; in: number | null; out: number | null }[] };
 type UnifiSwitch = {
   id: string;
+  controller: string;
   site: string;
   name: string;
   model: string;
@@ -88,12 +89,16 @@ type UnifiSwitch = {
   cpu: number | null;
   memory: number | null;
   temperature: number | null;
+  uptimeSec: number | null;
   portsUp: number;
   portsTotal: number;
   portErrors: number;
   poeWatts: number;
   poeMaxWatts: number | null;
   clients: number;
+  txBps: number | null;
+  rxBps: number | null;
+  version: string;
   uplink: string;
   upgradable: boolean;
 };
@@ -105,19 +110,48 @@ type UnifiAp = {
   model: string;
   online: boolean;
   cpu: number | null;
+  memory: number | null;
   clients: number;
   satisfaction: number | null;
   radios: { band: string; channel: number | null; utilization: number | null; clients: number }[];
+  txBps: number | null;
+  rxBps: number | null;
+  uptimeSec: number | null;
+  version: string;
   uplink: string;
+  upgradable: boolean;
+};
+type UnifiAlarm = { id: string; site: string; time: string; message: string };
+type UnifiController = {
+  id: string;
+  name: string;
+  ok: boolean;
+  message: string;
+  version: string;
+  via: "direto" | "zabbix";
+  sites: { name: string; title: string }[];
+  switches: UnifiSwitch[];
+  aps: UnifiAp[];
+  clients: {
+    total: number;
+    wired: number;
+    wireless: number;
+    guests: number;
+    satisfaction: number | null;
+    bySsid: { ssid: string; count: number }[];
+    byBand: { band: string; count: number }[];
+  };
+  traffic: { txBps: number; rxBps: number };
+  alarms: UnifiAlarm[];
 };
 type Unifi = {
   version: string;
-  controllers: { id: string; name: string; ok: boolean; message: string; version: string }[];
+  controllers: UnifiController[];
   sites: { name: string; title: string }[];
   switches: UnifiSwitch[];
   aps: UnifiAp[];
   clients: { total: number; wired: number; wireless: number; bySsid: { ssid: string; count: number }[] };
-  alarms: { id: string; site: string; time: string; message: string }[];
+  alarms: UnifiAlarm[];
 };
 type NocData = {
   unifi?: Unifi | null;
@@ -133,15 +167,29 @@ type NocData = {
   errors: string[];
 };
 
-type PageId = "overview" | "internet" | "unifi" | "antenas" | "servidores" | "cftv";
-const PAGES: { id: PageId; title: string; icon: typeof Activity }[] = [
+// Paginas fixas; cada controladora UniFi ganha a sua pagina ("unifi:<id>") depois de "internet".
+type NocPage = { id: string; title: string; icon: typeof Activity; controllerId?: string };
+const FIXED_PAGES: NocPage[] = [
   { id: "overview", title: "Visão geral", icon: Activity },
   { id: "internet", title: "Internet e Firewall", icon: Globe },
-  { id: "unifi", title: "Rede UniFi: switches, PoE e Wi-Fi", icon: Wifi },
-  { id: "antenas", title: "Antenas UniFi", icon: Radio },
+  { id: "antenas", title: "Antenas (ping do Zabbix)", icon: Radio },
   { id: "servidores", title: "Servidores e Datacenter", icon: Server },
   { id: "cftv", title: "CFTV e Videowall", icon: Camera },
 ];
+
+function buildPages(data: NocData | null): NocPage[] {
+  const controllers = data?.unifi?.controllers || [];
+  const unifiPages: NocPage[] = controllers.map((controller) => ({
+    id: `unifi:${controller.id}`,
+    title: `UniFi · ${controller.name}`,
+    icon: controller.aps.length >= controller.switches.length ? Radio : Network,
+    controllerId: controller.id,
+  }));
+  // Com antenas vindas da UniFi, a grade de ping do Zabbix vira redundante.
+  const hasUnifiAps = controllers.some((controller) => controller.ok && controller.aps.length);
+  const fixed = FIXED_PAGES.filter((page) => page.id !== "antenas" || !hasUnifiAps);
+  return [...fixed.slice(0, 2), ...unifiPages, ...fixed.slice(2)];
+}
 
 // Severidades no padrao do Zabbix (sempre com rotulo).
 const SEVERITY = [
@@ -558,162 +606,213 @@ function ServersPage({ data }: { data: NocData }) {
   );
 }
 
-// Controladora que nao respondeu aparece como aviso; as demais continuam no painel.
-function ControllerWarnings({ unifi }: { unifi: Unifi }) {
-  const failed = unifi.controllers.filter((controller) => !controller.ok);
-  if (!failed.length) return null;
+/* ---------- Pagina de uma controladora UniFi ---------- */
+
+const total = (device: { txBps: number | null; rxBps: number | null }) => (device.txBps || 0) + (device.rxBps || 0);
+const satisfactionTone = (value: number | null) => (value === null ? "unknown" : value >= 80 ? "good" : value >= 60 ? "warning" : "critical");
+const onlineTone = (online: number, count: number) => (!count ? "unknown" : online === count ? "good" : online / count < 0.5 ? "critical" : "warning");
+
+function HBarList({ rows, empty }: { rows: { label: string; count: number }[]; empty: string }) {
+  if (!rows.length) return <p className="noc-empty">{empty}</p>;
+  const top = Math.max(1, ...rows.map((row) => row.count));
   return (
-    <>
-      {failed.map((controller) => (
-        <p key={controller.id} className="noc-collect-warn">
-          <AlertTriangle size={18} /> Controladora {controller.name} sem resposta: {controller.message}
-        </p>
+    <ul className="noc-ssid-list">
+      {rows.map((row) => (
+        <li key={row.label}>
+          <span>{row.label}</span>
+          <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${(row.count / top) * 100}%` }} /></div>
+          <b>{row.count.toLocaleString("pt-BR")}</b>
+        </li>
       ))}
-    </>
+    </ul>
   );
 }
 
-// A pagina de antenas usa a UniFi quando todas as controladoras responderam e cobrem as antenas do Zabbix.
-function hasUnifiAps(data: NocData) {
-  const unifi = data.unifi;
-  if (!unifi || !unifi.aps.length || unifi.controllers.some((controller) => !controller.ok)) return false;
-  const zabbix = data.groups.find((group) => group.key === "antenas")?.total || 0;
-  return unifi.aps.length >= zabbix * 0.6;
-}
-
-function UnifiApPage({ unifi }: { unifi: Unifi }) {
-  const online = unifi.aps.filter((ap) => ap.online).length;
-  const offline = unifi.aps.length - online;
-  const tone = !offline ? "good" : online / Math.max(1, unifi.aps.length) < 0.5 ? "critical" : "warning";
-  const wifiClients = unifi.aps.reduce((sum, ap) => sum + (ap.online ? ap.clients : 0), 0);
-  const busiest = Math.max(1, ...unifi.aps.map((ap) => ap.clients));
-  const sizeClass = unifi.aps.length > 60 ? "size-xxs" : unifi.aps.length > 40 ? "size-xs" : unifi.aps.length > 24 ? "size-sm" : "size-md";
+function ApTile({ ap, busiest, compact }: { ap: UnifiAp; busiest: number; compact: boolean }) {
+  const busy = Math.max(0, ...ap.radios.map((radio) => radio.utilization ?? 0));
+  const tone = !ap.online ? "critical" : busy >= 80 || (ap.satisfaction !== null && ap.satisfaction < 60) ? "warning" : "good";
   return (
-    <div className="noc-page noc-unifi">
-      <div className="noc-group-head noc-unifi-head">
-        <div className="tone-good"><span>Online</span><strong>{online}</strong><small>antenas conectadas</small></div>
-        <div className={offline ? "tone-critical" : "tone-good"}><span>Desconectadas</span><strong>{offline}</strong><small>na controladora</small></div>
-        <div><span>Total</span><strong>{unifi.aps.length}</strong><small>{unifi.controllers.map((controller) => controller.name).join(" · ")}</small></div>
-        <div><span>Clientes no Wi-Fi</span><strong>{wifiClients.toLocaleString("pt-BR")}</strong><small>somando as antenas</small></div>
-        <div className={`status tone-${tone}`}>{toneIcon(tone, 26)} {toneLabel(tone)}</div>
-      </div>
-      <section className="noc-card noc-unifi-switches">
-        <h3><Radio size={20} /> Antenas <small>clientes · uso do canal (2,4 / 5 GHz)</small></h3>
-        <div className={`noc-swgrid ${sizeClass}`}>
-          {unifi.aps.map((ap) => {
-            const busy = Math.max(0, ...ap.radios.map((radio) => radio.utilization ?? 0));
-            const apTone = !ap.online ? "critical" : busy >= 80 ? "warning" : "good";
-            return (
-              <div key={ap.id} className={`noc-sw tone-${apTone}`} title={`${ap.name} · ${ap.model} · ${ap.controller} / ${ap.site}${ap.uplink ? ` · uplink ${ap.uplink}` : ""}`}>
-                <strong>{apTone === "critical" ? <WifiOff size={13} /> : toneIcon(apTone, 13)} {ap.name}</strong>
-                {ap.online ? (
-                  <>
-                    <div className="noc-sw-ports" aria-label={`${ap.clients} clientes`}><i style={{ width: `${(ap.clients / busiest) * 100}%` }} /></div>
-                    <small>
-                      <b>{ap.clients}</b> clientes · {ap.radios.map((radio) => pct(radio.utilization)).join(" / ") || ap.model}
-                    </small>
-                  </>
-                ) : (
-                  <small className="noc-sw-off">DESCONECTADA</small>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
+    <div className={`noc-sw tone-${tone}`} title={`${ap.name} · ${ap.model} · ${ap.site}${total(ap) ? ` · tráfego ${rate(total(ap))}` : ""}${ap.version ? ` · firmware ${ap.version}` : ""}${ap.uptimeSec ? ` · ligada há ${uptime(ap.uptimeSec)}` : ""}`}>
+      <strong>{tone === "critical" ? <WifiOff size={13} /> : toneIcon(tone, 13)} {ap.name}</strong>
+      {ap.online ? (
+        <>
+          <div className="noc-sw-ports" aria-label={`${ap.clients} clientes`}><i style={{ width: `${(ap.clients / busiest) * 100}%` }} /></div>
+          <small>
+            <b>{ap.clients}</b> cli · {ap.radios.map((radio) => pct(radio.utilization)).join(" / ") || "—"}
+            {!compact && total(ap) ? ` · ${rate(total(ap))}` : ""}
+          </small>
+        </>
+      ) : (
+        <small className="noc-sw-off">DESCONECTADA</small>
+      )}
     </div>
   );
 }
 
-function UnifiPage({ unifi }: { unifi: Unifi }) {
-  const swOnline = unifi.switches.filter((sw) => sw.online).length;
-  const apOnline = unifi.aps.filter((ap) => ap.online).length;
-  const poe = unifi.switches.reduce((sum, sw) => sum + sw.poeWatts, 0);
-  const topClients = Math.max(1, ...unifi.aps.map((ap) => ap.clients));
-  const topSsid = Math.max(1, ...unifi.clients.bySsid.map((entry) => entry.count));
-  const sizeClass = unifi.switches.length > 36 ? "size-xs" : unifi.switches.length > 20 ? "size-sm" : "size-md";
-  const swTone = swOnline === unifi.switches.length ? "good" : swOnline / Math.max(1, unifi.switches.length) < 0.5 ? "critical" : "warning";
-  const apTone = apOnline === unifi.aps.length ? "good" : apOnline / Math.max(1, unifi.aps.length) < 0.5 ? "critical" : "warning";
+function SwitchTile({ sw }: { sw: UnifiSwitch }) {
+  const tone = !sw.online ? "critical" : (sw.cpu ?? 0) >= 90 || (sw.temperature ?? 0) >= 75 ? "warning" : "good";
+  const usage = sw.portsTotal ? (sw.portsUp / sw.portsTotal) * 100 : 0;
+  return (
+    <div className={`noc-sw tone-${tone}`} title={`${sw.name} · ${sw.model} · ${sw.site}${sw.uplink ? ` · uplink ${sw.uplink}` : ""}${sw.version ? ` · firmware ${sw.version}` : ""}`}>
+      <strong>{tone === "critical" ? <WifiOff size={13} /> : toneIcon(tone, 13)} {sw.name}</strong>
+      {sw.online ? (
+        <>
+          <div className="noc-sw-ports" aria-label={`${sw.portsUp} de ${sw.portsTotal} portas ativas`}><i style={{ width: `${usage}%` }} /></div>
+          <small>
+            <b>{sw.portsUp}/{sw.portsTotal}</b> portas · <Zap size={11} /> {Math.round(sw.poeWatts)} W · CPU {pct(sw.cpu)}
+            {sw.temperature !== null ? ` · ${Math.round(sw.temperature)} °C` : ""}
+          </small>
+        </>
+      ) : (
+        <small className="noc-sw-off">DESCONECTADO</small>
+      )}
+    </div>
+  );
+}
+
+const gridSize = (count: number) => (count > 60 ? "size-xxs" : count > 40 ? "size-xs" : count > 20 ? "size-sm" : "size-md");
+
+function ControllerPage({ controller }: { controller: UnifiController }) {
+  if (!controller.ok) {
+    return (
+      <div className="noc-page noc-unifi">
+        <section className="noc-card noc-ctrl-down">
+          <XCircle size={48} />
+          <h3>Controladora {controller.name} sem resposta</h3>
+          <p>{controller.message}</p>
+          <small>{controller.via === "zabbix" ? "Lida pelo Zabbix (item NOC: resumo da controladora UniFi)." : "Acessada direto pelo portal. Veja o botão Wi-Fi no Painel NOC."}</small>
+        </section>
+      </div>
+    );
+  }
+
+  const apsOnline = controller.aps.filter((ap) => ap.online).length;
+  const swOnline = controller.switches.filter((sw) => sw.online).length;
+  const apFocus = controller.aps.length >= controller.switches.length;
+  const busiest = Math.max(1, ...controller.aps.map((ap) => ap.clients));
+  const poe = controller.switches.reduce((sum, sw) => sum + sw.poeWatts, 0);
+  const traffic = controller.traffic.txBps + controller.traffic.rxBps;
+  const upgrades = controller.aps.filter((ap) => ap.upgradable).length + controller.switches.filter((sw) => sw.upgradable).length;
+  const congested = controller.aps
+    .filter((ap) => ap.online)
+    .flatMap((ap) => ap.radios.filter((radio) => (radio.utilization ?? 0) >= 70).map((radio) => ({ ap: ap.name, ...radio })))
+    .sort((a, b) => (b.utilization ?? 0) - (a.utilization ?? 0));
+  const apTone = onlineTone(apsOnline, controller.aps.length);
+  const swTone = onlineTone(swOnline, controller.switches.length);
+  const satTone = satisfactionTone(controller.clients.satisfaction);
 
   return (
     <div className="noc-page noc-unifi">
-      <ControllerWarnings unifi={unifi} />
-      <div className="noc-group-head noc-unifi-head">
-        <div><span>Clientes conectados</span><strong>{unifi.clients.total.toLocaleString("pt-BR")}</strong><small>{unifi.clients.wired.toLocaleString("pt-BR")} cabo · {unifi.clients.wireless.toLocaleString("pt-BR")} Wi-Fi</small></div>
-        <div className={`tone-${swTone}`}><span>Switches</span><strong>{swOnline}/{unifi.switches.length}</strong><small>{toneIcon(swTone, 13)} {swOnline === unifi.switches.length ? "todos online" : `${unifi.switches.length - swOnline} desconectado(s)`}</small></div>
-        <div className={`tone-${apTone}`}><span>Antenas</span><strong>{apOnline}/{unifi.aps.length}</strong><small>{toneIcon(apTone, 13)} {apOnline === unifi.aps.length ? "todas online" : `${unifi.aps.length - apOnline} desconectada(s)`}</small></div>
-        <div><span>Consumo PoE</span><strong>{Math.round(poe).toLocaleString("pt-BR")} W</strong><small>somando os switches</small></div>
-        <div className={unifi.alarms.length ? "tone-warning" : "tone-good"}><span>Alarmes da controladora</span><strong>{unifi.alarms.length}</strong><small>UniFi {unifi.version}</small></div>
+      <div className="noc-group-head noc-ctrl-head">
+        <div>
+          <span>Clientes conectados</span>
+          <strong>{controller.clients.total.toLocaleString("pt-BR")}</strong>
+          <small>{controller.clients.wireless.toLocaleString("pt-BR")} Wi-Fi · {controller.clients.wired.toLocaleString("pt-BR")} cabo{controller.clients.guests ? ` · ${controller.clients.guests} convidados` : ""}</small>
+        </div>
+        <div className={`tone-${apTone}`}>
+          <span>Antenas</span>
+          <strong>{apsOnline}/{controller.aps.length}</strong>
+          <small>{toneIcon(apTone, 13)} {controller.aps.length - apsOnline ? `${controller.aps.length - apsOnline} desconectada(s)` : "todas online"}</small>
+        </div>
+        <div className={`tone-${swTone}`}>
+          <span>Switches</span>
+          <strong>{swOnline}/{controller.switches.length}</strong>
+          <small>{controller.switches.length ? <>{toneIcon(swTone, 13)} PoE {Math.round(poe).toLocaleString("pt-BR")} W</> : "nenhum nesta controladora"}</small>
+        </div>
+        <div>
+          <span>Tráfego agora</span>
+          <strong>{traffic ? rate(traffic) : "—"}</strong>
+          <small>somando as antenas</small>
+        </div>
+        <div className={`tone-${satTone}`}>
+          <span>Experiência Wi-Fi</span>
+          <strong>{controller.clients.satisfaction === null ? "—" : `${controller.clients.satisfaction}%`}</strong>
+          <small>satisfação média dos clientes</small>
+        </div>
+        <div className={controller.alarms.length || upgrades ? "tone-warning" : "tone-good"}>
+          <span>Alarmes (7 dias)</span>
+          <strong>{controller.alarms.length}</strong>
+          <small>{upgrades ? `${upgrades} com firmware novo` : `UniFi ${controller.version}`}</small>
+        </div>
       </div>
 
       <div className="noc-unifi-body">
         <section className="noc-card noc-unifi-switches">
-          <h3><Network size={20} /> Switches <small>portas ativas · PoE · CPU · temperatura</small></h3>
-          <div className={`noc-swgrid ${sizeClass}`}>
-            {unifi.switches.map((sw) => {
-              const tone = !sw.online ? "critical" : (sw.cpu ?? 0) >= 90 || (sw.temperature ?? 0) >= 75 ? "warning" : "good";
-              const usage = sw.portsTotal ? (sw.portsUp / sw.portsTotal) * 100 : 0;
-              return (
-                <div key={sw.id} className={`noc-sw tone-${tone}`} title={`${sw.name} · ${sw.model} · ${sw.site}${sw.uplink ? ` · uplink ${sw.uplink}` : ""}`}>
-                  <strong>{tone === "critical" ? <WifiOff size={13} /> : toneIcon(tone, 13)} {sw.name}</strong>
-                  {sw.online ? (
-                    <>
-                      <div className="noc-sw-ports" aria-label={`${sw.portsUp} de ${sw.portsTotal} portas ativas`}>
-                        <i style={{ width: `${usage}%` }} />
-                      </div>
-                      <small>
-                        <b>{sw.portsUp}/{sw.portsTotal}</b> portas · <Zap size={11} /> {Math.round(sw.poeWatts)} W · CPU {pct(sw.cpu)}
-                        {sw.temperature !== null ? ` · ${Math.round(sw.temperature)} °C` : ""}
-                      </small>
-                    </>
-                  ) : (
-                    <small className="noc-sw-off">DESCONECTADO</small>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          {apFocus ? (
+            <>
+              <h3><Radio size={20} /> Antenas <small>clientes · uso do canal 2,4 / 5 GHz · tráfego</small></h3>
+              <div className={`noc-swgrid ${gridSize(controller.aps.length)}`}>
+                {controller.aps.map((ap) => <ApTile key={ap.id} ap={ap} busiest={busiest} compact={controller.aps.length > 60} />)}
+              </div>
+            </>
+          ) : (
+            <>
+              <h3><Network size={20} /> Switches <small>portas ativas · PoE · CPU · temperatura</small></h3>
+              <div className={`noc-swgrid ${gridSize(controller.switches.length)}`}>
+                {controller.switches.map((sw) => <SwitchTile key={sw.id} sw={sw} />)}
+              </div>
+            </>
+          )}
         </section>
 
-        <div className="noc-unifi-side">
+        <div className="noc-unifi-side noc-ctrl-side">
           <section className="noc-card">
-            <h3><Radio size={20} /> Antenas mais usadas <small>clientes e uso do canal</small></h3>
-            <ul className="noc-ap-list">
-              {unifi.aps.filter((ap) => ap.online).slice(0, 7).map((ap) => (
-                <li key={ap.id} className={`tone-${ap.online ? "good" : "critical"}`}>
-                  <strong>{ap.online ? <CheckCircle2 size={14} /> : <WifiOff size={14} />} {ap.name}</strong>
-                  <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${(ap.clients / topClients) * 100}%` }} /></div>
-                  <b>{ap.online ? ap.clients : "—"}</b>
-                  <small>
-                    {ap.online
-                      ? ap.radios.map((radio) => `${radio.band} canal ${radio.channel ?? "—"} · ${pct(radio.utilization)}`).join("  |  ") || ap.model
-                      : "desconectada"}
-                  </small>
-                </li>
-              ))}
-            </ul>
+            <h3><Wifi size={20} /> Clientes por banda</h3>
+            <HBarList rows={controller.clients.byBand.map((entry) => ({ label: entry.band, count: entry.count }))} empty="Sem clientes no Wi-Fi." />
           </section>
           <section className="noc-card">
-            <h3><Wifi size={20} /> Redes Wi-Fi <small>clientes por rede</small></h3>
-            {unifi.clients.bySsid.length ? (
-              <ul className="noc-ssid-list">
-                {unifi.clients.bySsid.slice(0, 6).map((entry) => (
-                  <li key={entry.ssid}>
-                    <span>{entry.ssid}</span>
-                    <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${(entry.count / topSsid) * 100}%` }} /></div>
-                    <b>{entry.count}</b>
+            <h3><Wifi size={20} /> Redes Wi-Fi</h3>
+            <HBarList rows={controller.clients.bySsid.slice(0, 5).map((entry) => ({ label: entry.ssid, count: entry.count }))} empty="Sem clientes no Wi-Fi." />
+          </section>
+          {apFocus && controller.switches.length ? (
+            <section className="noc-card">
+              <h3><Network size={20} /> Switches <small>{swOnline}/{controller.switches.length} online</small></h3>
+              <ul className="noc-mini-list">
+                {[...controller.switches].sort((a, b) => Number(a.online) - Number(b.online)).slice(0, 5).map((sw) => (
+                  <li key={sw.id} className={`tone-${sw.online ? "good" : "critical"}`}>
+                    {sw.online ? <CheckCircle2 size={14} /> : <WifiOff size={14} />}
+                    <span>{sw.name}</span>
+                    <b>{sw.online ? `${sw.portsUp}/${sw.portsTotal} portas` : "desconectado"}</b>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {!apFocus && controller.aps.length ? (
+            <section className="noc-card">
+              <h3><Radio size={20} /> Antenas <small>{apsOnline}/{controller.aps.length} online</small></h3>
+              <ul className="noc-mini-list">
+                {controller.aps.slice(0, 5).map((ap) => (
+                  <li key={ap.id} className={`tone-${ap.online ? "good" : "critical"}`}>
+                    {ap.online ? <CheckCircle2 size={14} /> : <WifiOff size={14} />}
+                    <span>{ap.name}</span>
+                    <b>{ap.online ? `${ap.clients} clientes` : "desconectada"}</b>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          <section className="noc-card">
+            <h3><AlertTriangle size={20} /> Canais congestionados <small>uso acima de 70%</small></h3>
+            {congested.length ? (
+              <ul className="noc-mini-list">
+                {congested.slice(0, 5).map((entry) => (
+                  <li key={`${entry.ap}-${entry.band}`} className={(entry.utilization ?? 0) >= 85 ? "tone-critical" : "tone-warning"}>
+                    <AlertTriangle size={14} />
+                    <span>{entry.ap}</span>
+                    <b>{entry.band} canal {entry.channel ?? "—"} · {pct(entry.utilization)}</b>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="noc-empty">Nenhum cliente sem fio nesta controladora.</p>
+              <p className="noc-all-clear small"><ShieldCheck size={20} /> Nenhum canal congestionado</p>
             )}
           </section>
           <section className="noc-card noc-unifi-alarms">
-            <h3><AlertTriangle size={20} /> Alarmes da controladora</h3>
-            {unifi.alarms.length ? (
+            <h3><AlertTriangle size={20} /> Alarmes recentes</h3>
+            {controller.alarms.length ? (
               <ol>
-                {unifi.alarms.slice(0, 6).map((alarm) => (
+                {controller.alarms.slice(0, 4).map((alarm) => (
                   <li key={alarm.id}>
                     <span>{alarm.message}</span>
                     <time>{alarm.time ? `há ${duration(alarm.time)}` : ""}</time>
@@ -721,7 +820,7 @@ function UnifiPage({ unifi }: { unifi: Unifi }) {
                 ))}
               </ol>
             ) : (
-              <p className="noc-all-clear small"><ShieldCheck size={20} /> Nenhum alarme aberto</p>
+              <p className="noc-all-clear small"><ShieldCheck size={20} /> Nenhum alarme nos últimos 7 dias</p>
             )}
           </section>
         </div>
@@ -729,6 +828,7 @@ function UnifiPage({ unifi }: { unifi: Unifi }) {
     </div>
   );
 }
+
 
 type ControllerForm = { id: string; name: string; url: string; user: string; password: string; hasPassword: boolean; sites: string; insecureTls: boolean };
 type TestResult = { id: string; name: string; ok: boolean; message: string; viaZabbix?: boolean };
@@ -919,9 +1019,10 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
   const [now, setNow] = useState(() => new Date());
   const [fullscreen, setFullscreen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  // A pagina da UniFi so entra no carrossel quando a controladora esta configurada.
-  const hasUnifi = Boolean(data?.unifi);
-  const pages = useMemo(() => PAGES.filter((entry) => entry.id !== "unifi" || hasUnifi), [hasUnifi]);
+  // Uma pagina por controladora UniFi; a lista so muda quando entra/sai uma controladora.
+  const computed = buildPages(data);
+  const pagesKey = computed.map((entry) => `${entry.id}|${entry.title}`).join(",");
+  const pages = useMemo(() => computed, [pagesKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const pageCount = pages.length;
 
   const load = useCallback(async () => {
@@ -1079,10 +1180,13 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           <OverviewPage data={data} />
         ) : current.id === "internet" ? (
           <InternetPage data={data} />
-        ) : current.id === "unifi" && data.unifi ? (
-          <UnifiPage unifi={data.unifi} />
+        ) : current.controllerId ? (
+          (() => {
+            const controller = data.unifi?.controllers.find((entry) => entry.id === current.controllerId);
+            return controller ? <ControllerPage controller={controller} /> : <p className="noc-empty">Controladora indisponível.</p>;
+          })()
         ) : current.id === "antenas" ? (
-          hasUnifiAps(data) ? <UnifiApPage unifi={data.unifi!} /> : <GroupPage data={data} keys={["antenas"]} />
+          <GroupPage data={data} keys={["antenas"]} />
         ) : current.id === "servidores" ? (
           <ServersPage data={data} />
         ) : (

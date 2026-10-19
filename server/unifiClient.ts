@@ -328,7 +328,7 @@ type RawPort = {
   tx_errors?: number;
 };
 
-type RawRadio = { name?: string; radio?: string; channel?: number; cu_total?: number; num_sta?: number; satisfaction?: number };
+type RawRadio = { name?: string; radio?: string; channel?: number; cu_total?: number; num_sta?: number; satisfaction?: number; tx_power?: number };
 
 type RawDevice = {
   mac: string;
@@ -344,13 +344,15 @@ type RawDevice = {
   satisfaction?: number;
   general_temperature?: number;
   total_max_power?: number;
+  "tx_bytes-r"?: number;
+  "rx_bytes-r"?: number;
   "system-stats"?: { cpu?: string | number; mem?: string | number };
   port_table?: RawPort[];
   radio_table_stats?: RawRadio[];
-  uplink?: { type?: string; speed?: number; uplink_device_name?: string; uplink_remote_port?: number };
+  uplink?: { type?: string; speed?: number; uplink_device_name?: string; uplink_remote_port?: number; "tx_bytes-r"?: number; "rx_bytes-r"?: number };
 };
 
-type RawClient = { is_wired?: boolean; ap_mac?: string; essid?: string };
+type RawClient = { is_wired?: boolean; is_guest?: boolean; ap_mac?: string; essid?: string; radio?: string; satisfaction?: number };
 type RawAlarm = { _id: string; datetime?: string; time?: number; msg?: string; key?: string };
 type RawSite = { name: string; desc?: string };
 
@@ -373,6 +375,9 @@ export type UnifiSwitch = {
   poeWatts: number;
   poeMaxWatts: number | null;
   clients: number;
+  txBps: number | null;
+  rxBps: number | null;
+  version: string;
   uplink: string;
   upgradable: boolean;
 };
@@ -389,24 +394,74 @@ export type UnifiAp = {
   clients: number;
   satisfaction: number | null;
   radios: { band: string; channel: number | null; utilization: number | null; clients: number }[];
+  txBps: number | null;
+  rxBps: number | null;
+  uptimeSec: number | null;
+  version: string;
   uplink: string;
   upgradable: boolean;
+};
+
+type Alarm = { id: string; site: string; time: string; message: string };
+
+// Tudo o que uma controladora entrega (direto ou via Zabbix).
+type ControllerData = {
+  version: string;
+  sites: { name: string; title: string }[];
+  switches: UnifiSwitch[];
+  aps: UnifiAp[];
+  alarms: Alarm[];
+  wired: number;
+  wireless: number;
+  guests: number;
+  ssid: Map<string, number>;
+  bands: Map<string, number>;
+  satisfaction: number | null;
+};
+
+export type UnifiControllerView = {
+  id: string;
+  name: string;
+  ok: boolean;
+  message: string;
+  version: string;
+  via: "direto" | "zabbix";
+  sites: { name: string; title: string }[];
+  switches: UnifiSwitch[];
+  aps: UnifiAp[];
+  clients: {
+    total: number;
+    wired: number;
+    wireless: number;
+    guests: number;
+    satisfaction: number | null;
+    bySsid: { ssid: string; count: number }[];
+    byBand: { band: string; count: number }[];
+  };
+  traffic: { txBps: number; rxBps: number };
+  alarms: Alarm[];
 };
 
 export type UnifiOverview = {
   generatedAt: string;
   version: string;
-  controllers: { id: string; name: string; ok: boolean; message: string; version: string }[];
+  controllers: UnifiControllerView[];
   sites: { name: string; title: string }[];
   switches: UnifiSwitch[];
   aps: UnifiAp[];
   clients: { total: number; wired: number; wireless: number; bySsid: { ssid: string; count: number }[] };
-  alarms: { id: string; site: string; time: string; message: string }[];
+  alarms: Alarm[];
 };
 
 const num = (value: unknown) => {
   const parsed = typeof value === "string" ? Number.parseFloat(value) : typeof value === "number" ? value : Number.NaN;
   return Number.isFinite(parsed) ? Math.round(parsed * 10) / 10 : null;
+};
+
+// bytes/s da controladora -> bits/s
+const bps = (value: unknown) => {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+  return Number.isFinite(parsed) ? Math.round(parsed * 8) : null;
 };
 
 const bandName = (radio?: string) => (radio === "ng" ? "2,4 GHz" : radio === "na" ? "5 GHz" : radio === "6e" ? "6 GHz" : radio || "rádio");
@@ -420,7 +475,7 @@ function uplinkLabel(device: RawDevice) {
 }
 
 // Le uma controladora inteira (todos os sites escolhidos).
-async function loadController(controller: Controller) {
+async function loadController(controller: Controller): Promise<ControllerData> {
   const allSites = await controller.api<RawSite>("/api/self/sites");
   const wanted = controller.cfg.sites;
   const sites = wanted.length ? allSites.filter((site) => wanted.includes(site.name) || wanted.includes(site.desc || "")) : allSites;
@@ -439,25 +494,29 @@ async function loadController(controller: Controller) {
   ]);
 
   const name = controller.cfg.name;
-  const switches: UnifiSwitch[] = [];
-  const aps: UnifiAp[] = [];
-  const ssid = new Map<string, number>();
-  const alarms: UnifiOverview["alarms"] = [];
-  let wired = 0;
-  let wireless = 0;
+  const data: ControllerData = { version, sites: sites.map((site) => ({ name: site.name, title: site.desc || site.name })), switches: [], aps: [], alarms: [], wired: 0, wireless: 0, guests: 0, ssid: new Map(), bands: new Map(), satisfaction: null };
+  let satisfactionSum = 0;
+  let satisfactionCount = 0;
 
-  for (const { site, devices, clients, alarms: siteAlarms } of loaded) {
+  for (const { site, devices, clients, alarms } of loaded) {
     const title = site.desc || site.name;
     const clientsByAp = new Map<string, number>();
     for (const client of clients) {
+      if (client.is_guest) data.guests += 1;
       if (client.is_wired) {
-        wired += 1;
+        data.wired += 1;
         continue;
       }
-      wireless += 1;
+      data.wireless += 1;
       if (client.ap_mac) clientsByAp.set(client.ap_mac, (clientsByAp.get(client.ap_mac) || 0) + 1);
       const network = client.essid || "(oculta)";
-      ssid.set(network, (ssid.get(network) || 0) + 1);
+      data.ssid.set(network, (data.ssid.get(network) || 0) + 1);
+      const band = bandName(client.radio);
+      data.bands.set(band, (data.bands.get(band) || 0) + 1);
+      if (typeof client.satisfaction === "number") {
+        satisfactionSum += client.satisfaction;
+        satisfactionCount += 1;
+      }
     }
 
     for (const device of devices) {
@@ -471,15 +530,19 @@ async function loadController(controller: Controller) {
         online: device.state === 1,
         cpu: num(stats.cpu),
         memory: num(stats.mem),
+        // Versoes antigas tem tx/rx_bytes-r no aparelho; a 9.x so no uplink (rx do uplink = o que desce aos clientes).
+        txBps: bps(device["tx_bytes-r"] ?? device.uplink?.["rx_bytes-r"]),
+        rxBps: bps(device["rx_bytes-r"] ?? device.uplink?.["tx_bytes-r"]),
+        uptimeSec: device.uptime ?? null,
+        version: device.version || "",
         uplink: uplinkLabel(device),
         upgradable: Boolean(device.upgradable),
       };
       if (device.type === "usw") {
         const ports = (device.port_table || []).filter((port) => port.enable !== false);
-        switches.push({
+        data.switches.push({
           ...base,
           temperature: num(device.general_temperature),
-          uptimeSec: device.uptime ?? null,
           portsUp: ports.filter((port) => port.up).length,
           portsTotal: ports.length,
           portErrors: ports.reduce((sum, port) => sum + (port.rx_errors || 0) + (port.tx_errors || 0), 0),
@@ -488,7 +551,7 @@ async function loadController(controller: Controller) {
           clients: device.num_sta || 0,
         });
       } else if (device.type === "uap") {
-        aps.push({
+        data.aps.push({
           ...base,
           clients: clientsByAp.get(device.mac) ?? device.num_sta ?? 0,
           satisfaction: num(device.satisfaction),
@@ -502,8 +565,8 @@ async function loadController(controller: Controller) {
       }
     }
 
-    for (const alarm of siteAlarms.slice(0, 30)) {
-      alarms.push({
+    for (const alarm of alarms.slice(0, 30)) {
+      data.alarms.push({
         id: `${controller.cfg.id}:${alarm._id}`,
         site: title,
         time: alarm.datetime || (alarm.time ? new Date(alarm.time).toISOString() : ""),
@@ -511,25 +574,61 @@ async function loadController(controller: Controller) {
       });
     }
   }
-
-  return { version, sites: sites.map((site) => ({ name: site.name, title: site.desc || site.name })), switches, aps, ssid, alarms, wired, wireless };
+  data.satisfaction = satisfactionCount ? Math.round(satisfactionSum / satisfactionCount) : null;
+  return data;
 }
 
 /* ---------- Controladoras lidas pelo Zabbix ---------- */
 
 // Para redes que o portal nao alcanca (ex.: 192.168.2.x), um item Script no Zabbix
-// (chave noc.unifi.summary) faz um login por minuto na controladora e grava um resumo em JSON.
+// (chave noc.unifi.summary) faz um login a cada 30 s na controladora e grava um resumo em JSON.
 type ZabbixSummary = {
   version?: string;
   sites?: { name: string; title: string }[];
-  aps?: { id: string; name: string; model: string; site: string; online: boolean; cpu: number | null; clients: number; sat: number | null; radios: UnifiAp["radios"] }[];
-  switches?: { id: string; name: string; model: string; site: string; online: boolean; cpu: number | null; mem: number | null; temp: number | null; up: number; total: number; poe: number; clients: number }[];
+  aps?: {
+    id: string;
+    name: string;
+    model: string;
+    site: string;
+    online: boolean;
+    cpu: number | null;
+    mem?: number | null;
+    clients: number;
+    sat: number | null;
+    radios: UnifiAp["radios"];
+    tx?: number | null;
+    rx?: number | null;
+    uptime?: number | null;
+    ver?: string;
+    upg?: boolean;
+  }[];
+  switches?: {
+    id: string;
+    name: string;
+    model: string;
+    site: string;
+    online: boolean;
+    cpu: number | null;
+    mem: number | null;
+    temp: number | null;
+    up: number;
+    total: number;
+    poe: number;
+    clients: number;
+    tx?: number | null;
+    rx?: number | null;
+    uptime?: number | null;
+    ver?: string;
+    upg?: boolean;
+  }[];
   wired?: number;
   wireless?: number;
+  guests?: number;
   ssid?: Record<string, number>;
+  bands?: Record<string, number>;
+  sat?: number | null;
   alarms?: { id: string; site: string; time: string; msg: string }[];
 };
-type ControllerData = Awaited<ReturnType<typeof loadController>>;
 type ZabbixSource = { id: string; name: string; ok: boolean; message: string; data: ControllerData | null };
 
 const ZABBIX_STALE_SEC = 5 * 60;
@@ -569,15 +668,18 @@ async function loadFromZabbix(): Promise<ZabbixSource[]> {
         cpu: sw.cpu,
         memory: sw.mem,
         temperature: sw.temp,
-        uptimeSec: null,
+        uptimeSec: sw.uptime ?? null,
         portsUp: sw.up,
         portsTotal: sw.total,
         portErrors: 0,
         poeWatts: sw.poe,
         poeMaxWatts: null,
         clients: sw.clients,
+        txBps: sw.tx ?? null,
+        rxBps: sw.rx ?? null,
+        version: sw.ver || "",
         uplink: "",
-        upgradable: false,
+        upgradable: Boolean(sw.upg),
       })),
       aps: (summary.aps || []).map((ap) => ({
         id: `${base.id}:${ap.id}`,
@@ -587,20 +689,67 @@ async function loadFromZabbix(): Promise<ZabbixSource[]> {
         model: ap.model,
         online: ap.online,
         cpu: ap.cpu,
-        memory: null,
+        memory: ap.mem ?? null,
         clients: ap.clients,
         satisfaction: ap.sat,
         radios: ap.radios || [],
+        txBps: ap.tx ?? null,
+        rxBps: ap.rx ?? null,
+        uptimeSec: ap.uptime ?? null,
+        version: ap.ver || "",
         uplink: "",
-        upgradable: false,
+        upgradable: Boolean(ap.upg),
       })),
-      ssid: new Map(Object.entries(summary.ssid || {})),
       alarms: (summary.alarms || []).map((alarm) => ({ id: `${base.id}:${alarm.id}`, site: alarm.site, time: alarm.time, message: alarm.msg })),
       wired: summary.wired || 0,
       wireless: summary.wireless || 0,
+      guests: summary.guests || 0,
+      ssid: new Map(Object.entries(summary.ssid || {})),
+      bands: new Map(Object.entries(summary.bands || {})),
+      satisfaction: summary.sat ?? null,
     };
     return { ...base, ok: true, message: "", data };
   });
+}
+
+/* ---------- Montagem ---------- */
+
+const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, "pt-BR", { numeric: true });
+const sortedCounts = <K extends string>(map: Map<string, number>, key: K) =>
+  Array.from(map, ([label, count]) => ({ [key]: label, count }) as Record<K, string> & { count: number }).sort((a, b) => b.count - a.count);
+// Controladoras guardam alarmes antigos nao arquivados; no painel so interessam os recentes.
+const recentAlarms = (alarms: Alarm[]) =>
+  alarms
+    .filter((alarm) => !alarm.time || Date.now() - new Date(alarm.time).getTime() < ALARM_WINDOW_MS)
+    .sort((a, b) => b.time.localeCompare(a.time))
+    .slice(0, 30);
+
+function toView(id: string, name: string, via: UnifiControllerView["via"], data: ControllerData | null, message: string): UnifiControllerView {
+  const sum = (list: { online: boolean; txBps: number | null; rxBps: number | null }[], field: "txBps" | "rxBps") =>
+    list.reduce((total, device) => total + (device.online ? device[field] || 0 : 0), 0);
+  return {
+    id,
+    name,
+    ok: Boolean(data),
+    message: data ? "" : message,
+    version: data?.version || "",
+    via,
+    sites: data?.sites || [],
+    switches: (data?.switches || []).sort(byName),
+    aps: (data?.aps || []).sort((a, b) => Number(a.online) - Number(b.online) || b.clients - a.clients),
+    clients: {
+      total: (data?.wired || 0) + (data?.wireless || 0),
+      wired: data?.wired || 0,
+      wireless: data?.wireless || 0,
+      guests: data?.guests || 0,
+      satisfaction: data?.satisfaction ?? null,
+      bySsid: data ? sortedCounts(data.ssid, "ssid") : [],
+      byBand: data ? sortedCounts(data.bands, "band") : [],
+    },
+    // Nos APs, "tx" e o que a antena envia aos clientes (download deles).
+    traffic: data ? { txBps: sum(data.aps, "txBps"), rxBps: sum(data.aps, "rxBps") } : { txBps: 0, rxBps: 0 },
+    alarms: data ? recentAlarms(data.alarms) : [],
+  };
 }
 
 async function buildOverview(): Promise<UnifiOverview | null> {
@@ -609,53 +758,36 @@ async function buildOverview(): Promise<UnifiOverview | null> {
     Promise.all(
       active.map(async (controller) => {
         try {
-          return { id: controller.cfg.id, name: controller.cfg.name, data: await loadController(controller), error: "" };
+          return toView(controller.cfg.id, controller.cfg.name, "direto", await loadController(controller), "");
         } catch (error) {
           controller.cookie = "";
-          return { id: controller.cfg.id, name: controller.cfg.name, data: null, error: controller.describeError(error) };
+          return toView(controller.cfg.id, controller.cfg.name, "direto", null, controller.describeError(error));
         }
       }),
     ),
     loadFromZabbix().catch(() => [] as ZabbixSource[]),
   ]);
-  const results = [...direct, ...viaZabbix.map((source) => ({ id: source.id, name: source.name, data: source.data, error: source.message }))];
+  const views = [...direct, ...viaZabbix.map((source) => toView(source.id, source.name, "zabbix", source.data, source.message))];
   // Nada configurado (nem no portal, nem no Zabbix): sem pagina UniFi, sem erro.
-  if (!results.length) return null;
-  const ok = results.filter((entry) => entry.data);
-  // Nenhuma respondeu: erro para o painel esconder a pagina e mostrar o motivo.
-  if (!ok.length) throw new Error(results.map((entry) => `UniFi ${entry.name}: ${entry.error}`).join(" | "));
+  if (!views.length) return null;
+  const ok = views.filter((view) => view.ok);
+  // Nenhuma respondeu: erro para o painel esconder as paginas e mostrar o motivo.
+  if (!ok.length) throw new Error(views.map((view) => `UniFi ${view.name}: ${view.message}`).join(" | "));
 
   const ssid = new Map<string, number>();
-  for (const entry of ok) for (const [network, count] of entry.data!.ssid) ssid.set(network, (ssid.get(network) || 0) + count);
-  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, "pt-BR", { numeric: true });
-  const wired = ok.reduce((sum, entry) => sum + entry.data!.wired, 0);
-  const wireless = ok.reduce((sum, entry) => sum + entry.data!.wireless, 0);
+  for (const view of ok) for (const entry of view.clients.bySsid) ssid.set(entry.ssid, (ssid.get(entry.ssid) || 0) + entry.count);
+  const wired = ok.reduce((total, view) => total + view.clients.wired, 0);
+  const wireless = ok.reduce((total, view) => total + view.clients.wireless, 0);
 
   return {
     generatedAt: new Date().toISOString(),
-    version: Array.from(new Set(ok.map((entry) => entry.data!.version).filter(Boolean))).join(", "),
-    controllers: results.map(({ id, name, data, error }) => ({
-      id,
-      name,
-      ok: Boolean(data),
-      message: data ? "" : error,
-      version: data?.version || "",
-    })),
-    sites: ok.flatMap((entry) => entry.data!.sites),
-    switches: ok.flatMap((entry) => entry.data!.switches).sort(byName),
-    aps: ok.flatMap((entry) => entry.data!.aps).sort((a, b) => Number(a.online) - Number(b.online) || b.clients - a.clients),
-    clients: {
-      total: wired + wireless,
-      wired,
-      wireless,
-      bySsid: Array.from(ssid, ([network, count]) => ({ ssid: network, count })).sort((a, b) => b.count - a.count),
-    },
-    // Controladoras guardam alarmes antigos nao arquivados; no painel so interessam os recentes.
-    alarms: ok
-      .flatMap((entry) => entry.data!.alarms)
-      .filter((alarm) => !alarm.time || Date.now() - new Date(alarm.time).getTime() < ALARM_WINDOW_MS)
-      .sort((a, b) => b.time.localeCompare(a.time))
-      .slice(0, 30),
+    version: Array.from(new Set(ok.map((view) => view.version).filter(Boolean))).join(", "),
+    controllers: views,
+    sites: ok.flatMap((view) => view.sites),
+    switches: ok.flatMap((view) => view.switches).sort(byName),
+    aps: ok.flatMap((view) => view.aps).sort((a, b) => Number(a.online) - Number(b.online) || b.clients - a.clients),
+    clients: { total: wired + wireless, wired, wireless, bySsid: sortedCounts(ssid, "ssid") },
+    alarms: recentAlarms(ok.flatMap((view) => view.alarms)),
   };
 }
 
