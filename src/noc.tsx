@@ -418,6 +418,31 @@ function OverviewPage({ data }: { data: NocData }) {
     );
   };
 
+  // Antenas e switches: o numero real vem das controladoras UniFi (estado de cada aparelho na controladora).
+  // Vale o ping do Zabbix quando a UniFi nao cobre a maior parte dos aparelhos (ex.: controladora de
+  // switches ainda sem acesso e a outra so com 6 switches de CFTV).
+  const okControllers = (data.unifi?.controllers || []).filter((controller) => controller.ok);
+  const unifiTile = (kind: "aps" | "switches", zabbixKey: string, title: string, icon: React.ReactNode) => {
+    const devices: { online: boolean }[] = okControllers.flatMap((controller): { online: boolean }[] => controller[kind]);
+    const zabbixTotal = group(zabbixKey)?.total || 0;
+    if (!devices.length || devices.length < zabbixTotal * 0.6) return groupTile(zabbixKey, title, icon);
+    const up = devices.filter((device) => device.online).length;
+    const unifiGroup: NocGroup = { key: zabbixKey, title, total: devices.length, up, down: devices.length - up, unknown: 0, hosts: [] };
+    const failed = (data.unifi?.controllers || []).filter((controller) => !controller.ok).length;
+    const label = kind === "aps" ? "desconectada(s)" : "desconectado(s)";
+    return (
+      <DomainTile
+        title={title}
+        icon={icon}
+        tone={groupTone(unifiGroup)}
+        main={`${up}/${devices.length}`}
+        sub={`${devices.length - up} ${label} · UniFi${failed ? ` (${failed} controladora sem resposta)` : ""}`}
+      >
+        <AvailabilityBar group={unifiGroup} />
+      </DomainTile>
+    );
+  };
+
   return (
     <div className="noc-page noc-overview">
       <div className="noc-domains">
@@ -429,8 +454,8 @@ function OverviewPage({ data }: { data: NocData }) {
           main={fw ? pct(fw.cpu) : "—"}
           sub={fw ? `CPU · mem ${pct(fw.memory)} · ${(fw.sessions ?? 0).toLocaleString("pt-BR")} sessões` : "Sem FortiGate no Zabbix"}
         />
-        {groupTile("switches", "Switches", <Network size={18} />)}
-        {groupTile("antenas", "Antenas UniFi", <Radio size={18} />)}
+        {unifiTile("switches", "switches", "Switches", <Network size={18} />)}
+        {unifiTile("aps", "antenas", "Antenas UniFi", <Radio size={18} />)}
         {groupTile("servidores", "Servidores", <Server size={18} />, data.hardware.length ? `hardware Dell ${data.hardware.length - hwBad}/${data.hardware.length} ok` : "")}
         {groupTile("cftv", "CFTV", <Camera size={18} />)}
         {groupTile("videowall", "Videowall", <MonitorPlay size={18} />)}
