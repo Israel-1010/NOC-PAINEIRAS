@@ -533,6 +533,7 @@ type ControllerData = Awaited<ReturnType<typeof loadController>>;
 type ZabbixSource = { id: string; name: string; ok: boolean; message: string; data: ControllerData | null };
 
 const ZABBIX_STALE_SEC = 5 * 60;
+const ALARM_WINDOW_MS = 7 * 24 * 3600 * 1000;
 
 async function loadFromZabbix(): Promise<ZabbixSource[]> {
   if (!isZabbixConfigured()) return [];
@@ -649,8 +650,10 @@ async function buildOverview(): Promise<UnifiOverview | null> {
       wireless,
       bySsid: Array.from(ssid, ([network, count]) => ({ ssid: network, count })).sort((a, b) => b.count - a.count),
     },
+    // Controladoras guardam alarmes antigos nao arquivados; no painel so interessam os recentes.
     alarms: ok
       .flatMap((entry) => entry.data!.alarms)
+      .filter((alarm) => !alarm.time || Date.now() - new Date(alarm.time).getTime() < ALARM_WINDOW_MS)
       .sort((a, b) => b.time.localeCompare(a.time))
       .slice(0, 30),
   };
@@ -661,7 +664,7 @@ let cache: { expiresAt: number; value: Promise<UnifiOverview | null> } | null = 
 export function getUnifiOverview() {
   if (cache && cache.expiresAt > Date.now()) return cache.value;
   const value = buildOverview();
-  cache = { expiresAt: Date.now() + 30000, value };
+  cache = { expiresAt: Date.now() + 15000, value };
   value.catch(() => {
     cache = null;
   });

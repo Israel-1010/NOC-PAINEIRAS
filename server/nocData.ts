@@ -246,11 +246,31 @@ async function loadHardware() {
   });
 }
 
-let cache: { expiresAt: number; value: Promise<unknown> } | null = null;
+// Leitura quase em tempo real: dado com ate 8 s e devolvido na hora; mais velho que isso,
+// devolve a ultima leitura e atualiza em segundo plano (uma unica busca por vez).
+const FRESH_MS = 8000;
+let current: { at: number; value: Promise<unknown> } | null = null;
+let refreshing: Promise<unknown> | null = null;
 
 export function getNocOverview() {
-  if (cache && cache.expiresAt > Date.now()) return cache.value;
-  const value = (async () => {
+  if (current && Date.now() - current.at < FRESH_MS) return current.value;
+  if (!refreshing) {
+    const next = buildNocOverview();
+    refreshing = next;
+    next
+      .then(() => {
+        current = { at: Date.now(), value: next };
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        refreshing = null;
+      });
+  }
+  return current ? current.value : refreshing;
+}
+
+function buildNocOverview() {
+  return (async () => {
     const settle = async <T,>(task: Promise<T>, fallback: T) => {
       try {
         return { data: await task, error: "" };
@@ -306,9 +326,4 @@ export function getNocOverview() {
       errors: [groups, problems, firewalls, routers, hardware, links, traffic, unifi].map((entry) => entry.error).filter(Boolean),
     };
   })();
-  cache = { expiresAt: Date.now() + 20000, value };
-  value.catch(() => {
-    cache = null;
-  });
-  return value;
 }

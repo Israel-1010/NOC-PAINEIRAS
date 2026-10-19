@@ -441,7 +441,7 @@ export function LinksDashboard({ isAdmin }: { isAdmin: boolean }) {
 
   useEffect(() => {
     loadLive();
-    const timer = window.setInterval(loadLive, 30000);
+    const timer = window.setInterval(loadLive, 10000);
     return () => window.clearInterval(timer);
   }, [loadLive]);
 

@@ -587,7 +587,7 @@ function UnifiApPage({ unifi }: { unifi: Unifi }) {
   const tone = !offline ? "good" : online / Math.max(1, unifi.aps.length) < 0.5 ? "critical" : "warning";
   const wifiClients = unifi.aps.reduce((sum, ap) => sum + (ap.online ? ap.clients : 0), 0);
   const busiest = Math.max(1, ...unifi.aps.map((ap) => ap.clients));
-  const sizeClass = unifi.aps.length > 48 ? "size-xs" : unifi.aps.length > 24 ? "size-sm" : "size-md";
+  const sizeClass = unifi.aps.length > 60 ? "size-xxs" : unifi.aps.length > 40 ? "size-xs" : unifi.aps.length > 24 ? "size-sm" : "size-md";
   return (
     <div className="noc-page noc-unifi">
       <div className="noc-group-head noc-unifi-head">
@@ -938,7 +938,7 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
 
   useEffect(() => {
     load();
-    const timer = window.setInterval(load, 30000);
+    const timer = window.setInterval(load, 10000); // quase tempo real; o servidor segura o Zabbix com cache curto
     return () => window.clearInterval(timer);
   }, [load]);
 

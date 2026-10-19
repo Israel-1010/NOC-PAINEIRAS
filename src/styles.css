@@ -11396,3 +11396,32 @@ thead .ac-person-col {
   justify-self: start;
   border-style: dashed !important;
 }
+
+/* NOC: muitas antenas (mais de 60) cabem na TV em 8 colunas */
+.noc-swgrid.size-xxs {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.noc-swgrid.size-xxs .noc-sw {
+  gap: 2px;
+  padding: 4px 8px;
+}
+
+.noc-swgrid.size-xxs .noc-sw strong {
+  font-size: 0.82em;
+}
+
+.noc-swgrid.size-xxs .noc-sw small {
+  font-size: 0.74em;
+}
+
+.noc-swgrid.size-xxs .noc-sw-ports {
+  display: none;
+}
+
+/* NOC: pagina de antenas usa toda a altura */
+.noc-unifi > .noc-unifi-switches {
+  flex: 1;
+  min-height: 0;
+}

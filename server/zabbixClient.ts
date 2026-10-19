@@ -204,7 +204,7 @@ async function pingItems(hostIds: string[]) {
 }
 
 export async function getLinksLive() {
-  return cached("links:live", 15000, async () => {
+  return cached("links:live", 8000, async () => {
     const links = (await getLinkConfig()).filter((link) => link.enabled);
     const itemIds = links.flatMap((link) => [link.inItemId, link.outItemId, link.statusItemId]).filter(Boolean);
     const [items, pings, problems] = await Promise.all([
