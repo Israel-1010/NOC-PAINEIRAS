@@ -107,7 +107,7 @@ import {
   updateIp,
 } from "./ipInventoryClient";
 import { getTopology, saveTopology } from "./topologyStore";
-import { diagnoseAd, diagnoseIntune, diagnoseZabbix } from "./diagnostics";
+import { diagnoseAd, diagnoseIntune, diagnoseUnifi, diagnoseZabbix } from "./diagnostics";
 import { getLinkConfig, getLinksHistory, getLinksLive, listLinkCandidates, saveLinkConfig } from "./zabbixClient";
 import { getNocOverview } from "./nocData";
 import { allowTvKey, createTvKey, listTvKeys, revokeTvKey } from "./tvKeys";
@@ -402,7 +402,7 @@ app.post("/api/access/claim", requireAuth, asyncRoute((req) => claimAdmin(req.re
 app.get("/api/diagnostics/integrations", requireAuth, requireAdmin, asyncRoute(async () => ({
   checkedAt: new Date().toISOString(),
   runtime: runtimeInfo(),
-  reports: await Promise.all([diagnoseAd(formatApiError), diagnoseIntune(formatApiError), diagnoseZabbix(formatApiError)]),
+  reports: await Promise.all([diagnoseAd(formatApiError), diagnoseIntune(formatApiError), diagnoseZabbix(formatApiError), diagnoseUnifi(formatApiError)]),
 })));
 app.put("/api/access/admins/:login", requireAuth, requireAdmin, asyncRoute((req) =>
   setPanelAdmin(String(req.params.login), Boolean(req.body?.admin), req.res?.locals.user)));

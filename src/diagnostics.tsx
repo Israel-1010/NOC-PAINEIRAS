@@ -46,6 +46,10 @@ const HINTS: Record<string, string> = {
   "Variáveis do Zabbix": "Adicione ZABBIX_URL e ZABBIX_API_TOKEN nas variáveis do container (ou ZABBIX_USER/ZABBIX_PASSWORD) e faça o redeploy.",
   "Conexão de rede com o Zabbix": "O servidor do portal não alcança o Zabbix. Libere a porta 80/443 até o servidor Zabbix no firewall.",
   "API do Zabbix": "Confira se ZABBIX_URL termina no caminho do frontend (ex.: http://10.0.3.73/zabbix).",
+  "Variáveis da UniFi": "Adicione UNIFI_URL (ex.: https://10.0.0.56:8443), UNIFI_USER e UNIFI_PASSWORD (conta local View Only) e faça o redeploy.",
+  "Conexão de rede com a controladora": "O servidor do portal não alcança a controladora. Libere a porta 8443 até ela no firewall.",
+  "Versão da controladora": "Confira UNIFI_URL. Com certificado autoassinado, defina UNIFI_TLS_REJECT_UNAUTHORIZED=false.",
+  "Login e leitura dos aparelhos": "Usuário ou senha recusados: use uma conta LOCAL da controladora (sem 2FA e sem conta UI.com).",
   "Autenticação na API": "Token ou usuário/senha inválidos, ou usuário sem permissão de leitura nos hosts.",
   "Leitura dos links": "Confira se os hosts dos links estão num grupo com \"Link\" no nome, ou configure os links na tela Links de internet.",
 };

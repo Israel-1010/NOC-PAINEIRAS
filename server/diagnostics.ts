@@ -3,6 +3,7 @@ import net from "node:net";
 import { adConfig, intuneConfig, isAdConfigured, isIntuneConfigured } from "./config";
 import { getAdStatus, getAdSummary } from "./adClient";
 import { getIntuneStatus, getIntuneSummary } from "./intuneClient";
+import { getUnifiOverview, isUnifiConfigured, unifiHost, unifiVersion } from "./unifiClient";
 import { getLinksLive, isZabbixConfigured, zabbixHost, zabbixVersion, zbx } from "./zabbixClient";
 
 export type DiagnosticStep = { name: string; ok: boolean; ms: number; detail: string };
@@ -123,6 +124,24 @@ export async function diagnoseZabbix(formatError: ErrorFormatter): Promise<Diagn
     const live = await getLinksLive();
     if (!live.links.length) throw new Error("Nenhum link encontrado (grupo de hosts com 'Link' no nome).");
     return live.links.map((link) => `${link.name} ${(link.inBps / 1e6).toFixed(0)}/${(link.outBps / 1e6).toFixed(0)} Mbps`).join(" · ");
+  }, formatError);
+  return done();
+}
+
+export async function diagnoseUnifi(formatError: ErrorFormatter): Promise<DiagnosticReport> {
+  const steps: DiagnosticStep[] = [];
+  const done = (ok = steps.every((item) => item.ok)) => ({ id: "unifi", title: "Controladora UniFi", ok, steps });
+  if (!(await step(steps, "Variáveis da UniFi", async () => {
+    if (!isUnifiConfigured()) throw new Error("Faltando no servidor: UNIFI_URL, UNIFI_USER e UNIFI_PASSWORD.");
+    return unifiHost();
+  }, formatError))) return done(false);
+  const [host, portText] = unifiHost().split(":");
+  if (!(await step(steps, "Conexão de rede com a controladora", () => tcpCheck(host, Number(portText) || 443), formatError))) return done(false);
+  if (!(await step(steps, "Versão da controladora", async () => `UniFi Network ${await unifiVersion()}`, formatError))) return done(false);
+  await step(steps, "Login e leitura dos aparelhos", async () => {
+    const overview = await getUnifiOverview();
+    const online = (list: { online: boolean }[]) => `${list.filter((item) => item.online).length}/${list.length}`;
+    return `${overview.sites.length} site(s) · switches ${online(overview.switches)} · antenas ${online(overview.aps)} · ${overview.clients.total} clientes`;
   }, formatError);
   return done();
 }

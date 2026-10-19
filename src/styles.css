@@ -10986,3 +10986,208 @@ thead .ac-person-col {
 .noc-links {
   min-height: 0;
 }
+/* NOC: pagina da controladora UniFi */
+.noc-unifi {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+}
+
+.noc-unifi-head {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.noc-unifi-head small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--noc-muted);
+  font-size: 0.85em;
+}
+
+.noc-unifi-head > div[class*="tone-"] strong {
+  color: var(--tone);
+}
+
+.noc-unifi-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.noc-unifi-switches {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.noc-swgrid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 8px;
+  overflow: hidden;
+}
+
+.noc-swgrid.size-md { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.noc-swgrid.size-sm { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.noc-swgrid.size-xs { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+
+.noc-sw {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--noc-line);
+  border-left: 3px solid var(--tone);
+  border-radius: 10px;
+}
+
+.noc-sw.tone-critical {
+  background: rgba(240, 68, 56, 0.12);
+}
+
+.noc-sw strong {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  font-size: 0.95em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.noc-sw strong svg {
+  flex: none;
+  color: var(--tone);
+}
+
+.noc-sw small {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+  color: var(--noc-muted);
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.noc-sw small b {
+  color: var(--noc-ink);
+}
+
+.noc-sw-off {
+  color: var(--noc-critical) !important;
+  font-weight: 800;
+}
+
+.noc-sw-ports,
+.noc-hbar {
+  height: 6px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 99px;
+}
+
+.noc-sw-ports i,
+.noc-hbar i {
+  display: block;
+  height: 100%;
+  background: var(--noc-in);
+  border-radius: 99px;
+}
+
+.noc-unifi-side {
+  display: grid;
+  grid-template-rows: minmax(0, 1.3fr) auto minmax(0, 0.8fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.noc-unifi-side .noc-card {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.noc-ap-list,
+.noc-ssid-list,
+.noc-unifi-alarms ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.noc-ap-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 3em;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.noc-ap-list li strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.noc-ap-list li strong svg {
+  flex: none;
+  color: var(--tone);
+}
+
+.noc-ap-list li > b,
+.noc-ssid-list li > b {
+  text-align: right;
+  font-size: 1.1em;
+}
+
+.noc-ap-list li small {
+  grid-column: 1 / -1;
+  color: var(--noc-muted);
+  font-size: 0.8em;
+}
+
+.noc-ssid-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 3em;
+  align-items: center;
+  gap: 10px;
+}
+
+.noc-ssid-list li span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.noc-unifi-alarms li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  background: rgba(245, 176, 20, 0.08);
+  border-left: 3px solid var(--noc-warning);
+  border-radius: 8px;
+  font-size: 0.9em;
+}
+
+.noc-unifi-alarms li time {
+  flex: none;
+  color: var(--noc-muted);
+}
+
+.noc-all-clear.small {
+  font-size: 1em;
+}

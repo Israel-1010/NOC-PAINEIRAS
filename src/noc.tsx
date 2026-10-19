@@ -26,6 +26,7 @@ import {
   Shield,
   ShieldCheck,
   Thermometer,
+  Wifi,
   WifiOff,
   XCircle,
   Zap,
@@ -77,7 +78,46 @@ type NocLink = {
   lossPercent: number | null;
 };
 type TrafficLink = { id: string; name: string; series: { t: number; in: number | null; out: number | null }[] };
+type UnifiSwitch = {
+  id: string;
+  site: string;
+  name: string;
+  model: string;
+  online: boolean;
+  cpu: number | null;
+  memory: number | null;
+  temperature: number | null;
+  portsUp: number;
+  portsTotal: number;
+  portErrors: number;
+  poeWatts: number;
+  poeMaxWatts: number | null;
+  clients: number;
+  uplink: string;
+  upgradable: boolean;
+};
+type UnifiAp = {
+  id: string;
+  site: string;
+  name: string;
+  model: string;
+  online: boolean;
+  cpu: number | null;
+  clients: number;
+  satisfaction: number | null;
+  radios: { band: string; channel: number | null; utilization: number | null; clients: number }[];
+  uplink: string;
+};
+type Unifi = {
+  version: string;
+  sites: { name: string; title: string }[];
+  switches: UnifiSwitch[];
+  aps: UnifiAp[];
+  clients: { total: number; wired: number; wireless: number; bySsid: { ssid: string; count: number }[] };
+  alarms: { id: string; site: string; time: string; message: string }[];
+};
 type NocData = {
+  unifi?: Unifi | null;
   generatedAt: string;
   groups: NocGroup[];
   problems: NocProblem[];
@@ -89,11 +129,12 @@ type NocData = {
   errors: string[];
 };
 
-type PageId = "overview" | "internet" | "switches" | "antenas" | "servidores" | "cftv";
+type PageId = "overview" | "internet" | "switches" | "unifi" | "antenas" | "servidores" | "cftv";
 const PAGES: { id: PageId; title: string; icon: typeof Activity }[] = [
   { id: "overview", title: "Visão geral", icon: Activity },
   { id: "internet", title: "Internet e Firewall", icon: Globe },
   { id: "switches", title: "Switches", icon: Network },
+  { id: "unifi", title: "Rede UniFi: portas, PoE e Wi-Fi", icon: Wifi },
   { id: "antenas", title: "Antenas UniFi", icon: Radio },
   { id: "servidores", title: "Servidores e Datacenter", icon: Server },
   { id: "cftv", title: "CFTV e Videowall", icon: Camera },
@@ -227,7 +268,10 @@ function translateProblem(name: string) {
     .replace(/High ICMP ping response time/i, "Latência alta")
     .replace(/No SNMP data collection/i, "Sem coleta SNMP")
     .replace(/: Tunnel down/i, ": túnel VPN caído")
-    .replace(/: Link down/i, ": link caído");
+    .replace(/: Link down/i, ": link caído")
+    .replace(/^Software Upgrade Available$/i, "Atualização de firmware disponível")
+    .replace(/^One or more Switch is disconnected$/i, "Switch desconectado da controladora")
+    .replace(/^One or more Acces+ Point is disconnected$/i, "Antena desconectada da controladora");
 }
 
 function HostGrid({ group, compact }: { group: NocGroup; compact?: boolean }) {
@@ -511,6 +555,110 @@ function ServersPage({ data }: { data: NocData }) {
   );
 }
 
+function UnifiPage({ unifi }: { unifi: Unifi }) {
+  const swOnline = unifi.switches.filter((sw) => sw.online).length;
+  const apOnline = unifi.aps.filter((ap) => ap.online).length;
+  const poe = unifi.switches.reduce((sum, sw) => sum + sw.poeWatts, 0);
+  const topClients = Math.max(1, ...unifi.aps.map((ap) => ap.clients));
+  const topSsid = Math.max(1, ...unifi.clients.bySsid.map((entry) => entry.count));
+  const sizeClass = unifi.switches.length > 36 ? "size-xs" : unifi.switches.length > 20 ? "size-sm" : "size-md";
+  const swTone = swOnline === unifi.switches.length ? "good" : swOnline / Math.max(1, unifi.switches.length) < 0.5 ? "critical" : "warning";
+  const apTone = apOnline === unifi.aps.length ? "good" : apOnline / Math.max(1, unifi.aps.length) < 0.5 ? "critical" : "warning";
+
+  return (
+    <div className="noc-page noc-unifi">
+      <div className="noc-group-head noc-unifi-head">
+        <div><span>Clientes conectados</span><strong>{unifi.clients.total.toLocaleString("pt-BR")}</strong><small>{unifi.clients.wired.toLocaleString("pt-BR")} cabo · {unifi.clients.wireless.toLocaleString("pt-BR")} Wi-Fi</small></div>
+        <div className={`tone-${swTone}`}><span>Switches</span><strong>{swOnline}/{unifi.switches.length}</strong><small>{toneIcon(swTone, 13)} {swOnline === unifi.switches.length ? "todos online" : `${unifi.switches.length - swOnline} desconectado(s)`}</small></div>
+        <div className={`tone-${apTone}`}><span>Antenas</span><strong>{apOnline}/{unifi.aps.length}</strong><small>{toneIcon(apTone, 13)} {apOnline === unifi.aps.length ? "todas online" : `${unifi.aps.length - apOnline} desconectada(s)`}</small></div>
+        <div><span>Consumo PoE</span><strong>{Math.round(poe).toLocaleString("pt-BR")} W</strong><small>somando os switches</small></div>
+        <div className={unifi.alarms.length ? "tone-warning" : "tone-good"}><span>Alarmes da controladora</span><strong>{unifi.alarms.length}</strong><small>UniFi {unifi.version}</small></div>
+      </div>
+
+      <div className="noc-unifi-body">
+        <section className="noc-card noc-unifi-switches">
+          <h3><Network size={20} /> Switches <small>portas ativas · PoE · CPU · temperatura</small></h3>
+          <div className={`noc-swgrid ${sizeClass}`}>
+            {unifi.switches.map((sw) => {
+              const tone = !sw.online ? "critical" : (sw.cpu ?? 0) >= 90 || (sw.temperature ?? 0) >= 75 ? "warning" : "good";
+              const usage = sw.portsTotal ? (sw.portsUp / sw.portsTotal) * 100 : 0;
+              return (
+                <div key={sw.id} className={`noc-sw tone-${tone}`} title={`${sw.name} · ${sw.model} · ${sw.site}${sw.uplink ? ` · uplink ${sw.uplink}` : ""}`}>
+                  <strong>{tone === "critical" ? <WifiOff size={13} /> : toneIcon(tone, 13)} {sw.name}</strong>
+                  {sw.online ? (
+                    <>
+                      <div className="noc-sw-ports" aria-label={`${sw.portsUp} de ${sw.portsTotal} portas ativas`}>
+                        <i style={{ width: `${usage}%` }} />
+                      </div>
+                      <small>
+                        <b>{sw.portsUp}/{sw.portsTotal}</b> portas · <Zap size={11} /> {Math.round(sw.poeWatts)} W · CPU {pct(sw.cpu)}
+                        {sw.temperature !== null ? ` · ${Math.round(sw.temperature)} °C` : ""}
+                      </small>
+                    </>
+                  ) : (
+                    <small className="noc-sw-off">DESCONECTADO</small>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <div className="noc-unifi-side">
+          <section className="noc-card">
+            <h3><Radio size={20} /> Antenas <small>clientes e uso do canal</small></h3>
+            <ul className="noc-ap-list">
+              {unifi.aps.map((ap) => (
+                <li key={ap.id} className={`tone-${ap.online ? "good" : "critical"}`}>
+                  <strong>{ap.online ? <CheckCircle2 size={14} /> : <WifiOff size={14} />} {ap.name}</strong>
+                  <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${(ap.clients / topClients) * 100}%` }} /></div>
+                  <b>{ap.online ? ap.clients : "—"}</b>
+                  <small>
+                    {ap.online
+                      ? ap.radios.map((radio) => `${radio.band} canal ${radio.channel ?? "—"} · ${pct(radio.utilization)}`).join("  |  ") || ap.model
+                      : "desconectada"}
+                  </small>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className="noc-card">
+            <h3><Wifi size={20} /> Redes Wi-Fi <small>clientes por rede</small></h3>
+            {unifi.clients.bySsid.length ? (
+              <ul className="noc-ssid-list">
+                {unifi.clients.bySsid.slice(0, 6).map((entry) => (
+                  <li key={entry.ssid}>
+                    <span>{entry.ssid}</span>
+                    <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${(entry.count / topSsid) * 100}%` }} /></div>
+                    <b>{entry.count}</b>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="noc-empty">Nenhum cliente sem fio nesta controladora.</p>
+            )}
+          </section>
+          <section className="noc-card noc-unifi-alarms">
+            <h3><AlertTriangle size={20} /> Alarmes da controladora</h3>
+            {unifi.alarms.length ? (
+              <ol>
+                {unifi.alarms.slice(0, 6).map((alarm) => (
+                  <li key={alarm.id}>
+                    <span>{alarm.message}</span>
+                    <time>{alarm.time ? `há ${duration(alarm.time)}` : ""}</time>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="noc-all-clear small"><ShieldCheck size={20} /> Nenhum alarme aberto</p>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Painel (carrossel) ---------- */
 
 export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: boolean }) {
@@ -531,6 +679,10 @@ export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: bool
   const [now, setNow] = useState(() => new Date());
   const [fullscreen, setFullscreen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  // A pagina da UniFi so entra no carrossel quando a controladora esta configurada.
+  const hasUnifi = Boolean(data?.unifi);
+  const pages = useMemo(() => PAGES.filter((entry) => entry.id !== "unifi" || hasUnifi), [hasUnifi]);
+  const pageCount = pages.length;
 
   const load = useCallback(async () => {
     try {
@@ -562,14 +714,14 @@ export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: bool
   useEffect(() => {
     if (elapsed >= intervalSec) {
       setElapsed(0);
-      setPage((value) => (value + 1) % PAGES.length);
+      setPage((value) => (value + 1) % pageCount);
     }
-  }, [elapsed, intervalSec]);
+  }, [elapsed, intervalSec, pageCount]);
 
   const go = useCallback((delta: number) => {
     setElapsed(0);
-    setPage((value) => (value + delta + PAGES.length) % PAGES.length);
-  }, []);
+    setPage((value) => (value + delta + pageCount) % pageCount);
+  }, [pageCount]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -579,14 +731,14 @@ export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: bool
         event.preventDefault();
         setPaused((value) => !value);
       }
-      if (/^[1-6]$/.test(event.key)) {
+      if (/^[1-9]$/.test(event.key) && Number(event.key) <= pageCount) {
         setElapsed(0);
         setPage(Number(event.key) - 1);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [go]);
+  }, [go, pageCount]);
 
   useEffect(() => {
     const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
@@ -602,7 +754,7 @@ export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: bool
     }
   }, [intervalSec]);
 
-  const current = PAGES[page];
+  const current = pages[page % pageCount];
   const critical = data ? data.problems.filter((problem) => problem.severity >= 4).length : 0;
   const warnings = data ? data.problems.filter((problem) => problem.severity >= 2 && problem.severity < 4).length : 0;
   const globalTone = !data ? "unknown" : critical ? "critical" : warnings ? "warning" : "good";
@@ -622,15 +774,15 @@ export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: bool
           <current.icon size={22} />
           <h1>{current.title}</h1>
           <div className="noc-dots" role="tablist" aria-label="Páginas do painel">
-            {PAGES.map((entry, index) => (
+            {pages.map((entry, index) => (
               <button
                 key={entry.id}
                 type="button"
                 role="tab"
-                aria-selected={index === page}
+                aria-selected={entry.id === current.id}
                 aria-label={entry.title}
                 title={`${index + 1}. ${entry.title}`}
-                className={index === page ? "active" : ""}
+                className={entry.id === current.id ? "active" : ""}
                 onClick={() => {
                   setElapsed(0);
                   setPage(index);
@@ -683,6 +835,8 @@ export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: bool
           <InternetPage data={data} />
         ) : current.id === "switches" ? (
           <GroupPage data={data} keys={["switches"]} />
+        ) : current.id === "unifi" && data.unifi ? (
+          <UnifiPage unifi={data.unifi} />
         ) : current.id === "antenas" ? (
           <GroupPage data={data} keys={["antenas"]} />
         ) : current.id === "servidores" ? (

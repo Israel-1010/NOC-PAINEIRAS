@@ -1,3 +1,4 @@
+import { getUnifiOverview, isUnifiConfigured, type UnifiOverview } from "./unifiClient";
 import { getLinkConfig, getLinksHistory, getLinksLive, zbx } from "./zabbixClient";
 
 // Agregacao do Zabbix para o Painel NOC (TV). Uma chamada, cache curto.
@@ -257,7 +258,7 @@ export function getNocOverview() {
         return { data: fallback, error: error instanceof Error ? error.message : "Falha" };
       }
     };
-    const [groups, problems, firewalls, routers, hardware, links, traffic] = await Promise.all([
+    const [groups, problems, firewalls, routers, hardware, links, traffic, unifi] = await Promise.all([
       settle(loadGroups(), { groups: [] as NocGroup[], hostNames: new Map<string, string>() }),
       settle(loadProblems(), [] as Awaited<ReturnType<typeof loadProblems>>),
       settle(loadFirewalls(), [] as Awaited<ReturnType<typeof loadFirewalls>>),
@@ -265,6 +266,7 @@ export function getNocOverview() {
       settle(loadHardware(), [] as Awaited<ReturnType<typeof loadHardware>>),
       settle(getLinksLive(), { checkedAt: "", links: [], problems: [] } as Awaited<ReturnType<typeof getLinksLive>>),
       settle(getLinksHistory("6h"), null as Awaited<ReturnType<typeof getLinksHistory>> | null),
+      isUnifiConfigured() ? settle(getUnifiOverview(), null as UnifiOverview | null) : Promise.resolve({ data: null as UnifiOverview | null, error: "" }),
     ]);
 
     // Liga cada link a porta do firewall (ex.: x2 = TELIUM) para cruzar com o SD-WAN.
@@ -298,7 +300,9 @@ export function getNocOverview() {
       hardware: hardware.data,
       links: links.data.links.map((link) => ({ ...link, member: linkMembers.get(link.id) || "" })),
       traffic: traffic.data,
-      errors: [groups, problems, firewalls, routers, hardware, links, traffic].map((entry) => entry.error).filter(Boolean),
+      unifi: unifi.data,
+      unifiConfigured: isUnifiConfigured(),
+      errors: [groups, problems, firewalls, routers, hardware, links, traffic, unifi].map((entry) => entry.error).filter(Boolean),
     };
   })();
   cache = { expiresAt: Date.now() + 20000, value };
