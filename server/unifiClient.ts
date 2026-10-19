@@ -115,6 +115,7 @@ export async function testUnifi() {
   cookie = "";
   cache = null;
   try {
+    await login(true); // teste pedido pelo gestor ignora a espera
     const overview = await getUnifiOverview();
     return { ok: true, message: `Conectado: UniFi ${overview.version} · ${overview.switches.length} switches · ${overview.aps.length} antenas · ${overview.clients.total} clientes` };
   } catch (error) {
@@ -196,12 +197,29 @@ function request(method: "GET" | "POST", route: string, body?: unknown): Promise
   });
 }
 
-async function login() {
+// Depois de um login recusado, espera antes de tentar de novo: a controladora bloqueia a conta
+// quando recebe muitas tentativas erradas (e ai recusa ate a senha certa).
+const LOGIN_BACKOFF_MS = 10 * 60 * 1000;
+let loginBlockedUntil = 0;
+let lastLoginError = "";
+
+async function login(force = false) {
+  if (!force && Date.now() < loginBlockedUntil) {
+    const minutes = Math.ceil((loginBlockedUntil - Date.now()) / 60000);
+    throw new Error(`${lastLoginError} Nova tentativa automática em ${minutes} min (para não bloquear a conta).`);
+  }
   const response = await request("POST", "/api/login", { username: config.user, password: config.password });
   if (response.status !== 200) {
     const message = (response.json as { meta?: { msg?: string } } | null)?.meta?.msg || `HTTP ${response.status}`;
-    throw new Error(`UniFi: login recusado (${message}).`);
+    lastLoginError =
+      message === "api.err.Invalid"
+        ? "UniFi: login recusado (api.err.Invalid): usuário/senha errados ou conta bloqueada temporariamente por excesso de tentativas."
+        : `UniFi: login recusado (${message}).`;
+    loginBlockedUntil = Date.now() + LOGIN_BACKOFF_MS;
+    throw new Error(lastLoginError);
   }
+  loginBlockedUntil = 0;
+  lastLoginError = "";
   cookie = response.setCookie.map((entry) => entry.split(";")[0]).join("; ");
 }
 
