@@ -6,6 +6,7 @@ import https from "node:https";
 import path from "node:path";
 import type { AuthUser } from "./auth";
 import { sessionSecret } from "./config";
+import { isZabbixConfigured, zbx } from "./zabbixClient";
 
 // Conector somente leitura de controladoras UniFi Network instaladas em servidor (testado com 8.0).
 // Aceita varias controladoras (ex.: uma de switches, outra de antenas); cada uma tem sua sessao,
@@ -265,9 +266,20 @@ async function testController(controller: Controller) {
 }
 
 // Testa cada controladora sem cache e devolve o motivo exato de cada falha.
+// Inclui as controladoras lidas pelo Zabbix (rede que o portal nao alcanca).
 export async function testUnifi() {
   cache = null;
-  return { results: await Promise.all(controllers.map(testController)) };
+  const [direct, viaZabbix] = await Promise.all([Promise.all(controllers.map(testController)), loadFromZabbix().catch(() => [] as ZabbixSource[])]);
+  const fromZabbix = viaZabbix.map((source) => ({
+    id: source.id,
+    name: source.name,
+    ok: source.ok,
+    message: source.ok
+      ? `Via Zabbix: UniFi ${source.data!.version} · ${source.data!.switches.length} switches · ${source.data!.aps.length} antenas · ${source.data!.wired + source.data!.wireless} clientes`
+      : `Via Zabbix: ${source.message}`,
+    viaZabbix: true,
+  }));
+  return { results: [...direct, ...fromZabbix] };
 }
 
 export async function saveUnifiSettings(body: Record<string, unknown>, by: AuthUser) {
@@ -503,21 +515,114 @@ async function loadController(controller: Controller) {
   return { version, sites: sites.map((site) => ({ name: site.name, title: site.desc || site.name })), switches, aps, ssid, alarms, wired, wireless };
 }
 
-async function buildOverview(): Promise<UnifiOverview> {
+/* ---------- Controladoras lidas pelo Zabbix ---------- */
+
+// Para redes que o portal nao alcanca (ex.: 192.168.2.x), um item Script no Zabbix
+// (chave noc.unifi.summary) faz um login por minuto na controladora e grava um resumo em JSON.
+type ZabbixSummary = {
+  version?: string;
+  sites?: { name: string; title: string }[];
+  aps?: { id: string; name: string; model: string; site: string; online: boolean; cpu: number | null; clients: number; sat: number | null; radios: UnifiAp["radios"] }[];
+  switches?: { id: string; name: string; model: string; site: string; online: boolean; cpu: number | null; mem: number | null; temp: number | null; up: number; total: number; poe: number; clients: number }[];
+  wired?: number;
+  wireless?: number;
+  ssid?: Record<string, number>;
+  alarms?: { id: string; site: string; time: string; msg: string }[];
+};
+type ControllerData = Awaited<ReturnType<typeof loadController>>;
+type ZabbixSource = { id: string; name: string; ok: boolean; message: string; data: ControllerData | null };
+
+const ZABBIX_STALE_SEC = 5 * 60;
+
+async function loadFromZabbix(): Promise<ZabbixSource[]> {
+  if (!isZabbixConfigured()) return [];
+  const items = await zbx<{ itemid: string; lastvalue: string; lastclock: string; state: string; error: string; hosts: { hostid: string; name: string }[] }[]>("item.get", {
+    filter: { key_: "noc.unifi.summary" },
+    output: ["itemid", "lastvalue", "lastclock", "state", "error"],
+    selectHosts: ["hostid", "name"],
+    monitored: true,
+  });
+  return items.map((item) => {
+    const host = item.hosts[0];
+    const base = { id: `zbx-${host?.hostid || item.itemid}`, name: host?.name || "Controladora (Zabbix)" };
+    if (item.state === "1") return { ...base, ok: false, message: (item.error || "Item não suportado no Zabbix.").replace(/^Cannot execute script:\s*/i, ""), data: null };
+    const age = Date.now() / 1000 - Number(item.lastclock || 0);
+    if (!Number(item.lastclock)) return { ...base, ok: false, message: "O Zabbix ainda não coletou esta controladora.", data: null };
+    if (age > ZABBIX_STALE_SEC) return { ...base, ok: false, message: `Última coleta do Zabbix há ${Math.round(age / 60)} min.`, data: null };
+    let summary: ZabbixSummary;
+    try {
+      summary = JSON.parse(item.lastvalue) as ZabbixSummary;
+    } catch {
+      return { ...base, ok: false, message: "Resumo do Zabbix ilegível.", data: null };
+    }
+    const data: ControllerData = {
+      version: summary.version || "",
+      sites: summary.sites || [],
+      switches: (summary.switches || []).map((sw) => ({
+        id: `${base.id}:${sw.id}`,
+        controller: base.name,
+        site: sw.site,
+        name: sw.name,
+        model: sw.model,
+        online: sw.online,
+        cpu: sw.cpu,
+        memory: sw.mem,
+        temperature: sw.temp,
+        uptimeSec: null,
+        portsUp: sw.up,
+        portsTotal: sw.total,
+        portErrors: 0,
+        poeWatts: sw.poe,
+        poeMaxWatts: null,
+        clients: sw.clients,
+        uplink: "",
+        upgradable: false,
+      })),
+      aps: (summary.aps || []).map((ap) => ({
+        id: `${base.id}:${ap.id}`,
+        controller: base.name,
+        site: ap.site,
+        name: ap.name,
+        model: ap.model,
+        online: ap.online,
+        cpu: ap.cpu,
+        memory: null,
+        clients: ap.clients,
+        satisfaction: ap.sat,
+        radios: ap.radios || [],
+        uplink: "",
+        upgradable: false,
+      })),
+      ssid: new Map(Object.entries(summary.ssid || {})),
+      alarms: (summary.alarms || []).map((alarm) => ({ id: `${base.id}:${alarm.id}`, site: alarm.site, time: alarm.time, message: alarm.msg })),
+      wired: summary.wired || 0,
+      wireless: summary.wireless || 0,
+    };
+    return { ...base, ok: true, message: "", data };
+  });
+}
+
+async function buildOverview(): Promise<UnifiOverview | null> {
   const active = controllers.filter((controller) => controller.configured);
-  const results = await Promise.all(
-    active.map(async (controller) => {
-      try {
-        return { controller, data: await loadController(controller), error: "" };
-      } catch (error) {
-        controller.cookie = "";
-        return { controller, data: null, error: controller.describeError(error) };
-      }
-    }),
-  );
+  const [direct, viaZabbix] = await Promise.all([
+    Promise.all(
+      active.map(async (controller) => {
+        try {
+          return { id: controller.cfg.id, name: controller.cfg.name, data: await loadController(controller), error: "" };
+        } catch (error) {
+          controller.cookie = "";
+          return { id: controller.cfg.id, name: controller.cfg.name, data: null, error: controller.describeError(error) };
+        }
+      }),
+    ),
+    loadFromZabbix().catch(() => [] as ZabbixSource[]),
+  ]);
+  const results = [...direct, ...viaZabbix.map((source) => ({ id: source.id, name: source.name, data: source.data, error: source.message }))];
+  // Nada configurado (nem no portal, nem no Zabbix): sem pagina UniFi, sem erro.
+  if (!results.length) return null;
   const ok = results.filter((entry) => entry.data);
   // Nenhuma respondeu: erro para o painel esconder a pagina e mostrar o motivo.
-  if (!ok.length) throw new Error(results.map((entry) => `UniFi ${entry.controller.cfg.name}: ${entry.error}`).join(" | ") || "UniFi sem controladora configurada.");
+  if (!ok.length) throw new Error(results.map((entry) => `UniFi ${entry.name}: ${entry.error}`).join(" | "));
 
   const ssid = new Map<string, number>();
   for (const entry of ok) for (const [network, count] of entry.data!.ssid) ssid.set(network, (ssid.get(network) || 0) + count);
@@ -528,9 +633,9 @@ async function buildOverview(): Promise<UnifiOverview> {
   return {
     generatedAt: new Date().toISOString(),
     version: Array.from(new Set(ok.map((entry) => entry.data!.version).filter(Boolean))).join(", "),
-    controllers: results.map(({ controller, data, error }) => ({
-      id: controller.cfg.id,
-      name: controller.cfg.name,
+    controllers: results.map(({ id, name, data, error }) => ({
+      id,
+      name,
       ok: Boolean(data),
       message: data ? "" : error,
       version: data?.version || "",
@@ -551,7 +656,7 @@ async function buildOverview(): Promise<UnifiOverview> {
   };
 }
 
-let cache: { expiresAt: number; value: Promise<UnifiOverview> } | null = null;
+let cache: { expiresAt: number; value: Promise<UnifiOverview | null> } | null = null;
 
 export function getUnifiOverview() {
   if (cache && cache.expiresAt > Date.now()) return cache.value;

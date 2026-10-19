@@ -3,7 +3,7 @@ import net from "node:net";
 import { adConfig, intuneConfig, isAdConfigured, isIntuneConfigured } from "./config";
 import { getAdStatus, getAdSummary } from "./adClient";
 import { getIntuneStatus, getIntuneSummary } from "./intuneClient";
-import { isUnifiConfigured, testUnifi, unifiTargets } from "./unifiClient";
+import { testUnifi, unifiTargets } from "./unifiClient";
 import { getLinksLive, isZabbixConfigured, zabbixHost, zabbixVersion, zbx } from "./zabbixClient";
 
 export type DiagnosticStep = { name: string; ok: boolean; ms: number; detail: string };
@@ -131,15 +131,15 @@ export async function diagnoseZabbix(formatError: ErrorFormatter): Promise<Diagn
 export async function diagnoseUnifi(formatError: ErrorFormatter): Promise<DiagnosticReport> {
   const steps: DiagnosticStep[] = [];
   const done = (ok = steps.every((item) => item.ok)) => ({ id: "unifi", title: "Controladora UniFi", ok, steps });
+  const { results } = await testUnifi();
   if (!(await step(steps, "Variáveis da UniFi", async () => {
-    if (!isUnifiConfigured()) throw new Error("Nenhuma controladora configurada (Painel NOC > botão Wi-Fi, ou variáveis UNIFI_*).");
-    return unifiTargets().map((target) => `${target.name} (${target.host})`).join(" · ");
+    if (!results.length) throw new Error("Nenhuma controladora configurada (Painel NOC > botão Wi-Fi) nem item noc.unifi.summary no Zabbix.");
+    return results.map((result) => result.name).join(" · ");
   }, formatError))) return done(false);
   for (const target of unifiTargets()) {
     const [host, portText] = target.host.split(":");
     await step(steps, `Conexão de rede com a controladora ${target.name}`, () => tcpCheck(host, Number(portText) || 443), formatError);
   }
-  const { results } = await testUnifi();
   for (const result of results) {
     steps.push({ name: `Login e leitura: ${result.name}`, ok: result.ok, ms: 0, detail: result.message });
   }

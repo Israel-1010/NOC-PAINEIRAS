@@ -731,7 +731,7 @@ function UnifiPage({ unifi }: { unifi: Unifi }) {
 }
 
 type ControllerForm = { id: string; name: string; url: string; user: string; password: string; hasPassword: boolean; sites: string; insecureTls: boolean };
-type TestResult = { id: string; name: string; ok: boolean; message: string };
+type TestResult = { id: string; name: string; ok: boolean; message: string; viaZabbix?: boolean };
 type UnifiSettingsData = {
   source: "env" | "panel" | "none";
   envConfigured: boolean;
@@ -873,6 +873,19 @@ function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () 
         <button type="button" className="noc-ctrl-add" onClick={() => setList((value) => [...value, newController(value.length)])}>
           + Adicionar controladora
         </button>
+        {results.some((result) => result.viaZabbix) ? (
+          <fieldset className="noc-ctrl">
+            <legend>Lidas pelo Zabbix</legend>
+            <p className="noc-modal-hint">
+              Para redes que o portal não alcança. Configure no Zabbix, no host da controladora, as macros {"{$NOC.UNIFI.USER}"} e {"{$NOC.UNIFI.PASSWORD}"} (item "NOC: resumo da controladora UniFi").
+            </p>
+            {results.filter((result) => result.viaZabbix).map((result) => (
+              <p key={result.id} className={`noc-modal-result ${result.ok ? "ok" : "bad"}`}>
+                {result.ok ? <CheckCircle2 size={16} /> : <XCircle size={16} />} <b>{result.name}</b>: {result.message.replace(/^Via Zabbix: /, "")}
+              </p>
+            ))}
+          </fieldset>
+        ) : null}
         {error ? <p className="noc-modal-result bad"><XCircle size={16} /> {error}</p> : null}
         {info?.updatedAt ? <small className="noc-modal-meta">Última alteração por {info.updatedBy} em {new Date(info.updatedAt).toLocaleString("pt-BR")}</small> : null}
         <footer>
