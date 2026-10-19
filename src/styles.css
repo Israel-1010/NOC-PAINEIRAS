@@ -11191,3 +11191,161 @@ thead .ac-person-col {
 .noc-all-clear.small {
   font-size: 1em;
 }
+
+/* NOC: formulario da controladora UniFi */
+.noc-controls button.noc-attn {
+  color: var(--noc-warning);
+  border-color: var(--noc-warning);
+}
+
+.noc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.noc-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 81;
+  display: grid;
+  gap: 12px;
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 20px;
+  overflow-y: auto;
+  color: var(--noc-ink);
+  background: var(--noc-panel);
+  border: 1px solid var(--noc-line);
+  border-radius: 14px;
+  font-size: 15px;
+  transform: translate(-50%, -50%);
+}
+
+.noc-modal header,
+.noc-modal footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.noc-modal footer {
+  justify-content: flex-end;
+}
+
+.noc-modal h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.noc-modal-hint,
+.noc-modal-meta {
+  margin: 0;
+  color: var(--noc-muted);
+  font-size: 13px;
+}
+
+.noc-modal label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.noc-modal label span {
+  color: var(--noc-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.noc-modal label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.noc-modal label.check span {
+  color: var(--noc-ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.noc-modal-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.noc-modal input:not([type="checkbox"]) {
+  min-height: 38px;
+  padding: 0 10px;
+  color: var(--noc-ink);
+  background: var(--noc-page);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.noc-modal input:disabled {
+  opacity: 0.6;
+}
+
+.noc-modal button {
+  min-height: 38px;
+  padding: 0 14px;
+  color: var(--noc-ink);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.noc-modal header button {
+  display: grid;
+  place-items: center;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.noc-modal button.primary {
+  color: #fff;
+  background: var(--noc-in);
+  border-color: var(--noc-in);
+}
+
+.noc-modal button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.noc-modal-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.noc-modal-result.ok {
+  color: #6ce9a6;
+  background: rgba(18, 183, 106, 0.12);
+}
+
+.noc-modal-result.bad {
+  color: #fda29b;
+  background: rgba(240, 68, 56, 0.12);
+}
+
+@media (max-width: 600px) {
+  .noc-modal-row {
+    grid-template-columns: 1fr;
+  }
+}

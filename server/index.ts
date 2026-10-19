@@ -111,6 +111,7 @@ import { diagnoseAd, diagnoseIntune, diagnoseUnifi, diagnoseZabbix } from "./dia
 import { getLinkConfig, getLinksHistory, getLinksLive, listLinkCandidates, saveLinkConfig } from "./zabbixClient";
 import { getNocOverview } from "./nocData";
 import { allowTvKey, createTvKey, listTvKeys, revokeTvKey } from "./tvKeys";
+import { getUnifiSettings, saveUnifiSettings } from "./unifiClient";
 import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
 import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
 import {
@@ -578,6 +579,11 @@ app.get("/api/noc", nocAuth, asyncRoute(() => getNocOverview()));
 app.get("/api/tv-keys", requireAuth, requireAdmin, asyncRoute(async () => ({ keys: listTvKeys() })));
 app.post("/api/tv-keys", requireAuth, requireAdmin, asyncRoute((req) => createTvKey(String(req.body?.name || ""), req.res?.locals.user)));
 app.delete("/api/tv-keys/:id", requireAuth, requireAdmin, asyncRoute((req) => revokeTvKey(String(req.params.id))));
+app.get("/api/unifi/settings", requireAuth, requireAdmin, asyncRoute(async () => getUnifiSettings()));
+app.put("/api/unifi/settings", requireAuth, requireAdmin, asyncRoute(async (req) => {
+  writeAudit({ event: "unifi-configurado", user: req.res?.locals.user?.login, ip: req.ip });
+  return saveUnifiSettings(req.body || {}, req.res?.locals.user);
+}));
 
 /* ---------- Links de internet (Zabbix) ---------- */
 app.use("/api/links", requireAuth, requireViews(["links", "tv"], ["links"]));

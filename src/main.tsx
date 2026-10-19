@@ -2081,7 +2081,7 @@ function App() {
         ) : activeView === "links" ? (
           <LinksDashboard isAdmin={Boolean(access?.isAdmin)} />
         ) : activeView === "noc" ? (
-          <NocWall />
+          <NocWall isAdmin={Boolean(access?.isAdmin)} />
         ) : activeView === "tv" ? (
           <TvDashboard
             adSummary={adSummaryState}

@@ -1,42 +1,150 @@
+import crypto from "node:crypto";
+import fsSync from "node:fs";
+import fs from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
+import path from "node:path";
+import type { AuthUser } from "./auth";
+import { sessionSecret } from "./config";
 
 // Conector somente leitura da controladora UniFi Network instalada em servidor (testado com 8.0).
 // Um unico login por processo; os dados ficam em cache por 30 s para nao pesar a controladora.
-const unifiUrl = (process.env.UNIFI_URL || "").replace(/\/$/, "");
-const unifiUser = process.env.UNIFI_USER || "";
-const unifiPassword = process.env.UNIFI_PASSWORD || "";
-const unifiSites = (process.env.UNIFI_SITES || "")
-  .split(",")
-  .map((site) => site.trim())
-  .filter(Boolean);
-// Controladoras costumam usar certificado autoassinado; desligue a validacao so se for o caso.
-const rejectUnauthorized = process.env.UNIFI_TLS_REJECT_UNAUTHORIZED !== "false";
+// Configuracao: variaveis UNIFI_* (tem prioridade) ou o formulario do Painel NOC, salvo em data/unifi.json
+// com a senha criptografada (AES-256-GCM, chave derivada do APP_SESSION_SECRET).
+
+type UnifiConfig = { url: string; user: string; password: string; sites: string[]; rejectUnauthorized: boolean };
+type StoredConfig = { url: string; user: string; passwordEnc: string; sites: string[]; insecureTls: boolean; updatedAt: string; updatedBy: string };
+
+const dataDir = path.resolve(process.cwd(), "data");
+const storePath = path.join(dataDir, "unifi.json");
+const fromEnv = Boolean(process.env.UNIFI_URL);
+const key = crypto.createHash("sha256").update(`unifi:${sessionSecret}`).digest();
+
+function encrypt(text: string) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const data = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
+  return [iv, cipher.getAuthTag(), data].map((part) => part.toString("base64")).join(".");
+}
+
+function decrypt(value: string) {
+  try {
+    const [iv, tag, data] = value.split(".").map((part) => Buffer.from(part, "base64"));
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+  } catch {
+    return ""; // segredo da sessao mudou: senha precisa ser informada de novo
+  }
+}
+
+const splitSites = (value: string) => value.split(",").map((site) => site.trim()).filter(Boolean);
+
+function loadStored(): StoredConfig | null {
+  try {
+    return JSON.parse(fsSync.readFileSync(storePath, "utf8")) as StoredConfig;
+  } catch {
+    return null;
+  }
+}
+
+function resolveConfig(): UnifiConfig {
+  if (fromEnv) {
+    return {
+      url: (process.env.UNIFI_URL || "").replace(/\/$/, ""),
+      user: process.env.UNIFI_USER || "",
+      password: process.env.UNIFI_PASSWORD || "",
+      sites: splitSites(process.env.UNIFI_SITES || ""),
+      // Controladoras costumam usar certificado autoassinado; desligue a validacao so se for o caso.
+      rejectUnauthorized: process.env.UNIFI_TLS_REJECT_UNAUTHORIZED !== "false",
+    };
+  }
+  const stored = loadStored();
+  return {
+    url: (stored?.url || "").replace(/\/$/, ""),
+    user: stored?.user || "",
+    password: stored?.passwordEnc ? decrypt(stored.passwordEnc) : "",
+    sites: stored?.sites || [],
+    rejectUnauthorized: !stored?.insecureTls,
+  };
+}
+
+let config = resolveConfig();
 
 export function isUnifiConfigured() {
-  return Boolean(unifiUrl && unifiUser && unifiPassword);
+  return Boolean(config.url && config.user && config.password);
 }
 
 export function unifiHost() {
   try {
-    return unifiUrl ? new URL(unifiUrl).host : "";
+    return config.url ? new URL(config.url).host : "";
   } catch {
     return "";
   }
 }
 
+// Para o formulario: nunca devolve a senha.
+export function getUnifiSettings() {
+  const stored = loadStored();
+  return {
+    source: fromEnv ? "env" : stored ? "panel" : "none",
+    url: config.url,
+    user: config.user,
+    hasPassword: Boolean(config.password),
+    sites: config.sites.join(", "),
+    insecureTls: !config.rejectUnauthorized,
+    updatedAt: fromEnv ? "" : stored?.updatedAt || "",
+    updatedBy: fromEnv ? "" : stored?.updatedBy || "",
+  };
+}
+
+export async function saveUnifiSettings(body: Record<string, unknown>, by: AuthUser) {
+  if (fromEnv) throw new Error("A UniFi esta configurada por variaveis UNIFI_* no servidor; altere por la.");
+  const url = String(body.url || "").trim().replace(/\/$/, "");
+  if (url && !/^https?:\/\/[^/\s]+$/i.test(url)) throw new Error("Endereco invalido. Exemplo: https://10.0.0.56:8443");
+  const user = String(body.user || "").trim().slice(0, 120);
+  const newPassword = String(body.password || "");
+  const previous = loadStored();
+  const stored: StoredConfig = {
+    url,
+    user,
+    passwordEnc: newPassword ? encrypt(newPassword) : previous?.passwordEnc || "",
+    sites: splitSites(String(body.sites || "")),
+    insecureTls: Boolean(body.insecureTls),
+    updatedAt: new Date().toISOString(),
+    updatedBy: by.login,
+  };
+  await fs.mkdir(dataDir, { recursive: true });
+  const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tempPath, `${JSON.stringify(stored, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await fs.rename(tempPath, storePath);
+  config = resolveConfig();
+  cookie = "";
+  cache = null;
+  if (!isUnifiConfigured()) return { ...getUnifiSettings(), test: { ok: false, message: "Preencha endereco, usuario e senha." } };
+  try {
+    const overview = await getUnifiOverview();
+    return {
+      ...getUnifiSettings(),
+      test: { ok: true, message: `Conectado: UniFi ${overview.version} · ${overview.switches.length} switches · ${overview.aps.length} antenas · ${overview.clients.total} clientes` },
+    };
+  } catch (error) {
+    return { ...getUnifiSettings(), test: { ok: false, message: error instanceof Error ? error.message : "Falha ao conectar." } };
+  }
+}
+
 let cookie = "";
 
-function request(method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; json: unknown; setCookie: string[] }> {
+function request(method: "GET" | "POST", route: string, body?: unknown): Promise<{ status: number; json: unknown; setCookie: string[] }> {
   return new Promise((resolve, reject) => {
-    const url = new URL(`${unifiUrl}${path}`);
+    const url = new URL(`${config.url}${route}`);
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const client = url.protocol === "http:" ? http : https;
     const req = client.request(
       url,
       {
         method,
-        rejectUnauthorized,
+        rejectUnauthorized: config.rejectUnauthorized,
         timeout: 15000,
         headers: {
           Accept: "application/json",
@@ -67,7 +175,7 @@ function request(method: "GET" | "POST", path: string, body?: unknown): Promise<
 }
 
 async function login() {
-  const response = await request("POST", "/api/login", { username: unifiUser, password: unifiPassword });
+  const response = await request("POST", "/api/login", { username: config.user, password: config.password });
   if (response.status !== 200) {
     const message = (response.json as { meta?: { msg?: string } } | null)?.meta?.msg || `HTTP ${response.status}`;
     throw new Error(`UniFi: login recusado (${message}).`);
@@ -75,15 +183,15 @@ async function login() {
   cookie = response.setCookie.map((entry) => entry.split(";")[0]).join("; ");
 }
 
-async function api<T>(path: string): Promise<T[]> {
-  if (!isUnifiConfigured()) throw new Error("UniFi nao configurado. Defina UNIFI_URL, UNIFI_USER e UNIFI_PASSWORD.");
+async function api<T>(route: string): Promise<T[]> {
+  if (!isUnifiConfigured()) throw new Error("UniFi nao configurado. Preencha em Painel NOC > Configurar UniFi (ou variaveis UNIFI_*).");
   if (!cookie) await login();
-  let response = await request("GET", path);
+  let response = await request("GET", route);
   if (response.status === 401) {
     await login();
-    response = await request("GET", path);
+    response = await request("GET", route);
   }
-  if (response.status !== 200) throw new Error(`UniFi respondeu ${response.status} em ${path}.`);
+  if (response.status !== 200) throw new Error(`UniFi respondeu ${response.status} em ${route}.`);
   return ((response.json as { data?: T[] } | null)?.data || []) as T[];
 }
 
@@ -209,7 +317,8 @@ async function loadSite(site: RawSite) {
 
 async function buildOverview(): Promise<UnifiOverview> {
   const allSites = await api<RawSite>("/api/self/sites");
-  const sites = unifiSites.length ? allSites.filter((site) => unifiSites.includes(site.name) || unifiSites.includes(site.desc || "")) : allSites;
+  const wanted = config.sites;
+  const sites = wanted.length ? allSites.filter((site) => wanted.includes(site.name) || wanted.includes(site.desc || "")) : allSites;
   const [loaded, version] = await Promise.all([Promise.all(sites.map(loadSite)), unifiVersion().catch(() => "")]);
 
   const switches: UnifiSwitch[] = [];

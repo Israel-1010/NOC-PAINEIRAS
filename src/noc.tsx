@@ -28,6 +28,7 @@ import {
   Thermometer,
   Wifi,
   WifiOff,
+  X,
   XCircle,
   Zap,
 } from "lucide-react";
@@ -118,6 +119,7 @@ type Unifi = {
 };
 type NocData = {
   unifi?: Unifi | null;
+  unifiConfigured?: boolean;
   generatedAt: string;
   groups: NocGroup[];
   problems: NocProblem[];
@@ -659,9 +661,112 @@ function UnifiPage({ unifi }: { unifi: Unifi }) {
   );
 }
 
+type UnifiSettingsData = {
+  source: "env" | "panel" | "none";
+  url: string;
+  user: string;
+  hasPassword: boolean;
+  sites: string;
+  insecureTls: boolean;
+  updatedAt: string;
+  updatedBy: string;
+  test?: { ok: boolean; message: string };
+};
+
+function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({ url: "", user: "", password: "", sites: "", insecureTls: true });
+  const [info, setInfo] = useState<UnifiSettingsData | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/unifi/settings`, { headers: headersFor() })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error((payload as { message?: string }).message || `Servidor respondeu ${response.status}`);
+        return payload as UnifiSettingsData;
+      })
+      .then((data) => {
+        setInfo(data);
+        setForm({ url: data.url || "https://10.0.0.56:8443", user: data.user, password: "", sites: data.sites, insecureTls: data.source === "none" ? true : data.insecureTls });
+      })
+      .catch((error) => setResult({ ok: false, message: error instanceof Error ? error.message : "Falha ao carregar." }));
+  }, []);
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setResult(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/unifi/settings`, {
+        method: "PUT",
+        headers: { ...headersFor(), "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const payload = (await response.json().catch(() => ({}))) as UnifiSettingsData & { message?: string };
+      if (!response.ok) throw new Error(payload.message || `Servidor respondeu ${response.status}`);
+      setInfo(payload);
+      setForm((value) => ({ ...value, password: "" }));
+      setResult(payload.test || null);
+      if (payload.test?.ok) onSaved();
+    } catch (error) {
+      setResult({ ok: false, message: error instanceof Error ? error.message : "Falha ao salvar." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const locked = info?.source === "env";
+  return (
+    <>
+      <div className="noc-modal-backdrop" onClick={onClose} />
+      <form className="noc-modal" role="dialog" aria-modal="true" aria-label="Configurar controladora UniFi" onSubmit={save}>
+        <header>
+          <h3><Wifi size={20} /> Controladora UniFi</h3>
+          <button type="button" aria-label="Fechar" onClick={onClose}><X size={18} /></button>
+        </header>
+        <p className="noc-modal-hint">
+          {locked
+            ? "Configurada por variáveis UNIFI_* no servidor. Para mudar, altere no Portainer."
+            : "Use uma conta local \"View Only\" da controladora (sem 2FA e sem conta UI.com). A senha fica criptografada no servidor e não é exibida de novo."}
+        </p>
+        <label>
+          <span>Endereço da controladora</span>
+          <input value={form.url} disabled={locked} placeholder="https://10.0.0.56:8443" onChange={(event) => setForm({ ...form, url: event.target.value })} />
+        </label>
+        <div className="noc-modal-row">
+          <label>
+            <span>Usuário</span>
+            <input value={form.user} disabled={locked} autoComplete="off" onChange={(event) => setForm({ ...form, user: event.target.value })} />
+          </label>
+          <label>
+            <span>Senha {info?.hasPassword ? "(deixe em branco para manter)" : ""}</span>
+            <input type="password" value={form.password} disabled={locked} autoComplete="new-password" onChange={(event) => setForm({ ...form, password: event.target.value })} />
+          </label>
+        </div>
+        <label>
+          <span>Sites (vazio = todos; ex.: Paineiras, Associados)</span>
+          <input value={form.sites} disabled={locked} onChange={(event) => setForm({ ...form, sites: event.target.value })} />
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={form.insecureTls} disabled={locked} onChange={(event) => setForm({ ...form, insecureTls: event.target.checked })} />
+          <span>Aceitar certificado autoassinado (padrão das controladoras instaladas em servidor)</span>
+        </label>
+        {result ? <p className={`noc-modal-result ${result.ok ? "ok" : "bad"}`}>{result.ok ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {result.message}</p> : null}
+        {info?.updatedAt ? <small className="noc-modal-meta">Última alteração por {info.updatedBy} em {new Date(info.updatedAt).toLocaleString("pt-BR")}</small> : null}
+        <footer>
+          <button type="button" onClick={onClose}>Fechar</button>
+          {!locked ? <button type="submit" className="primary" disabled={saving}>{saving ? "Testando conexão..." : "Salvar e testar"}</button> : null}
+        </footer>
+      </form>
+    </>
+  );
+}
+
 /* ---------- Painel (carrossel) ---------- */
 
-export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: boolean }) {
+export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: string; kiosk?: boolean; isAdmin?: boolean }) {
+  const [showUnifi, setShowUnifi] = useState(false);
   const [data, setData] = useState<NocData | null>(null);
   const [error, setError] = useState("");
   const [page, setPage] = useState(0);
@@ -725,6 +830,7 @@ export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: bool
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, .noc-modal")) return;
       if (event.key === "ArrowRight") go(1);
       if (event.key === "ArrowLeft") go(-1);
       if (event.key === " ") {
@@ -811,6 +917,11 @@ export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: bool
           <select value={intervalSec} onChange={(event) => setIntervalSec(Number(event.target.value))} aria-label="Tempo por página">
             {[10, 15, 20, 30, 45, 60].map((value) => <option key={value} value={value}>{value}s</option>)}
           </select>
+          {!kiosk && isAdmin ? (
+            <button type="button" className={data && !data.unifiConfigured ? "noc-attn" : ""} aria-label="Configurar controladora UniFi" title="Configurar controladora UniFi" onClick={() => setShowUnifi(true)}>
+              <Wifi size={18} />
+            </button>
+          ) : null}
           {!kiosk ? (
             <button type="button" aria-label="Tela cheia" title="Tela cheia" onClick={() => (document.fullscreenElement ? document.exitFullscreen() : rootRef.current?.requestFullscreen?.())}>
               {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
@@ -863,6 +974,7 @@ export function NocWall({ tvKey, kiosk = false }: { tvKey?: string; kiosk?: bool
         </div>
         <span className="noc-updated">{data ? `atualizado ${new Date(data.generatedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}</span>
       </footer>
+      {showUnifi ? <UnifiSettings onClose={() => setShowUnifi(false)} onSaved={() => window.setTimeout(load, 1500)} /> : null}
     </div>
   );
 }
