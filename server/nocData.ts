@@ -116,9 +116,99 @@ async function itemsOf(hostIds: string[]) {
 
 const bracket = (key: string) => /\[(.*)\]$/.exec(key)?.[1] || "";
 
+/* ---------- Seguranca do FortiGate (IPS / antivirus) ---------- */
+
+// O template "FortiGate by SNMP" grava esses contadores como taxa por segundo; o valor instantaneo
+// quase sempre e 0. Somamos o historico para ter o total real de eventos nas ultimas 24 h.
+const SECURITY_KEYS = {
+  detected: "ips.detected.total[fgIpsIntrusionsDetected.0]",
+  blocked: "ips.blocked[fgIpsIntrusionsBlocked.0]",
+  critical: "ips.detected.crit[fgIpsCritSevDetections.0]",
+  high: "ips.detected.high[fgIpsHighSevDetections.0]",
+  medium: "ips.detected.med[fgIpsMedSevDetections.0]",
+  low: "ips.detected.low[fgIpsLowSevDetections.0]",
+  info: "ips.detected.info[fgIpsInfoSevDetections.0]",
+  signature: "ips.detected.sign[fgIpsSignatureDetections.0]",
+  anomaly: "ips.detected.anomaly[fgIpsAnomalyDetections.0]",
+} as const;
+type SecurityKey = keyof typeof SECURITY_KEYS | "antivirus";
+const SECURITY_WINDOW_H = 24;
+
+export type FirewallSecurity = {
+  windowHours: number;
+  totals: Record<SecurityKey, number>;
+  hourly: { t: number; detected: number; blocked: number }[];
+  ipsDatabase: string;
+};
+
+async function loadSecurity(items: ZbxItem[]): Promise<FirewallSecurity | null> {
+  const tracked = new Map<string, SecurityKey>();
+  for (const [name, key] of Object.entries(SECURITY_KEYS) as [SecurityKey, string][]) {
+    const item = items.find((entry) => entry.key_ === key);
+    if (item) tracked.set(item.itemid, name);
+  }
+  // Antivirus vem por no do cluster (HA 1, HA 2): soma os dois.
+  for (const item of items.filter((entry) => entry.key_.startsWith("ha.av.events["))) tracked.set(item.itemid, "antivirus");
+  if (!tracked.size) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  const currentHour = now - (now % 3600);
+  const from = currentHour - (SECURITY_WINDOW_H - 1) * 3600;
+  const ids = Array.from(tracked.keys());
+  const [trends, recent] = await Promise.all([
+    zbx<{ itemid: string; clock: string; value_avg: string; num: string }[]>("trend.get", { itemids: ids, time_from: from, time_till: currentHour - 1, output: ["itemid", "clock", "value_avg", "num"] }),
+    zbx<{ itemid: string; clock: string; value: string }[]>("history.get", { itemids: ids, history: 0, time_from: currentHour, sortfield: "clock", sortorder: "ASC", output: ["itemid", "clock", "value"] }),
+  ]);
+
+  const totals = Object.fromEntries([...Object.keys(SECURITY_KEYS), "antivirus"].map((name) => [name, 0])) as Record<SecurityKey, number>;
+  const hours = new Map<number, { t: number; detected: number; blocked: number }>();
+  for (let t = from; t <= currentHour; t += 3600) hours.set(t, { t: t * 1000, detected: 0, blocked: 0 });
+  const add = (itemid: string, hour: number, events: number) => {
+    const name = tracked.get(itemid);
+    if (!name || !Number.isFinite(events) || events <= 0) return;
+    totals[name] += events;
+    const bucket = hours.get(hour);
+    if (bucket && name === "detected") bucket.detected += events;
+    if (bucket && name === "blocked") bucket.blocked += events;
+  };
+  // Horas fechadas: media da taxa x 3600 s.
+  for (const trend of trends) add(trend.itemid, Number(trend.clock), Number(trend.value_avg) * 3600);
+  // Hora atual: cada amostra vale a taxa ate a proxima (ou ate agora).
+  const byItem = new Map<string, { clock: number; value: number }[]>();
+  for (const point of recent) {
+    const list = byItem.get(point.itemid) || [];
+    list.push({ clock: Number(point.clock), value: Number(point.value) });
+    byItem.set(point.itemid, list);
+  }
+  for (const [itemid, points] of byItem) {
+    points.forEach((point, index) => {
+      const next = points[index + 1]?.clock ?? now;
+      add(itemid, currentHour, point.value * Math.max(0, Math.min(next - point.clock, 600)));
+    });
+  }
+
+  const round = (value: number) => Math.round(value);
+  return {
+    windowHours: SECURITY_WINDOW_H,
+    totals: Object.fromEntries(Object.entries(totals).map(([name, value]) => [name, round(value)])) as Record<SecurityKey, number>,
+    hourly: Array.from(hours.values()).map((hour) => ({ t: hour.t, detected: round(hour.detected), blocked: round(hour.blocked) })),
+    ipsDatabase: items.find((entry) => entry.key_ === "ips.database.version[fgSysVersionIps.0]")?.lastvalue || "",
+  };
+}
+
+// Historico de 24 h nao muda a cada 8 s: guarda por 2 min.
+let securityCache: { at: number; hostId: string; value: Promise<FirewallSecurity | null> } | null = null;
+function securityFor(hostId: string, items: ZbxItem[]) {
+  if (securityCache && securityCache.hostId === hostId && Date.now() - securityCache.at < 120000) return securityCache.value;
+  const value = loadSecurity(items).catch(() => null);
+  securityCache = { at: Date.now(), hostId, value };
+  return value;
+}
+
 async function loadFirewalls() {
   const hosts = await hostsByTemplate(/fortigate/i);
   const items = await itemsOf(hosts.map((host) => host.hostid));
+  const security = new Map(await Promise.all(hosts.map(async (host) => [host.hostid, await securityFor(host.hostid, items.filter((item) => item.hostid === host.hostid))] as const)));
   return hosts.map((host) => {
     const own = items.filter((item) => item.hostid === host.hostid);
     const get = (key: string) => own.find((item) => item.key_ === key)?.lastvalue;
@@ -185,6 +275,7 @@ async function loadFirewalls() {
       sdwan,
       sensors,
       ips: { detected: num(get("ips.detected.total[fgIpsIntrusionsDetected.0]")), blocked: num(get("ips.blocked[fgIpsIntrusionsBlocked.0]")) },
+      security: security.get(host.hostid) || null,
     };
   });
 }

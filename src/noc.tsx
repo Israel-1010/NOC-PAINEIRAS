@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   Activity,
   AlertOctagon,
@@ -53,6 +53,12 @@ type Firewall = {
   sdwan: { member: string; check: string; latencyMs: number | null; jitterMs: number | null; loss: number | null; alive: boolean | null }[];
   sensors: { name: string; kind: string; value: number | null; alarm: boolean | null }[];
   ips: { detected: number | null; blocked: number | null };
+  security: {
+    windowHours: number;
+    totals: Record<"detected" | "blocked" | "critical" | "high" | "medium" | "low" | "info" | "signature" | "anomaly" | "antivirus", number>;
+    hourly: { t: number; detected: number; blocked: number }[];
+    ipsDatabase: string;
+  } | null;
 };
 type Router = { id: string; name: string; model: string; cpu: number | null; memory: number | null; temperature: number | null; uptimeSec: number | null };
 type Hardware = {
@@ -452,7 +458,13 @@ function OverviewPage({ data }: { data: NocData }) {
           icon={<Shield size={18} />}
           tone={fwTone}
           main={fw ? pct(fw.cpu) : "—"}
-          sub={fw ? `CPU · mem ${pct(fw.memory)} · ${(fw.sessions ?? 0).toLocaleString("pt-BR")} sessões` : "Sem FortiGate no Zabbix"}
+          sub={
+            fw
+              ? fw.security
+                ? `CPU · ${fw.security.totals.blocked.toLocaleString("pt-BR")} ataques bloqueados em 24 h`
+                : `CPU · mem ${pct(fw.memory)} · ${(fw.sessions ?? 0).toLocaleString("pt-BR")} sessões`
+              : "Sem FortiGate no Zabbix"
+          }
         />
         {unifiTile("switches", "switches", "Switches", <Network size={18} />)}
         {unifiTile("aps", "antenas", "Antenas UniFi", <Radio size={18} />)}
@@ -485,6 +497,65 @@ function OverviewPage({ data }: { data: NocData }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// IPS/antivirus do FortiGate somados nas ultimas 24 h (o Zabbix guarda como taxa por segundo).
+const SEC_LEVELS = [
+  { key: "critical", label: "Crítica", tone: "s5" },
+  { key: "high", label: "Alta", tone: "s4" },
+  { key: "medium", label: "Média", tone: "s3" },
+  { key: "low", label: "Baixa", tone: "s2" },
+] as const;
+
+function SecurityCard({ fw }: { fw: Firewall }) {
+  const sec = fw.security;
+  if (!sec) {
+    return (
+      <section className="noc-card">
+        <h3><ShieldCheck size={20} /> Segurança</h3>
+        <p className="noc-empty">Sem contadores de IPS no Zabbix.</p>
+      </section>
+    );
+  }
+  const { totals } = sec;
+  const top = Math.max(1, ...SEC_LEVELS.map((level) => totals[level.key]));
+  const serious = totals.critical + totals.high;
+  return (
+    <section className="noc-card noc-sec">
+      <h3><ShieldCheck size={20} /> Segurança <small>últimas {sec.windowHours} h</small></h3>
+      <div className="noc-sec-big">
+        <div className="tone-good"><span>Ataques bloqueados</span><strong>{totals.blocked.toLocaleString("pt-BR")}</strong></div>
+        <div className={serious ? "tone-warning" : ""}><span>Intrusões detectadas</span><strong>{totals.detected.toLocaleString("pt-BR")}</strong></div>
+      </div>
+      <ul className="noc-sec-levels">
+        {SEC_LEVELS.map((level) => (
+          <li key={level.key} className={level.tone}>
+            <span>{level.label}</span>
+            <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${totals[level.key] ? Math.max(2, (totals[level.key] / top) * 100) : 0}%` }} /></div>
+            <b>{totals[level.key].toLocaleString("pt-BR")}</b>
+          </li>
+        ))}
+      </ul>
+      <div className="noc-fill noc-sec-chart" aria-label="Intrusões detectadas por hora">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={sec.hourly} margin={{ top: 4, right: 0, bottom: 0, left: 0 }} barCategoryGap={2}>
+            <XAxis dataKey="t" hide />
+            <YAxis hide />
+            <Tooltip
+              cursor={{ fill: "rgba(255,255,255,0.06)" }}
+              contentStyle={{ background: "#0b1430", border: "1px solid #2c3a5a", borderRadius: 8, color: "#eef2fb" }}
+              labelFormatter={(t) => `${new Date(Number(t)).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`}
+              formatter={(value, key) => [Number(value).toLocaleString("pt-BR"), key === "detected" ? "Detectadas" : "Bloqueadas"]}
+            />
+            <Bar dataKey="detected" fill="#3987e5" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <small className="noc-sec-foot">
+        Detecções por hora · antivírus {totals.antivirus.toLocaleString("pt-BR")}{sec.ipsDatabase ? ` · base IPS ${sec.ipsDatabase.replace(/\(.*\)/, "").trim()}` : ""}
+      </small>
+    </section>
   );
 }
 
@@ -558,15 +629,14 @@ function InternetPage({ data }: { data: NocData }) {
               ))}
             </ul>
           </section>
+          <SecurityCard fw={fw} />
           <section className="noc-card">
             <h3><Thermometer size={20} /> Hardware do firewall</h3>
-            <div className="noc-hw-grid">
+            <div className="noc-hw-grid single">
               <div className={alarms.length ? "tone-critical" : "tone-good"}><span>Alarmes</span><strong>{alarms.length ? alarms.length : "Nenhum"}</strong></div>
               <div><span>Maior temperatura</span><strong>{maxTemp === null ? "—" : `${Math.round(maxTemp)} °C`}</strong></div>
               <div className={psu.some((sensor) => sensor.alarm) ? "tone-critical" : "tone-good"}><span>Fontes</span><strong>{psu.filter((sensor) => !sensor.alarm).length}/{psu.length} OK</strong></div>
               <div className={fans.some((sensor) => sensor.alarm) ? "tone-critical" : "tone-good"}><span>Ventoinhas</span><strong>{fans.filter((sensor) => !sensor.alarm).length}/{fans.length} OK</strong></div>
-              <div><span>Intrusões detectadas</span><strong>{fw.ips.detected ?? "—"}</strong></div>
-              <div><span>Intrusões bloqueadas</span><strong>{fw.ips.blocked ?? "—"}</strong></div>
             </div>
           </section>
         </div>

@@ -11520,3 +11520,87 @@ thead .ac-person-col {
 .noc-ctrl-down small {
   color: var(--noc-muted);
 }
+
+/* NOC: quadro de seguranca do FortiGate (IPS 24 h) */
+.noc-fw {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.85fr) minmax(0, 1.15fr) minmax(0, 0.7fr);
+}
+
+.noc-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.noc-sec-big {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.noc-sec-big div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--noc-panel-2);
+  border-left: 3px solid var(--tone, var(--noc-line));
+  border-radius: 8px;
+}
+
+.noc-sec-big span {
+  color: var(--noc-muted);
+  font-size: 0.82em;
+  font-weight: 600;
+}
+
+.noc-sec-big strong {
+  font-size: 1.7em;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.noc-sec-big .tone-good strong {
+  color: var(--noc-good);
+}
+
+.noc-sec-levels {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.noc-sec-levels li {
+  display: grid;
+  grid-template-columns: 4.2em minmax(0, 1fr) 4.5em;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88em;
+}
+
+.noc-sec-levels li span {
+  color: var(--sev);
+  font-weight: 700;
+}
+
+.noc-sec-levels li .noc-hbar i {
+  background: var(--sev);
+}
+
+.noc-sec-levels li b {
+  text-align: right;
+}
+
+.noc-sec-chart {
+  min-height: 50px;
+}
+
+.noc-sec-foot {
+  color: var(--noc-muted);
+  font-size: 0.78em;
+}
+
+.noc-hw-grid.single {
+  grid-template-columns: 1fr;
+}
