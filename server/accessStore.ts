@@ -8,6 +8,7 @@ import type { AuthUser } from "./auth";
 // Itens do menu que podem ser liberados por usuario.
 export const portalViews = [
   { id: "tv", label: "Visão geral (TV)", sensitive: false },
+  { id: "noc", label: "Painel NOC (TV)", sensitive: false },
   { id: "links", label: "Links de internet", sensitive: false },
   { id: "topology", label: "Topologia", sensitive: true },
   { id: "snmp", label: "SNMP", sensitive: true },
@@ -23,7 +24,7 @@ export const portalViews = [
 
 export type PortalView = (typeof portalViews)[number]["id"];
 const allViewIds = portalViews.map((view) => view.id) as PortalView[];
-const initialDefaults: PortalView[] = ["tv", "links", "projects", "milvusPortal", "pop"];
+const initialDefaults: PortalView[] = ["tv", "noc", "links", "projects", "milvusPortal", "pop"];
 
 class AccessDenied extends Error {
   status = 403;

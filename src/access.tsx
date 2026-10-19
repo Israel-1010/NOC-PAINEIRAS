@@ -275,6 +275,83 @@ export function AccessDashboard() {
           </tbody>
         </table>
       </div>
+
+      <TvKeysSection />
     </div>
+  );
+}
+
+type TvKeyInfo = { id: string; name: string; createdAt: string; createdBy: string; lastUsedAt: string };
+
+// Chaves para TVs/monitores do NOC: abrem so o Painel NOC, sem login pessoal.
+function TvKeysSection() {
+  const [keys, setKeys] = useState<TvKeyInfo[]>([]);
+  const [name, setName] = useState("");
+  const [created, setCreated] = useState<{ name: string; url: string } | null>(null);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setKeys((await api<{ keys: TvKeyInfo[] }>("/api/tv-keys")).keys);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Falha ao carregar as chaves de TV.");
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function create() {
+    try {
+      const result = await api<{ name: string; key: string }>("/api/tv-keys", "POST", { name: name || "TV NOC" });
+      setCreated({ name: result.name, url: `${window.location.origin}/?tv=${result.key}` });
+      setName("");
+      load();
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Falha ao criar a chave.");
+    }
+  }
+
+  async function revoke(key: TvKeyInfo) {
+    if (!window.confirm(`Revogar a chave "${key.name}"? A TV que usa essa chave para de mostrar o painel.`)) return;
+    await api(`/api/tv-keys/${encodeURIComponent(key.id)}`, "DELETE");
+    load();
+  }
+
+  return (
+    <section className="ac-tv">
+      <h3><ShieldCheck size={18} /> Telas de TV (modo quiosque)</h3>
+      <p>
+        Gere um endereço para a TV do NOC. Ele abre <b>somente o Painel NOC</b>, em tela cheia, sem login pessoal e sem expirar.
+        Não dá acesso a nenhuma outra área.
+      </p>
+      {error ? <div className="pm-error"><AlertTriangle size={16} /><span>{error}</span></div> : null}
+      <div className="ac-tv-form">
+        <input value={name} maxLength={60} onChange={(event) => setName(event.target.value)} placeholder="Nome da tela (ex.: TV sala de TI)" />
+        <button className="pm-btn primary" type="button" onClick={create}>Gerar endereço da TV</button>
+      </div>
+      {created ? (
+        <div className="ac-tv-created">
+          <strong>Endereço da "{created.name}" (copie agora, ele não aparece de novo):</strong>
+          <code>{created.url}</code>
+          <button className="pm-btn ghost" type="button" onClick={() => navigator.clipboard?.writeText(created.url)}>Copiar</button>
+        </div>
+      ) : null}
+      {keys.length ? (
+        <ul className="ac-tv-list">
+          {keys.map((key) => (
+            <li key={key.id}>
+              <strong>{key.name}</strong>
+              <span>criada por {key.createdBy} em {new Date(key.createdAt).toLocaleDateString("pt-BR")}</span>
+              <span>{key.lastUsedAt ? `último uso ${new Date(key.lastUsedAt).toLocaleString("pt-BR")}` : "ainda não usada"}</span>
+              <button type="button" onClick={() => revoke(key)}>Revogar</button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="ac-tv-empty">Nenhuma TV cadastrada.</p>
+      )}
+    </section>
   );
 }

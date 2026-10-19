@@ -65,6 +65,7 @@ import { ProjectsDashboard } from "./projects";
 import { AccessDashboard } from "./access";
 import { DiagnosticsDashboard } from "./diagnostics";
 import { LinksDashboard } from "./links";
+import { NocWall } from "./noc";
 import "./styles.css";
 
 type Status = "online" | "warning" | "offline";
@@ -784,7 +785,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" || value === "noc" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1211,6 +1212,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
   {
     title: "Monitoramento",
     items: [
+      { label: "Painel NOC", icon: Activity, view: "noc" },
       { label: "Visão geral (TV)", icon: Tv, view: "tv" },
       { label: "Links de internet", icon: Zap, view: "links" },
       { label: "Topologia", icon: Network, view: "topology" },
@@ -1254,7 +1256,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
   },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links";
+type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links" | "noc";
 
 function statusLabel(status: Status) {
   return {
@@ -1276,6 +1278,7 @@ function viewEyebrow(view: View) {
   if (view === "pop") return "Procedimento operacional padrao";
   if (view === "projects") return "Gestão de projetos da TI";
   if (view === "links") return "Monitoramento via Zabbix";
+  if (view === "noc") return "Central de monitoramento";
   if (view === "access") return "Administração do portal";
   if (view === "diagnostics") return "Administração do portal";
   if (view === "topology") return "Mapa e monitoramento";
@@ -1294,6 +1297,7 @@ function viewTitle(view: View) {
   if (view === "pop") return "POP";
   if (view === "projects") return "Projetos";
   if (view === "links") return "Links de internet";
+  if (view === "noc") return "Painel NOC";
   if (view === "access") return "Acessos";
   if (view === "diagnostics") return "Diagnóstico das integrações";
   if (view === "topology") return "Topologia";
@@ -2076,6 +2080,8 @@ function App() {
           <DiagnosticsDashboard />
         ) : activeView === "links" ? (
           <LinksDashboard isAdmin={Boolean(access?.isAdmin)} />
+        ) : activeView === "noc" ? (
+          <NocWall />
         ) : activeView === "tv" ? (
           <TvDashboard
             adSummary={adSummaryState}
@@ -10082,8 +10088,29 @@ class ViewErrorBoundary extends React.Component<{ children: React.ReactNode }, {
   }
 }
 
+// Modo quiosque da TV: ?tv=<chave> guarda a chave e mostra so o Painel NOC (sem login pessoal).
+const TV_KEY_STORAGE = "rede-clube-tv-key";
+function resolveTvKey() {
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get("tv");
+  try {
+    if (fromUrl) {
+      window.localStorage.setItem(TV_KEY_STORAGE, fromUrl);
+      params.delete("tv");
+      params.set("modo", "tv");
+      window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+      return fromUrl;
+    }
+    if (params.get("modo") === "tv") return window.localStorage.getItem(TV_KEY_STORAGE) || "";
+  } catch {
+    return fromUrl || "";
+  }
+  return "";
+}
+const tvKey = resolveTvKey();
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    {tvKey ? <NocWall tvKey={tvKey} kiosk /> : <App />}
   </React.StrictMode>,
 );

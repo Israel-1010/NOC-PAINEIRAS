@@ -109,6 +109,8 @@ import {
 import { getTopology, saveTopology } from "./topologyStore";
 import { diagnoseAd, diagnoseIntune, diagnoseZabbix } from "./diagnostics";
 import { getLinkConfig, getLinksHistory, getLinksLive, listLinkCandidates, saveLinkConfig } from "./zabbixClient";
+import { getNocOverview } from "./nocData";
+import { allowTvKey, createTvKey, listTvKeys, revokeTvKey } from "./tvKeys";
 import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
 import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
 import {
@@ -560,6 +562,22 @@ app.post("/api/topology/ping", asyncRoute(async (req) => {
   const items = await Promise.all(uniqueIps.map((ip) => pingHost(ip)));
   return { ok: true, items };
 }));
+
+/* ---------- Painel NOC (TV): sessao com permissao OU chave de TV ---------- */
+function nocAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  allowTvKey(req, res, () => {
+    if (res.locals.tvKey) {
+      next();
+      return;
+    }
+    requireAuth(req, res, () => requireViews(["noc", "tv", "links"])(req, res, next));
+  });
+}
+
+app.get("/api/noc", nocAuth, asyncRoute(() => getNocOverview()));
+app.get("/api/tv-keys", requireAuth, requireAdmin, asyncRoute(async () => ({ keys: listTvKeys() })));
+app.post("/api/tv-keys", requireAuth, requireAdmin, asyncRoute((req) => createTvKey(String(req.body?.name || ""), req.res?.locals.user)));
+app.delete("/api/tv-keys/:id", requireAuth, requireAdmin, asyncRoute((req) => revokeTvKey(String(req.params.id))));
 
 /* ---------- Links de internet (Zabbix) ---------- */
 app.use("/api/links", requireAuth, requireViews(["links", "tv"], ["links"]));
