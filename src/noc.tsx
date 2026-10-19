@@ -99,6 +99,7 @@ type UnifiSwitch = {
 };
 type UnifiAp = {
   id: string;
+  controller: string;
   site: string;
   name: string;
   model: string;
@@ -111,6 +112,7 @@ type UnifiAp = {
 };
 type Unifi = {
   version: string;
+  controllers: { id: string; name: string; ok: boolean; message: string; version: string }[];
   sites: { name: string; title: string }[];
   switches: UnifiSwitch[];
   aps: UnifiAp[];
@@ -131,12 +133,11 @@ type NocData = {
   errors: string[];
 };
 
-type PageId = "overview" | "internet" | "switches" | "unifi" | "antenas" | "servidores" | "cftv";
+type PageId = "overview" | "internet" | "unifi" | "antenas" | "servidores" | "cftv";
 const PAGES: { id: PageId; title: string; icon: typeof Activity }[] = [
   { id: "overview", title: "Visão geral", icon: Activity },
   { id: "internet", title: "Internet e Firewall", icon: Globe },
-  { id: "switches", title: "Switches", icon: Network },
-  { id: "unifi", title: "Rede UniFi: portas, PoE e Wi-Fi", icon: Wifi },
+  { id: "unifi", title: "Rede UniFi: switches, PoE e Wi-Fi", icon: Wifi },
   { id: "antenas", title: "Antenas UniFi", icon: Radio },
   { id: "servidores", title: "Servidores e Datacenter", icon: Server },
   { id: "cftv", title: "CFTV e Videowall", icon: Camera },
@@ -557,6 +558,73 @@ function ServersPage({ data }: { data: NocData }) {
   );
 }
 
+// Controladora que nao respondeu aparece como aviso; as demais continuam no painel.
+function ControllerWarnings({ unifi }: { unifi: Unifi }) {
+  const failed = unifi.controllers.filter((controller) => !controller.ok);
+  if (!failed.length) return null;
+  return (
+    <>
+      {failed.map((controller) => (
+        <p key={controller.id} className="noc-collect-warn">
+          <AlertTriangle size={18} /> Controladora {controller.name} sem resposta: {controller.message}
+        </p>
+      ))}
+    </>
+  );
+}
+
+// A pagina de antenas usa a UniFi quando todas as controladoras responderam e cobrem as antenas do Zabbix.
+function hasUnifiAps(data: NocData) {
+  const unifi = data.unifi;
+  if (!unifi || !unifi.aps.length || unifi.controllers.some((controller) => !controller.ok)) return false;
+  const zabbix = data.groups.find((group) => group.key === "antenas")?.total || 0;
+  return unifi.aps.length >= zabbix * 0.6;
+}
+
+function UnifiApPage({ unifi }: { unifi: Unifi }) {
+  const online = unifi.aps.filter((ap) => ap.online).length;
+  const offline = unifi.aps.length - online;
+  const tone = !offline ? "good" : online / Math.max(1, unifi.aps.length) < 0.5 ? "critical" : "warning";
+  const wifiClients = unifi.aps.reduce((sum, ap) => sum + (ap.online ? ap.clients : 0), 0);
+  const busiest = Math.max(1, ...unifi.aps.map((ap) => ap.clients));
+  const sizeClass = unifi.aps.length > 48 ? "size-xs" : unifi.aps.length > 24 ? "size-sm" : "size-md";
+  return (
+    <div className="noc-page noc-unifi">
+      <div className="noc-group-head noc-unifi-head">
+        <div className="tone-good"><span>Online</span><strong>{online}</strong><small>antenas conectadas</small></div>
+        <div className={offline ? "tone-critical" : "tone-good"}><span>Desconectadas</span><strong>{offline}</strong><small>na controladora</small></div>
+        <div><span>Total</span><strong>{unifi.aps.length}</strong><small>{unifi.controllers.map((controller) => controller.name).join(" · ")}</small></div>
+        <div><span>Clientes no Wi-Fi</span><strong>{wifiClients.toLocaleString("pt-BR")}</strong><small>somando as antenas</small></div>
+        <div className={`status tone-${tone}`}>{toneIcon(tone, 26)} {toneLabel(tone)}</div>
+      </div>
+      <section className="noc-card noc-unifi-switches">
+        <h3><Radio size={20} /> Antenas <small>clientes · uso do canal (2,4 / 5 GHz)</small></h3>
+        <div className={`noc-swgrid ${sizeClass}`}>
+          {unifi.aps.map((ap) => {
+            const busy = Math.max(0, ...ap.radios.map((radio) => radio.utilization ?? 0));
+            const apTone = !ap.online ? "critical" : busy >= 80 ? "warning" : "good";
+            return (
+              <div key={ap.id} className={`noc-sw tone-${apTone}`} title={`${ap.name} · ${ap.model} · ${ap.controller} / ${ap.site}${ap.uplink ? ` · uplink ${ap.uplink}` : ""}`}>
+                <strong>{apTone === "critical" ? <WifiOff size={13} /> : toneIcon(apTone, 13)} {ap.name}</strong>
+                {ap.online ? (
+                  <>
+                    <div className="noc-sw-ports" aria-label={`${ap.clients} clientes`}><i style={{ width: `${(ap.clients / busiest) * 100}%` }} /></div>
+                    <small>
+                      <b>{ap.clients}</b> clientes · {ap.radios.map((radio) => pct(radio.utilization)).join(" / ") || ap.model}
+                    </small>
+                  </>
+                ) : (
+                  <small className="noc-sw-off">DESCONECTADA</small>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function UnifiPage({ unifi }: { unifi: Unifi }) {
   const swOnline = unifi.switches.filter((sw) => sw.online).length;
   const apOnline = unifi.aps.filter((ap) => ap.online).length;
@@ -569,6 +637,7 @@ function UnifiPage({ unifi }: { unifi: Unifi }) {
 
   return (
     <div className="noc-page noc-unifi">
+      <ControllerWarnings unifi={unifi} />
       <div className="noc-group-head noc-unifi-head">
         <div><span>Clientes conectados</span><strong>{unifi.clients.total.toLocaleString("pt-BR")}</strong><small>{unifi.clients.wired.toLocaleString("pt-BR")} cabo · {unifi.clients.wireless.toLocaleString("pt-BR")} Wi-Fi</small></div>
         <div className={`tone-${swTone}`}><span>Switches</span><strong>{swOnline}/{unifi.switches.length}</strong><small>{toneIcon(swTone, 13)} {swOnline === unifi.switches.length ? "todos online" : `${unifi.switches.length - swOnline} desconectado(s)`}</small></div>
@@ -608,9 +677,9 @@ function UnifiPage({ unifi }: { unifi: Unifi }) {
 
         <div className="noc-unifi-side">
           <section className="noc-card">
-            <h3><Radio size={20} /> Antenas <small>clientes e uso do canal</small></h3>
+            <h3><Radio size={20} /> Antenas mais usadas <small>clientes e uso do canal</small></h3>
             <ul className="noc-ap-list">
-              {unifi.aps.map((ap) => (
+              {unifi.aps.filter((ap) => ap.online).slice(0, 7).map((ap) => (
                 <li key={ap.id} className={`tone-${ap.online ? "good" : "critical"}`}>
                   <strong>{ap.online ? <CheckCircle2 size={14} /> : <WifiOff size={14} />} {ap.name}</strong>
                   <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${(ap.clients / topClients) * 100}%` }} /></div>
@@ -661,37 +730,54 @@ function UnifiPage({ unifi }: { unifi: Unifi }) {
   );
 }
 
+type ControllerForm = { id: string; name: string; url: string; user: string; password: string; hasPassword: boolean; sites: string; insecureTls: boolean };
+type TestResult = { id: string; name: string; ok: boolean; message: string };
 type UnifiSettingsData = {
   source: "env" | "panel" | "none";
   envConfigured: boolean;
-  url: string;
-  user: string;
-  hasPassword: boolean;
-  sites: string;
-  insecureTls: boolean;
+  controllers: Omit<ControllerForm, "password">[];
   updatedAt: string;
   updatedBy: string;
-  test?: { ok: boolean; message: string };
+  results?: TestResult[];
 };
 
+const newController = (index: number): ControllerForm => ({
+  id: "",
+  name: index === 0 ? "Switches" : "Antenas",
+  url: index === 0 ? "https://10.0.0.56:8443" : "https://192.168.2.10:8443",
+  user: "",
+  password: "",
+  hasPassword: false,
+  sites: "",
+  insecureTls: true,
+});
+
 function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState({ url: "", user: "", password: "", sites: "", insecureTls: true });
+  const [list, setList] = useState<ControllerForm[]>([]);
   const [info, setInfo] = useState<UnifiSettingsData | null>(null);
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [results, setResults] = useState<TestResult[]>([]);
+  const [error, setError] = useState("");
 
   async function test() {
     setTesting(true);
+    setError("");
     try {
       const response = await fetch(`${API_BASE}/api/unifi/test`, { method: "POST", headers: headersFor() });
-      const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string };
-      setResult({ ok: Boolean(response.ok && payload.ok), message: payload.message || `Servidor respondeu ${response.status}` });
-    } catch (error) {
-      setResult({ ok: false, message: error instanceof Error ? error.message : "Falha ao testar." });
+      const payload = (await response.json().catch(() => ({}))) as { results?: TestResult[]; message?: string };
+      if (!response.ok) throw new Error(payload.message || `Servidor respondeu ${response.status}`);
+      setResults(payload.results || []);
+    } catch (testError) {
+      setError(testError instanceof Error ? testError.message : "Falha ao testar.");
     } finally {
       setTesting(false);
     }
+  }
+
+  function apply(data: UnifiSettingsData) {
+    setInfo(data);
+    setList(data.controllers.length ? data.controllers.map((entry) => ({ ...entry, password: "" })) : [newController(0)]);
   }
 
   useEffect(() => {
@@ -702,31 +788,32 @@ function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () 
         return payload as UnifiSettingsData;
       })
       .then((data) => {
-        setInfo(data);
-        setForm({ url: data.url || "https://10.0.0.56:8443", user: data.user, password: "", sites: data.sites, insecureTls: data.source === "none" ? true : data.insecureTls });
-        if (data.source !== "none") test(); // mostra ja se a conexao atual funciona e, se nao, o motivo
+        apply(data);
+        if (data.controllers.length) test(); // mostra ja se a conexao atual funciona e, se nao, o motivo
       })
-      .catch((error) => setResult({ ok: false, message: error instanceof Error ? error.message : "Falha ao carregar." }));
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Falha ao carregar."));
   }, []);
+
+  const update = (index: number, patch: Partial<ControllerForm>) => setList((value) => value.map((entry, position) => (position === index ? { ...entry, ...patch } : entry)));
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
-    setResult(null);
+    setError("");
+    setResults([]);
     try {
       const response = await fetch(`${API_BASE}/api/unifi/settings`, {
         method: "PUT",
         headers: { ...headersFor(), "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ controllers: list.map(({ hasPassword: _hasPassword, ...entry }) => entry) }),
       });
       const payload = (await response.json().catch(() => ({}))) as UnifiSettingsData & { message?: string };
       if (!response.ok) throw new Error(payload.message || `Servidor respondeu ${response.status}`);
-      setInfo(payload);
-      setForm((value) => ({ ...value, password: "" }));
-      setResult(payload.test || null);
-      if (payload.test?.ok) onSaved();
-    } catch (error) {
-      setResult({ ok: false, message: error instanceof Error ? error.message : "Falha ao salvar." });
+      apply(payload);
+      setResults(payload.results || []);
+      if (payload.results?.some((result) => result.ok)) onSaved();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Falha ao salvar.");
     } finally {
       setSaving(false);
     }
@@ -735,44 +822,63 @@ function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () 
   return (
     <>
       <div className="noc-modal-backdrop" onClick={onClose} />
-      <form className="noc-modal" role="dialog" aria-modal="true" aria-label="Configurar controladora UniFi" onSubmit={save}>
+      <form className="noc-modal" role="dialog" aria-modal="true" aria-label="Configurar controladoras UniFi" onSubmit={save}>
         <header>
-          <h3><Wifi size={20} /> Controladora UniFi</h3>
+          <h3><Wifi size={20} /> Controladoras UniFi</h3>
           <button type="button" aria-label="Fechar" onClick={onClose}><X size={18} /></button>
         </header>
         <p className="noc-modal-hint">
-          Use uma conta local "View Only" da controladora (sem 2FA e sem conta UI.com). A senha fica criptografada no servidor e não é exibida de novo.
+          Use uma conta local "View Only" em cada controladora (sem 2FA e sem conta UI.com). As senhas ficam criptografadas no servidor e não são exibidas de novo.
           {info?.source === "env" ? " Hoje vale o que está nas variáveis UNIFI_* do servidor; o que você salvar aqui passa a valer no lugar delas." : ""}
         </p>
-        <label>
-          <span>Endereço da controladora</span>
-          <input value={form.url} placeholder="https://10.0.0.56:8443" onChange={(event) => setForm({ ...form, url: event.target.value })} />
-        </label>
-        <div className="noc-modal-row">
-          <label>
-            <span>Usuário</span>
-            <input value={form.user} autoComplete="off" onChange={(event) => setForm({ ...form, user: event.target.value })} />
-          </label>
-          <label>
-            <span>Senha {info?.hasPassword ? "(deixe em branco para manter)" : ""}</span>
-            <input type="password" value={form.password} autoComplete="new-password" onChange={(event) => setForm({ ...form, password: event.target.value })} />
-          </label>
-        </div>
-        <label>
-          <span>Sites (vazio = todos; ex.: Paineiras, Associados)</span>
-          <input value={form.sites} onChange={(event) => setForm({ ...form, sites: event.target.value })} />
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={form.insecureTls} onChange={(event) => setForm({ ...form, insecureTls: event.target.checked })} />
-          <span>Aceitar certificado autoassinado (padrão das controladoras instaladas em servidor)</span>
-        </label>
-        {testing && !saving ? <p className="noc-modal-result">Testando conexão com a controladora...</p> : null}
-        {result && !testing ? <p className={`noc-modal-result ${result.ok ? "ok" : "bad"}`}>{result.ok ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {result.message}</p> : null}
+        {list.map((entry, index) => {
+          const result = results.find((item) => item.id === entry.id);
+          return (
+            <fieldset key={entry.id || `novo-${index}`} className="noc-ctrl">
+              <legend>
+                <input aria-label="Nome da controladora" value={entry.name} maxLength={60} onChange={(event) => update(index, { name: event.target.value })} />
+                <button type="button" aria-label={`Remover ${entry.name}`} title="Remover" onClick={() => setList((value) => value.filter((_, position) => position !== index))}>
+                  <X size={15} />
+                </button>
+              </legend>
+              <label>
+                <span>Endereço</span>
+                <input value={entry.url} placeholder="https://10.0.0.56:8443" onChange={(event) => update(index, { url: event.target.value })} />
+              </label>
+              <div className="noc-modal-row">
+                <label>
+                  <span>Usuário</span>
+                  <input value={entry.user} autoComplete="off" onChange={(event) => update(index, { user: event.target.value })} />
+                </label>
+                <label>
+                  <span>Senha {entry.hasPassword ? "(em branco = manter)" : ""}</span>
+                  <input type="password" value={entry.password} autoComplete="new-password" onChange={(event) => update(index, { password: event.target.value })} />
+                </label>
+              </div>
+              <div className="noc-modal-row">
+                <label>
+                  <span>Sites (vazio = todos)</span>
+                  <input value={entry.sites} onChange={(event) => update(index, { sites: event.target.value })} />
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={entry.insecureTls} onChange={(event) => update(index, { insecureTls: event.target.checked })} />
+                  <span>Aceitar certificado autoassinado</span>
+                </label>
+              </div>
+              {testing && entry.id ? <p className="noc-modal-result">Testando...</p> : null}
+              {!testing && result ? <p className={`noc-modal-result ${result.ok ? "ok" : "bad"}`}>{result.ok ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {result.message}</p> : null}
+            </fieldset>
+          );
+        })}
+        <button type="button" className="noc-ctrl-add" onClick={() => setList((value) => [...value, newController(value.length)])}>
+          + Adicionar controladora
+        </button>
+        {error ? <p className="noc-modal-result bad"><XCircle size={16} /> {error}</p> : null}
         {info?.updatedAt ? <small className="noc-modal-meta">Última alteração por {info.updatedBy} em {new Date(info.updatedAt).toLocaleString("pt-BR")}</small> : null}
         <footer>
           <button type="button" onClick={onClose}>Fechar</button>
-          {info && info.source !== "none" ? <button type="button" disabled={testing || saving} onClick={test}>Testar conexão atual</button> : null}
-          <button type="submit" className="primary" disabled={saving}>{saving ? "Testando conexão..." : "Salvar e testar"}</button>
+          {info?.controllers.length ? <button type="button" disabled={testing || saving} onClick={test}>Testar conexões</button> : null}
+          <button type="submit" className="primary" disabled={saving}>{saving ? "Salvando e testando..." : "Salvar e testar"}</button>
         </footer>
       </form>
     </>
@@ -960,12 +1066,10 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           <OverviewPage data={data} />
         ) : current.id === "internet" ? (
           <InternetPage data={data} />
-        ) : current.id === "switches" ? (
-          <GroupPage data={data} keys={["switches"]} />
         ) : current.id === "unifi" && data.unifi ? (
           <UnifiPage unifi={data.unifi} />
         ) : current.id === "antenas" ? (
-          <GroupPage data={data} keys={["antenas"]} />
+          hasUnifiAps(data) ? <UnifiApPage unifi={data.unifi!} /> : <GroupPage data={data} keys={["antenas"]} />
         ) : current.id === "servidores" ? (
           <ServersPage data={data} />
         ) : (

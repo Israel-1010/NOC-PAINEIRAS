@@ -3,7 +3,7 @@ import net from "node:net";
 import { adConfig, intuneConfig, isAdConfigured, isIntuneConfigured } from "./config";
 import { getAdStatus, getAdSummary } from "./adClient";
 import { getIntuneStatus, getIntuneSummary } from "./intuneClient";
-import { getUnifiOverview, isUnifiConfigured, unifiHost, unifiVersion } from "./unifiClient";
+import { isUnifiConfigured, testUnifi, unifiTargets } from "./unifiClient";
 import { getLinksLive, isZabbixConfigured, zabbixHost, zabbixVersion, zbx } from "./zabbixClient";
 
 export type DiagnosticStep = { name: string; ok: boolean; ms: number; detail: string };
@@ -132,16 +132,16 @@ export async function diagnoseUnifi(formatError: ErrorFormatter): Promise<Diagno
   const steps: DiagnosticStep[] = [];
   const done = (ok = steps.every((item) => item.ok)) => ({ id: "unifi", title: "Controladora UniFi", ok, steps });
   if (!(await step(steps, "Variáveis da UniFi", async () => {
-    if (!isUnifiConfigured()) throw new Error("Faltando no servidor: UNIFI_URL, UNIFI_USER e UNIFI_PASSWORD.");
-    return unifiHost();
+    if (!isUnifiConfigured()) throw new Error("Nenhuma controladora configurada (Painel NOC > botão Wi-Fi, ou variáveis UNIFI_*).");
+    return unifiTargets().map((target) => `${target.name} (${target.host})`).join(" · ");
   }, formatError))) return done(false);
-  const [host, portText] = unifiHost().split(":");
-  if (!(await step(steps, "Conexão de rede com a controladora", () => tcpCheck(host, Number(portText) || 443), formatError))) return done(false);
-  if (!(await step(steps, "Versão da controladora", async () => `UniFi Network ${await unifiVersion()}`, formatError))) return done(false);
-  await step(steps, "Login e leitura dos aparelhos", async () => {
-    const overview = await getUnifiOverview();
-    const online = (list: { online: boolean }[]) => `${list.filter((item) => item.online).length}/${list.length}`;
-    return `${overview.sites.length} site(s) · switches ${online(overview.switches)} · antenas ${online(overview.aps)} · ${overview.clients.total} clientes`;
-  }, formatError);
+  for (const target of unifiTargets()) {
+    const [host, portText] = target.host.split(":");
+    await step(steps, `Conexão de rede com a controladora ${target.name}`, () => tcpCheck(host, Number(portText) || 443), formatError);
+  }
+  const { results } = await testUnifi();
+  for (const result of results) {
+    steps.push({ name: `Login e leitura: ${result.name}`, ok: result.ok, ms: 0, detail: result.message });
+  }
   return done();
 }

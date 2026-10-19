@@ -11349,3 +11349,50 @@ thead .ac-person-col {
     grid-template-columns: 1fr;
   }
 }
+
+/* NOC: lista de controladoras UniFi no formulario */
+.noc-modal {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.noc-ctrl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+}
+
+.noc-ctrl legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+}
+
+.noc-ctrl legend input {
+  min-height: 30px !important;
+  width: 14em;
+  font-weight: 700;
+}
+
+.noc-ctrl legend button {
+  display: grid;
+  place-items: center;
+  min-height: 30px;
+  padding: 0 6px;
+}
+
+.noc-ctrl .noc-modal-row {
+  align-items: end;
+}
+
+.noc-ctrl label.check {
+  min-height: 38px;
+}
+
+.noc-ctrl-add {
+  justify-self: start;
+  border-style: dashed !important;
+}

@@ -32,6 +32,9 @@ function authToken() {
 }
 
 // O que fazer quando cada passo falha (texto para o gestor).
+// Passos com nome variavel (ex.: "Login e leitura: Antenas") usam a dica do prefixo.
+const hintFor = (name: string) => HINTS[name] || Object.entries(HINTS).find(([prefix]) => name.startsWith(prefix))?.[1] || "";
+
 const HINTS: Record<string, string> = {
   "Variáveis do AD": "Confira as variáveis do container no Portainer (Env) e faça o redeploy.",
   "DNS do controlador de domínio": "O servidor não resolve o nome do DC. Use o IP em AD_URL ou ajuste o DNS do host/container.",
@@ -46,10 +49,9 @@ const HINTS: Record<string, string> = {
   "Variáveis do Zabbix": "Adicione ZABBIX_URL e ZABBIX_API_TOKEN nas variáveis do container (ou ZABBIX_USER/ZABBIX_PASSWORD) e faça o redeploy.",
   "Conexão de rede com o Zabbix": "O servidor do portal não alcança o Zabbix. Libere a porta 80/443 até o servidor Zabbix no firewall.",
   "API do Zabbix": "Confira se ZABBIX_URL termina no caminho do frontend (ex.: http://10.0.3.73/zabbix).",
-  "Variáveis da UniFi": "Adicione UNIFI_URL (ex.: https://10.0.0.56:8443), UNIFI_USER e UNIFI_PASSWORD (conta local View Only) e faça o redeploy.",
+  "Variáveis da UniFi": "No Painel NOC, clique no botão Wi-Fi e cadastre a controladora (endereço, conta local View Only e senha).",
   "Conexão de rede com a controladora": "O servidor do portal não alcança a controladora. Libere a porta 8443 até ela no firewall.",
-  "Versão da controladora": "Confira UNIFI_URL. Com certificado autoassinado, defina UNIFI_TLS_REJECT_UNAUTHORIZED=false.",
-  "Login e leitura dos aparelhos": "Usuário ou senha recusados: use uma conta LOCAL da controladora (sem 2FA e sem conta UI.com).",
+  "Login e leitura": "Use uma conta LOCAL da controladora (sem 2FA e sem conta UI.com). Se a senha está certa, a conta pode estar bloqueada por excesso de tentativas: espere uns 15 min.",
   "Autenticação na API": "Token ou usuário/senha inválidos, ou usuário sem permissão de leitura nos hosts.",
   "Leitura dos links": "Confira se os hosts dos links estão num grupo com \"Link\" no nome, ou configure os links na tela Links de internet.",
 };
@@ -141,7 +143,7 @@ export function DiagnosticsDashboard() {
                   <div>
                     <strong>{item.name} <small>{item.ms}ms</small></strong>
                     <span>{item.detail}</span>
-                    {!item.ok && HINTS[item.name] ? <em>Como resolver: {HINTS[item.name]}</em> : null}
+                    {!item.ok && hintFor(item.name) ? <em>Como resolver: {hintFor(item.name)}</em> : null}
                   </div>
                 </li>
               ))}
