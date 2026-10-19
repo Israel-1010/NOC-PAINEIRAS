@@ -107,7 +107,8 @@ import {
   updateIp,
 } from "./ipInventoryClient";
 import { getTopology, saveTopology } from "./topologyStore";
-import { diagnoseAd, diagnoseIntune } from "./diagnostics";
+import { diagnoseAd, diagnoseIntune, diagnoseZabbix } from "./diagnostics";
+import { getLinkConfig, getLinksHistory, getLinksLive, listLinkCandidates, saveLinkConfig } from "./zabbixClient";
 import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
 import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
 import {
@@ -399,7 +400,7 @@ app.post("/api/access/claim", requireAuth, asyncRoute((req) => claimAdmin(req.re
 app.get("/api/diagnostics/integrations", requireAuth, requireAdmin, asyncRoute(async () => ({
   checkedAt: new Date().toISOString(),
   runtime: runtimeInfo(),
-  reports: await Promise.all([diagnoseAd(formatApiError), diagnoseIntune(formatApiError)]),
+  reports: await Promise.all([diagnoseAd(formatApiError), diagnoseIntune(formatApiError), diagnoseZabbix(formatApiError)]),
 })));
 app.put("/api/access/admins/:login", requireAuth, requireAdmin, asyncRoute((req) =>
   setPanelAdmin(String(req.params.login), Boolean(req.body?.admin), req.res?.locals.user)));
@@ -559,6 +560,14 @@ app.post("/api/topology/ping", asyncRoute(async (req) => {
   const items = await Promise.all(uniqueIps.map((ip) => pingHost(ip)));
   return { ok: true, items };
 }));
+
+/* ---------- Links de internet (Zabbix) ---------- */
+app.use("/api/links", requireAuth, requireViews(["links", "tv"], ["links"]));
+app.get("/api/links", asyncRoute(() => getLinksLive()));
+app.get("/api/links/history", asyncRoute((req) => getLinksHistory(String(req.query.range || "24h"))));
+app.get("/api/links/config", requireAdmin, asyncRoute(async () => ({ links: await getLinkConfig() })));
+app.put("/api/links/config", requireAdmin, asyncRoute((req) => saveLinkConfig(req.body)));
+app.get("/api/links/candidates", requireAdmin, asyncRoute(() => listLinkCandidates()));
 
 app.use("/api/projects", requireAuth, requireViews(["projects"]));
 

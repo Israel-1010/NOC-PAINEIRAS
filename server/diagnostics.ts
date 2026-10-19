@@ -3,6 +3,7 @@ import net from "node:net";
 import { adConfig, intuneConfig, isAdConfigured, isIntuneConfigured } from "./config";
 import { getAdStatus, getAdSummary } from "./adClient";
 import { getIntuneStatus, getIntuneSummary } from "./intuneClient";
+import { getLinksLive, isZabbixConfigured, zabbixHost, zabbixVersion, zbx } from "./zabbixClient";
 
 export type DiagnosticStep = { name: string; ok: boolean; ms: number; detail: string };
 export type DiagnosticReport = { id: string; title: string; ok: boolean; steps: DiagnosticStep[] };
@@ -105,4 +106,23 @@ export async function diagnoseIntune(formatError: ErrorFormatter): Promise<Diagn
   }, formatError);
 
   return { id: "intune", title: "Intune", ok: steps.every((item) => item.ok), steps };
+}
+
+export async function diagnoseZabbix(formatError: ErrorFormatter): Promise<DiagnosticReport> {
+  const steps: DiagnosticStep[] = [];
+  const done = (ok = steps.every((item) => item.ok)) => ({ id: "zabbix", title: "Zabbix (links de internet)", ok, steps });
+  if (!(await step(steps, "Variáveis do Zabbix", async () => {
+    if (!isZabbixConfigured()) throw new Error("Faltando no servidor: ZABBIX_URL e ZABBIX_API_TOKEN (ou ZABBIX_USER e ZABBIX_PASSWORD).");
+    return zabbixHost();
+  }, formatError))) return done(false);
+  const [host, portText] = zabbixHost().split(":");
+  if (!(await step(steps, "Conexão de rede com o Zabbix", () => tcpCheck(host, Number(portText) || 80), formatError))) return done(false);
+  if (!(await step(steps, "API do Zabbix", async () => `Versão ${await zabbixVersion()}`, formatError))) return done(false);
+  if (!(await step(steps, "Autenticação na API", async () => `${(await zbx<unknown[]>("host.get", { output: ["hostid"], limit: 1000 })).length} equipamentos visíveis`, formatError))) return done(false);
+  await step(steps, "Leitura dos links", async () => {
+    const live = await getLinksLive();
+    if (!live.links.length) throw new Error("Nenhum link encontrado (grupo de hosts com 'Link' no nome).");
+    return live.links.map((link) => `${link.name} ${(link.inBps / 1e6).toFixed(0)}/${(link.outBps / 1e6).toFixed(0)} Mbps`).join(" · ");
+  }, formatError);
+  return done();
 }

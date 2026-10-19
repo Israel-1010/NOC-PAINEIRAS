@@ -43,6 +43,11 @@ const HINTS: Record<string, string> = {
   "Conexão HTTPS com a Microsoft": "O servidor não sai para a internet na porta 443. Libere no firewall ou configure o proxy.",
   "Autenticação no Azure (token)": "Segredo do aplicativo expirado ou errado. Gere um novo segredo no Azure (App registrations) e atualize a variável.",
   "Leitura de dispositivos": "O aplicativo autentica, mas falta permissão no Graph (DeviceManagementManagedDevices.Read.All com consentimento de administrador).",
+  "Variáveis do Zabbix": "Adicione ZABBIX_URL e ZABBIX_API_TOKEN nas variáveis do container (ou ZABBIX_USER/ZABBIX_PASSWORD) e faça o redeploy.",
+  "Conexão de rede com o Zabbix": "O servidor do portal não alcança o Zabbix. Libere a porta 80/443 até o servidor Zabbix no firewall.",
+  "API do Zabbix": "Confira se ZABBIX_URL termina no caminho do frontend (ex.: http://10.0.3.73/zabbix).",
+  "Autenticação na API": "Token ou usuário/senha inválidos, ou usuário sem permissão de leitura nos hosts.",
+  "Leitura dos links": "Confira se os hosts dos links estão num grupo com \"Link\" no nome, ou configure os links na tela Links de internet.",
 };
 
 export function DiagnosticsDashboard() {

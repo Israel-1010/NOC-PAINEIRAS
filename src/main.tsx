@@ -64,6 +64,7 @@ import {
 import { ProjectsDashboard } from "./projects";
 import { AccessDashboard } from "./access";
 import { DiagnosticsDashboard } from "./diagnostics";
+import { LinksDashboard } from "./links";
 import "./styles.css";
 
 type Status = "online" | "warning" | "offline";
@@ -783,7 +784,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1211,6 +1212,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
     title: "Monitoramento",
     items: [
       { label: "Visão geral (TV)", icon: Tv, view: "tv" },
+      { label: "Links de internet", icon: Zap, view: "links" },
       { label: "Topologia", icon: Network, view: "topology" },
       { label: "SNMP", icon: Signal, view: "snmp" },
     ],
@@ -1252,7 +1254,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
   },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics";
+type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links";
 
 function statusLabel(status: Status) {
   return {
@@ -1273,6 +1275,7 @@ function viewEyebrow(view: View) {
   if (view === "wifi") return "Portal WiFi";
   if (view === "pop") return "Procedimento operacional padrao";
   if (view === "projects") return "Gestão de projetos da TI";
+  if (view === "links") return "Monitoramento via Zabbix";
   if (view === "access") return "Administração do portal";
   if (view === "diagnostics") return "Administração do portal";
   if (view === "topology") return "Mapa e monitoramento";
@@ -1290,6 +1293,7 @@ function viewTitle(view: View) {
   if (view === "wifi") return "WiFi";
   if (view === "pop") return "POP";
   if (view === "projects") return "Projetos";
+  if (view === "links") return "Links de internet";
   if (view === "access") return "Acessos";
   if (view === "diagnostics") return "Diagnóstico das integrações";
   if (view === "topology") return "Topologia";
@@ -2070,6 +2074,8 @@ function App() {
           <AccessDashboard />
         ) : activeView === "diagnostics" ? (
           <DiagnosticsDashboard />
+        ) : activeView === "links" ? (
+          <LinksDashboard isAdmin={Boolean(access?.isAdmin)} />
         ) : activeView === "tv" ? (
           <TvDashboard
             adSummary={adSummaryState}
@@ -2267,6 +2273,28 @@ function TvDashboard({
   ipDetails: IpDetails;
   onRefreshAd: () => Promise<void>;
 }) {
+  // Links ao vivo do Zabbix (velocidade real e % do contratado). Sem Zabbix, usa o inventario.
+  const [zabbixLinks, setZabbixLinks] = useState<TvZabbixLink[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await authFetch("/api/links");
+        if (!response.ok) return;
+        const payload = await parseApiPayload<{ links?: TvZabbixLink[] }>(response, {});
+        if (!cancelled) setZabbixLinks(payload.links || []);
+      } catch {
+        /* mantem o ultimo valor */
+      }
+    };
+    load();
+    const timer = window.setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const lockoutEventsTotal = adDetails.lockoutEvents.length;
   const intuneRiskDevices = intuneDetails.devices.filter((device) => intuneDeviceRiskReasons(device).length);
   const mobileDevices = intuneDetails.devices.filter((device) => !intuneDeviceIsWindows(device));
@@ -2371,8 +2399,12 @@ function TvDashboard({
         </article>
 
         <article className="panel tv-links-panel">
-          <PanelHeader icon={CircleGauge} title="Links de internet" meta={`${internetLinkGroups.length} circuitos`} />
-          <TvLinkGauges groups={internetLinkGroups} />
+          <PanelHeader
+            icon={CircleGauge}
+            title="Links de internet"
+            meta={zabbixLinks?.length ? `Zabbix ao vivo · ${zabbixLinks.filter((link) => link.online).length}/${zabbixLinks.length} online` : `${internetLinkGroups.length} circuitos`}
+          />
+          {zabbixLinks?.length ? <TvLiveLinkGauges links={zabbixLinks} /> : <TvLinkGauges groups={internetLinkGroups} />}
         </article>
       </section>
 
@@ -2469,6 +2501,54 @@ function TvAlertQueue({ items }: { items: TvAlertItem[] }) {
   );
 }
 
+type TvZabbixLink = {
+  id: string;
+  name: string;
+  contractedMbps: number;
+  inBps: number;
+  outBps: number;
+  usagePercent: number | null;
+  online: boolean;
+  latencyMs: number | null;
+  lossPercent: number | null;
+};
+
+function tvRate(bps: number) {
+  const mbps = bps / 1e6;
+  if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`;
+  return `${mbps >= 100 ? Math.round(mbps) : mbps.toFixed(1)} Mbps`;
+}
+
+function TvLiveLinkGauges({ links }: { links: TvZabbixLink[] }) {
+  return (
+    <div className="tv-link-gauges">
+      {links.map((link) => {
+        const usage = link.usagePercent ?? 0;
+        const fill = Math.min(100, Math.max(2, usage));
+        const tone = !link.online ? "danger critical" : usage >= 90 ? "danger" : usage >= 70 ? "warn" : "";
+        const contracted = link.contractedMbps >= 1000 ? `${link.contractedMbps / 1000} Gbps` : `${link.contractedMbps} Mbps`;
+        return (
+          <div
+            className={`tv-link-gauge ${tone}`}
+            key={link.id}
+            style={{ "--gauge-fill": `${fill / 2}%`, "--gauge-angle": `${180 + fill * 1.8}deg` } as React.CSSProperties}
+          >
+            <div className="tv-gauge-dial" aria-hidden="true">
+              <span />
+            </div>
+            <div className="tv-gauge-copy">
+              <strong>{link.name}</strong>
+              <b>{link.online ? `${usage >= 10 ? Math.round(usage) : usage.toFixed(1)}%` : "OFFLINE"}</b>
+              <span>↓ {tvRate(link.inBps)} · ↑ {tvRate(link.outBps)}</span>
+              <small>{link.contractedMbps ? `de ${contracted}` : ""}{link.latencyMs !== null ? ` · ${link.latencyMs} ms` : ""}{link.lossPercent ? ` · perda ${link.lossPercent}%` : ""}</small>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TvLinkGauges({ groups }: { groups: InternetLinkGroup[] }) {
   if (!groups.length) {
     return <EmptyState title="Links nao cadastrados" detail="Cadastre os circuitos em IPS > Links para a TV montar os velocimetros." />;
@@ -2488,7 +2568,7 @@ function TvLinkGauges({ groups }: { groups: InternetLinkGroup[] }) {
           <div
             className={`tv-link-gauge ${isDown ? "danger critical" : isWarn ? "warn" : ""}`}
             key={group.circuit.id}
-            style={{ "--gauge-fill": `${gaugeFill}%`, "--gauge-angle": `${-70 + gaugeFill * 1.4}deg` } as React.CSSProperties}
+            style={{ "--gauge-fill": `${gaugeFill / 2}%`, "--gauge-angle": `${180 + gaugeFill * 1.8}deg` } as React.CSSProperties}
           >
             <div className="tv-gauge-dial" aria-hidden="true">
               <span />
