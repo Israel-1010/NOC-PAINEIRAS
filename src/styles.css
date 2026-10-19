@@ -11604,3 +11604,21 @@ thead .ac-person-col {
 .noc-hw-grid.single {
   grid-template-columns: 1fr;
 }
+
+/* NOC: visao geral com 6 quadros (sem CFTV) e grupos pequenos (videowall) em 4 colunas */
+.noc-domains {
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  grid-auto-flow: column;
+}
+
+.noc-hostgrid.size-lg {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.noc-hostgrid.size-lg .noc-host strong {
+  font-size: 1.35em;
+}
+
+.noc-hostgrid.size-lg .noc-host small {
+  font-size: 1.05em;
+}

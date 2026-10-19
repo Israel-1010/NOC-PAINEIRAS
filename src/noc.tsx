@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
-  Camera,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -180,7 +179,7 @@ const FIXED_PAGES: NocPage[] = [
   { id: "internet", title: "Internet e Firewall", icon: Globe },
   { id: "antenas", title: "Antenas (ping do Zabbix)", icon: Radio },
   { id: "servidores", title: "Servidores e Datacenter", icon: Server },
-  { id: "cftv", title: "CFTV e Videowall", icon: Camera },
+  { id: "videowall", title: "Videowall", icon: MonitorPlay },
 ];
 
 function buildPages(data: NocData | null): NocPage[] {
@@ -333,7 +332,7 @@ function translateProblem(name: string) {
 
 function HostGrid({ group, compact }: { group: NocGroup; compact?: boolean }) {
   const allDown = group.total > 3 && group.down === group.total;
-  const size = group.total > 60 ? "xs" : group.total > 36 ? "sm" : "md";
+  const size = group.total > 60 ? "xs" : group.total > 36 ? "sm" : group.total <= 12 ? "lg" : "md";
   return (
     <div className="noc-hostgrid-wrap">
       {allDown ? (
@@ -461,7 +460,7 @@ function OverviewPage({ data }: { data: NocData }) {
           sub={
             fw
               ? fw.security
-                ? `CPU · ${fw.security.totals.blocked.toLocaleString("pt-BR")} ataques bloqueados em 24 h`
+                ? `CPU · ${fw.security.totals.blocked.toLocaleString("pt-BR")} bloqueios em 24 h`
                 : `CPU · mem ${pct(fw.memory)} · ${(fw.sessions ?? 0).toLocaleString("pt-BR")} sessões`
               : "Sem FortiGate no Zabbix"
           }
@@ -469,7 +468,6 @@ function OverviewPage({ data }: { data: NocData }) {
         {unifiTile("switches", "switches", "Switches", <Network size={18} />)}
         {unifiTile("aps", "antenas", "Antenas UniFi", <Radio size={18} />)}
         {groupTile("servidores", "Servidores", <Server size={18} />, data.hardware.length ? `hardware Dell ${data.hardware.length - hwBad}/${data.hardware.length} ok` : "")}
-        {groupTile("cftv", "CFTV", <Camera size={18} />)}
         {groupTile("videowall", "Videowall", <MonitorPlay size={18} />)}
       </div>
 
@@ -1285,7 +1283,7 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
         ) : current.id === "servidores" ? (
           <ServersPage data={data} />
         ) : (
-          <GroupPage data={data} keys={["cftv", "videowall"]} />
+          <GroupPage data={data} keys={["videowall"]} />
         )}
       </main>
 
