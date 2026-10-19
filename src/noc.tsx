@@ -663,6 +663,7 @@ function UnifiPage({ unifi }: { unifi: Unifi }) {
 
 type UnifiSettingsData = {
   source: "env" | "panel" | "none";
+  envConfigured: boolean;
   url: string;
   user: string;
   hasPassword: boolean;
@@ -678,6 +679,20 @@ function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () 
   const [info, setInfo] = useState<UnifiSettingsData | null>(null);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  async function test() {
+    setTesting(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/unifi/test`, { method: "POST", headers: headersFor() });
+      const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string };
+      setResult({ ok: Boolean(response.ok && payload.ok), message: payload.message || `Servidor respondeu ${response.status}` });
+    } catch (error) {
+      setResult({ ok: false, message: error instanceof Error ? error.message : "Falha ao testar." });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   useEffect(() => {
     fetch(`${API_BASE}/api/unifi/settings`, { headers: headersFor() })
@@ -689,6 +704,7 @@ function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () 
       .then((data) => {
         setInfo(data);
         setForm({ url: data.url || "https://10.0.0.56:8443", user: data.user, password: "", sites: data.sites, insecureTls: data.source === "none" ? true : data.insecureTls });
+        if (data.source !== "none") test(); // mostra ja se a conexao atual funciona e, se nao, o motivo
       })
       .catch((error) => setResult({ ok: false, message: error instanceof Error ? error.message : "Falha ao carregar." }));
   }, []);
@@ -716,7 +732,6 @@ function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () 
     }
   }
 
-  const locked = info?.source === "env";
   return (
     <>
       <div className="noc-modal-backdrop" onClick={onClose} />
@@ -726,37 +741,38 @@ function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () 
           <button type="button" aria-label="Fechar" onClick={onClose}><X size={18} /></button>
         </header>
         <p className="noc-modal-hint">
-          {locked
-            ? "Configurada por variáveis UNIFI_* no servidor. Para mudar, altere no Portainer."
-            : "Use uma conta local \"View Only\" da controladora (sem 2FA e sem conta UI.com). A senha fica criptografada no servidor e não é exibida de novo."}
+          Use uma conta local "View Only" da controladora (sem 2FA e sem conta UI.com). A senha fica criptografada no servidor e não é exibida de novo.
+          {info?.source === "env" ? " Hoje vale o que está nas variáveis UNIFI_* do servidor; o que você salvar aqui passa a valer no lugar delas." : ""}
         </p>
         <label>
           <span>Endereço da controladora</span>
-          <input value={form.url} disabled={locked} placeholder="https://10.0.0.56:8443" onChange={(event) => setForm({ ...form, url: event.target.value })} />
+          <input value={form.url} placeholder="https://10.0.0.56:8443" onChange={(event) => setForm({ ...form, url: event.target.value })} />
         </label>
         <div className="noc-modal-row">
           <label>
             <span>Usuário</span>
-            <input value={form.user} disabled={locked} autoComplete="off" onChange={(event) => setForm({ ...form, user: event.target.value })} />
+            <input value={form.user} autoComplete="off" onChange={(event) => setForm({ ...form, user: event.target.value })} />
           </label>
           <label>
             <span>Senha {info?.hasPassword ? "(deixe em branco para manter)" : ""}</span>
-            <input type="password" value={form.password} disabled={locked} autoComplete="new-password" onChange={(event) => setForm({ ...form, password: event.target.value })} />
+            <input type="password" value={form.password} autoComplete="new-password" onChange={(event) => setForm({ ...form, password: event.target.value })} />
           </label>
         </div>
         <label>
           <span>Sites (vazio = todos; ex.: Paineiras, Associados)</span>
-          <input value={form.sites} disabled={locked} onChange={(event) => setForm({ ...form, sites: event.target.value })} />
+          <input value={form.sites} onChange={(event) => setForm({ ...form, sites: event.target.value })} />
         </label>
         <label className="check">
-          <input type="checkbox" checked={form.insecureTls} disabled={locked} onChange={(event) => setForm({ ...form, insecureTls: event.target.checked })} />
+          <input type="checkbox" checked={form.insecureTls} onChange={(event) => setForm({ ...form, insecureTls: event.target.checked })} />
           <span>Aceitar certificado autoassinado (padrão das controladoras instaladas em servidor)</span>
         </label>
-        {result ? <p className={`noc-modal-result ${result.ok ? "ok" : "bad"}`}>{result.ok ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {result.message}</p> : null}
+        {testing && !saving ? <p className="noc-modal-result">Testando conexão com a controladora...</p> : null}
+        {result && !testing ? <p className={`noc-modal-result ${result.ok ? "ok" : "bad"}`}>{result.ok ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {result.message}</p> : null}
         {info?.updatedAt ? <small className="noc-modal-meta">Última alteração por {info.updatedBy} em {new Date(info.updatedAt).toLocaleString("pt-BR")}</small> : null}
         <footer>
           <button type="button" onClick={onClose}>Fechar</button>
-          {!locked ? <button type="submit" className="primary" disabled={saving}>{saving ? "Testando conexão..." : "Salvar e testar"}</button> : null}
+          {info && info.source !== "none" ? <button type="button" disabled={testing || saving} onClick={test}>Testar conexão atual</button> : null}
+          <button type="submit" className="primary" disabled={saving}>{saving ? "Testando conexão..." : "Salvar e testar"}</button>
         </footer>
       </form>
     </>

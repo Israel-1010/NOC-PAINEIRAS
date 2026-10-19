@@ -9,15 +9,15 @@ import { sessionSecret } from "./config";
 
 // Conector somente leitura da controladora UniFi Network instalada em servidor (testado com 8.0).
 // Um unico login por processo; os dados ficam em cache por 30 s para nao pesar a controladora.
-// Configuracao: variaveis UNIFI_* (tem prioridade) ou o formulario do Painel NOC, salvo em data/unifi.json
-// com a senha criptografada (AES-256-GCM, chave derivada do APP_SESSION_SECRET).
+// Configuracao: formulario do Painel NOC (tem prioridade), salvo em data/unifi.json com a senha
+// criptografada (AES-256-GCM, chave derivada do APP_SESSION_SECRET), ou as variaveis UNIFI_*.
 
 type UnifiConfig = { url: string; user: string; password: string; sites: string[]; rejectUnauthorized: boolean };
 type StoredConfig = { url: string; user: string; passwordEnc: string; sites: string[]; insecureTls: boolean; updatedAt: string; updatedBy: string };
 
 const dataDir = path.resolve(process.cwd(), "data");
 const storePath = path.join(dataDir, "unifi.json");
-const fromEnv = Boolean(process.env.UNIFI_URL);
+const envConfigured = Boolean(process.env.UNIFI_URL);
 const key = crypto.createHash("sha256").update(`unifi:${sessionSecret}`).digest();
 
 function encrypt(text: string) {
@@ -48,28 +48,38 @@ function loadStored(): StoredConfig | null {
   }
 }
 
-function resolveConfig(): UnifiConfig {
-  if (fromEnv) {
-    return {
-      url: (process.env.UNIFI_URL || "").replace(/\/$/, ""),
-      user: process.env.UNIFI_USER || "",
-      password: process.env.UNIFI_PASSWORD || "",
-      sites: splitSites(process.env.UNIFI_SITES || ""),
-      // Controladoras costumam usar certificado autoassinado; desligue a validacao so se for o caso.
-      rejectUnauthorized: process.env.UNIFI_TLS_REJECT_UNAUTHORIZED !== "false",
-    };
-  }
-  const stored = loadStored();
+function envConfig(): UnifiConfig {
   return {
-    url: (stored?.url || "").replace(/\/$/, ""),
-    user: stored?.user || "",
-    password: stored?.passwordEnc ? decrypt(stored.passwordEnc) : "",
-    sites: stored?.sites || [],
-    rejectUnauthorized: !stored?.insecureTls,
+    url: (process.env.UNIFI_URL || "").replace(/\/$/, ""),
+    user: process.env.UNIFI_USER || "",
+    password: process.env.UNIFI_PASSWORD || "",
+    sites: splitSites(process.env.UNIFI_SITES || ""),
+    // Controladoras costumam usar certificado autoassinado; desligue a validacao so se for o caso.
+    rejectUnauthorized: process.env.UNIFI_TLS_REJECT_UNAUTHORIZED !== "false",
   };
 }
 
-let config = resolveConfig();
+function resolveConfig(): { source: "panel" | "env" | "none"; value: UnifiConfig } {
+  const stored = loadStored();
+  if (stored?.url) {
+    return {
+      source: "panel",
+      value: {
+        url: stored.url.replace(/\/$/, ""),
+        user: stored.user || "",
+        // Sem senha salva no painel, aproveita a do servidor (UNIFI_PASSWORD).
+        password: stored.passwordEnc ? decrypt(stored.passwordEnc) : process.env.UNIFI_PASSWORD || "",
+        sites: stored.sites || [],
+        rejectUnauthorized: !stored.insecureTls,
+      },
+    };
+  }
+  if (envConfigured) return { source: "env", value: envConfig() };
+  return { source: "none", value: { url: "", user: "", password: "", sites: [], rejectUnauthorized: true } };
+}
+
+let resolved = resolveConfig();
+let config = resolved.value;
 
 export function isUnifiConfigured() {
   return Boolean(config.url && config.user && config.password);
@@ -85,21 +95,43 @@ export function unifiHost() {
 
 // Para o formulario: nunca devolve a senha.
 export function getUnifiSettings() {
-  const stored = loadStored();
+  const stored = resolved.source === "panel" ? loadStored() : null;
   return {
-    source: fromEnv ? "env" : stored ? "panel" : "none",
+    source: resolved.source,
+    envConfigured,
     url: config.url,
     user: config.user,
     hasPassword: Boolean(config.password),
     sites: config.sites.join(", "),
     insecureTls: !config.rejectUnauthorized,
-    updatedAt: fromEnv ? "" : stored?.updatedAt || "",
-    updatedBy: fromEnv ? "" : stored?.updatedBy || "",
+    updatedAt: stored?.updatedAt || "",
+    updatedBy: stored?.updatedBy || "",
   };
 }
 
+// Testa a configuracao atual sem cache e devolve o motivo exato da falha.
+export async function testUnifi() {
+  if (!isUnifiConfigured()) return { ok: false, message: "Preencha endereço, usuário e senha." };
+  cookie = "";
+  cache = null;
+  try {
+    const overview = await getUnifiOverview();
+    return { ok: true, message: `Conectado: UniFi ${overview.version} · ${overview.switches.length} switches · ${overview.aps.length} antenas · ${overview.clients.total} clientes` };
+  } catch (error) {
+    return { ok: false, message: describeError(error) };
+  }
+}
+
+function describeError(error: unknown) {
+  const err = error as NodeJS.ErrnoException & { cause?: NodeJS.ErrnoException };
+  const code = err?.code || err?.cause?.code || "";
+  if (/ECONNREFUSED/.test(code)) return `A controladora recusou a conexão em ${unifiHost()} (porta fechada ou serviço parado).`;
+  if (/ETIMEDOUT|ENETUNREACH|EHOSTUNREACH/.test(code) || /tempo esgotado/i.test(err?.message || "")) return `Sem resposta de ${unifiHost()}: o servidor do portal não alcança a controladora (rota/firewall).`;
+  if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY/i.test(code)) return "Certificado da controladora não confiável: marque \"Aceitar certificado autoassinado\".";
+  return err instanceof Error ? err.message : "Falha ao conectar.";
+}
+
 export async function saveUnifiSettings(body: Record<string, unknown>, by: AuthUser) {
-  if (fromEnv) throw new Error("A UniFi esta configurada por variaveis UNIFI_* no servidor; altere por la.");
   const url = String(body.url || "").trim().replace(/\/$/, "");
   if (url && !/^https?:\/\/[^/\s]+$/i.test(url)) throw new Error("Endereco invalido. Exemplo: https://10.0.0.56:8443");
   const user = String(body.user || "").trim().slice(0, 120);
@@ -118,19 +150,9 @@ export async function saveUnifiSettings(body: Record<string, unknown>, by: AuthU
   const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
   await fs.writeFile(tempPath, `${JSON.stringify(stored, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   await fs.rename(tempPath, storePath);
-  config = resolveConfig();
-  cookie = "";
-  cache = null;
-  if (!isUnifiConfigured()) return { ...getUnifiSettings(), test: { ok: false, message: "Preencha endereco, usuario e senha." } };
-  try {
-    const overview = await getUnifiOverview();
-    return {
-      ...getUnifiSettings(),
-      test: { ok: true, message: `Conectado: UniFi ${overview.version} · ${overview.switches.length} switches · ${overview.aps.length} antenas · ${overview.clients.total} clientes` },
-    };
-  } catch (error) {
-    return { ...getUnifiSettings(), test: { ok: false, message: error instanceof Error ? error.message : "Falha ao conectar." } };
-  }
+  resolved = resolveConfig();
+  config = resolved.value;
+  return { ...getUnifiSettings(), test: await testUnifi() };
 }
 
 let cookie = "";
