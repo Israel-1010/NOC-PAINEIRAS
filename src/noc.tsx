@@ -430,6 +430,8 @@ function OverviewPage({ data }: { data: NocData }) {
   const unifiTile = (kind: "aps" | "switches", zabbixKey: string, title: string, icon: React.ReactNode) => {
     const devices: { online: boolean }[] = okControllers.flatMap((controller): { online: boolean }[] => controller[kind]);
     const zabbixTotal = group(zabbixKey)?.total || 0;
+    // Sem UniFi e sem hosts no Zabbix (ex.: so ping ligado e grupo vazio): nao mostra o quadro.
+    if (!devices.length && !zabbixTotal) return null;
     if (!devices.length || devices.length < zabbixTotal * 0.6) return groupTile(zabbixKey, title, icon);
     const up = devices.filter((device) => device.online).length;
     const unifiGroup: NocGroup = { key: zabbixKey, title, total: devices.length, up, down: devices.length - up, unknown: 0, hosts: [] };

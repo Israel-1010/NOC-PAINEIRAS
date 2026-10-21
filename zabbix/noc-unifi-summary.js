@@ -110,6 +110,7 @@ try {
           id: dev.mac, name: dev.name || dev.mac, model: dev.model || '', site: title, online: dev.state === 1,
           cpu: num(stats.cpu), mem: num(stats.mem), clients: byAp[dev.mac] !== undefined ? byAp[dev.mac] : (dev.num_sta || 0), sat: num(dev.satisfaction),
           tx: bps(down), rx: bps(upl), uptime: dev.uptime || null, ver: dev.version || '', upg: !!dev.upgradable,
+          ip: dev.ip || '', link: link.type || '',
           radios: (dev.radio_table_stats || []).map(function (r) { return { band: band(r.radio), channel: r.channel === undefined ? null : r.channel, utilization: num(r.cu_total), clients: r.num_sta || 0 }; })
         });
       } else if (dev.type === 'usw') {
