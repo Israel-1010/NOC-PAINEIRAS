@@ -63,7 +63,20 @@ function bps(v) {
   return typeof n === 'number' && isFinite(n) ? Math.round(n * 8) : null;
 }
 
-var out = { v: 2, at: new Date().toISOString(), version: '', sites: [], aps: [], switches: [], wired: 0, wireless: 0, guests: 0, ssid: {}, bands: {}, sat: null, alarms: [] };
+var out = { v: 3, at: new Date().toISOString(), version: '', sites: [], aps: [], switches: [], wired: 0, wireless: 0, guests: 0, ssid: {}, bands: {}, sat: null, alarms: [], events: [] };
+
+// Eventos das ultimas 24 h (log da controladora). Eventos de cliente (WU/WG/LU = usuario conectou/saiu)
+// sao milhares por dia: ficam de fora; vale o que e de infraestrutura (antena, switch, gateway).
+function recentEvents(siteName) {
+  var list = [];
+  // Consulta leve (100 eventos): a controladora da CPM68 se mostrou instavel.
+  try { list = call('POST', '/api/s/' + siteName + '/stat/event', { _limit: 100, within: 24, _sort: '-time' }); }
+  catch (e) {
+    try { list = call('GET', '/api/s/' + siteName + '/stat/event?within=24&_limit=100'); } catch (e2) { list = []; }
+  }
+  // Fora tambem EVT_AD_ (login de administrador): o proprio login deste item apareceria a cada execucao.
+  return list.filter(function (ev) { return !/^EVT_(WU|WG|LU|AD)_/.test(String(ev.key || '')); });
+}
 var satSum = 0, satCount = 0;
 try {
   var st = new HttpRequest();
@@ -126,10 +139,19 @@ try {
       }
     }
 
+    // Alarmes abertos: os mais recentes primeiro (a API devolve os mais antigos antes).
+    alarms.sort(function (x, y) { return (y.time || 0) - (x.time || 0); });
     for (var a = 0; a < alarms.length && a < 20; a++) {
       out.alarms.push({ id: alarms[a]._id, site: title, time: alarms[a].datetime || '', msg: alarms[a].msg || alarms[a].key || 'Alarme' });
     }
+
+    var evs = recentEvents(site.name);
+    for (var v = 0; v < evs.length; v++) {
+      out.events.push({ t: evs[v].datetime || (evs[v].time ? new Date(evs[v].time).toISOString() : ''), k: evs[v].key || '', m: evs[v].msg || '', site: title });
+    }
   }
+  out.events.sort(function (x, y) { return x.t < y.t ? 1 : x.t > y.t ? -1 : 0; });
+  out.events = out.events.slice(0, 60);
 } finally {
   try { call('POST', '/api/logout'); } catch (e) { /* sessao expira sozinha */ }
 }
@@ -139,6 +161,7 @@ out.sat = satCount ? Math.round(satSum / satCount) : null;
 var text = JSON.stringify(out);
 if (text.length > 60000) {
   out.alarms = [];
+  out.events = out.events.slice(0, 20);
   for (var x = 0; x < out.aps.length; x++) { delete out.aps[x].ver; delete out.aps[x].model; }
   for (var y = 0; y < out.switches.length; y++) { delete out.switches[y].ver; delete out.switches[y].model; }
   text = JSON.stringify(out);

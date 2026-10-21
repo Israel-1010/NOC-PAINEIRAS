@@ -12058,3 +12058,31 @@ thead .ac-person-col {
 .noc-docker-env-grid .noc-sw small {
   font-size: 0.74em;
 }
+
+/* NOC: log da controladora UniFi */
+.noc-unifi-log li {
+  justify-content: flex-start !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-left-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+.noc-unifi-log li.drop {
+  border-left-color: var(--noc-critical) !important;
+  background: rgba(240, 68, 56, 0.08) !important;
+}
+
+.noc-unifi-log li.back {
+  border-left-color: var(--noc-good) !important;
+}
+
+.noc-unifi-log li time {
+  flex: none;
+  min-width: 3.4em;
+  font-variant-numeric: tabular-nums;
+}
+
+.noc-unifi-log li span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

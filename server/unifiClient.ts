@@ -403,6 +403,10 @@ export type UnifiAp = {
 };
 
 type Alarm = { id: string; site: string; time: string; message: string };
+// Log da controladora (so infraestrutura: antena, switch, gateway; eventos de cliente ficam de fora).
+type UnifiEvent = { time: string; key: string; message: string; site: string };
+// EVT_AD_ = login de administrador (o proprio portal/Zabbix ao ler a controladora): fica de fora.
+const isInfraEvent = (key: string) => !/^EVT_(WU|WG|LU|AD)_/.test(key);
 
 // Tudo o que uma controladora entrega (direto ou via Zabbix).
 type ControllerData = {
@@ -411,6 +415,7 @@ type ControllerData = {
   switches: UnifiSwitch[];
   aps: UnifiAp[];
   alarms: Alarm[];
+  events: UnifiEvent[];
   wired: number;
   wireless: number;
   guests: number;
@@ -440,6 +445,7 @@ export type UnifiControllerView = {
   };
   traffic: { txBps: number; rxBps: number };
   alarms: Alarm[];
+  events: UnifiEvent[];
 };
 
 export type UnifiOverview = {
@@ -482,24 +488,29 @@ async function loadController(controller: Controller): Promise<ControllerData> {
   const [loaded, version] = await Promise.all([
     Promise.all(
       sites.map(async (site) => {
-        const [devices, clients, alarms] = await Promise.all([
+        const [devices, clients, alarms, events] = await Promise.all([
           controller.api<RawDevice>(`/api/s/${site.name}/stat/device`),
           controller.api<RawClient>(`/api/s/${site.name}/stat/sta`),
           controller.api<RawAlarm>(`/api/s/${site.name}/list/alarm?archived=false`).catch(() => [] as RawAlarm[]),
+          controller.api<{ key?: string; msg?: string; time?: number; datetime?: string }>(`/api/s/${site.name}/stat/event?within=24&_limit=100`).catch(() => []),
         ]);
-        return { site, devices, clients, alarms };
+        return { site, devices, clients, alarms, events };
       }),
     ),
     controller.version().catch(() => ""),
   ]);
 
   const name = controller.cfg.name;
-  const data: ControllerData = { version, sites: sites.map((site) => ({ name: site.name, title: site.desc || site.name })), switches: [], aps: [], alarms: [], wired: 0, wireless: 0, guests: 0, ssid: new Map(), bands: new Map(), satisfaction: null };
+  const data: ControllerData = { version, sites: sites.map((site) => ({ name: site.name, title: site.desc || site.name })), switches: [], aps: [], alarms: [], events: [], wired: 0, wireless: 0, guests: 0, ssid: new Map(), bands: new Map(), satisfaction: null };
   let satisfactionSum = 0;
   let satisfactionCount = 0;
 
-  for (const { site, devices, clients, alarms } of loaded) {
+  for (const { site, devices, clients, alarms, events } of loaded) {
     const title = site.desc || site.name;
+    for (const event of events) {
+      if (!isInfraEvent(event.key || "")) continue;
+      data.events.push({ time: event.datetime || (event.time ? new Date(event.time).toISOString() : ""), key: event.key || "", message: event.msg || "", site: title });
+    }
     const clientsByAp = new Map<string, number>();
     for (const client of clients) {
       if (client.is_guest) data.guests += 1;
@@ -628,6 +639,7 @@ type ZabbixSummary = {
   bands?: Record<string, number>;
   sat?: number | null;
   alarms?: { id: string; site: string; time: string; msg: string }[];
+  events?: { t: string; k: string; m: string; site: string }[];
 };
 type ZabbixSource = { id: string; name: string; ok: boolean; message: string; data: ControllerData | null };
 
@@ -701,6 +713,7 @@ async function loadFromZabbix(): Promise<ZabbixSource[]> {
         upgradable: Boolean(ap.upg),
       })),
       alarms: (summary.alarms || []).map((alarm) => ({ id: `${base.id}:${alarm.id}`, site: alarm.site, time: alarm.time, message: alarm.msg })),
+      events: (summary.events || []).filter((event) => isInfraEvent(event.k)).map((event) => ({ time: event.t, key: event.k, message: event.m, site: event.site })),
       wired: summary.wired || 0,
       wireless: summary.wireless || 0,
       guests: summary.guests || 0,
@@ -749,6 +762,7 @@ function toView(id: string, name: string, via: UnifiControllerView["via"], data:
     // Nos APs, "tx" e o que a antena envia aos clientes (download deles).
     traffic: data ? { txBps: sum(data.aps, "txBps"), rxBps: sum(data.aps, "rxBps") } : { txBps: 0, rxBps: 0 },
     alarms: data ? recentAlarms(data.alarms) : [],
+    events: data ? [...data.events].sort((a, b) => b.time.localeCompare(a.time)).slice(0, 60) : [],
   };
 }
 

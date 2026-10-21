@@ -148,6 +148,7 @@ type UnifiController = {
   };
   traffic: { txBps: number; rxBps: number };
   alarms: UnifiAlarm[];
+  events: { time: string; key: string; message: string; site: string }[];
 };
 type Unifi = {
   version: string;
@@ -1019,6 +1020,31 @@ function SwitchTile({ sw }: { sw: UnifiSwitch }) {
   );
 }
 
+// Log da controladora em portugues: "AP[UniFi_Lutas] was disconnected" -> "Antena UniFi_Lutas desconectou".
+function translateUnifiEvent(message: string, names?: Map<string, string>) {
+  const device = /^(AP|Switch|Gateway|UDM|USG|USW|UAP)\[(.+?)\]\s*(.*)$/i.exec(message);
+  if (!device) return message;
+  // A controladora as vezes identifica o aparelho pelo MAC: troca pelo nome.
+  if (names && /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(device[2])) device[2] = names.get(device[2].toLowerCase()) || device[2];
+  const kind = /^(AP|UAP)$/i.test(device[1]) ? "Antena" : /^(Switch|USW)$/i.test(device[1]) ? "Switch" : "Gateway";
+  const action = device[3]
+    .replace(/^was disconnected.*$/i, "desconectou")
+    .replace(/^was connected.*$/i, "voltou")
+    .replace(/^was restarted.*$/i, "reiniciou")
+    .replace(/^was upgraded.*$/i, "atualizou o firmware")
+    .replace(/^was adopted.*$/i, "foi adotada")
+    .replace(/^was deleted.*$/i, "foi removida")
+    .replace(/^lost contact.*$/i, "perdeu contato")
+    .replace(/^detected.*$/i, "detectou uma anomalia");
+  return `${kind} ${device[2]} ${action}`;
+}
+const isDropEvent = (event: { key: string; message: string }) => /Lost_Contact|Disconnected/i.test(event.key) || /was disconnected/i.test(event.message);
+const eventTime = (iso: string) => {
+  const date = new Date(iso);
+  const sameDay = date.toDateString() === new Date().toDateString();
+  return date.toLocaleString("pt-BR", sameDay ? { hour: "2-digit", minute: "2-digit" } : { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+};
+
 const gridSize = (count: number) => (count > 60 ? "size-xxs" : count > 40 ? "size-xs" : count > 20 ? "size-sm" : "size-md");
 
 function ControllerPage({ controller }: { controller: UnifiController }) {
@@ -1049,6 +1075,9 @@ function ControllerPage({ controller }: { controller: UnifiController }) {
   const apTone = onlineTone(apsOnline, controller.aps.length);
   const swTone = onlineTone(swOnline, controller.switches.length);
   const satTone = satisfactionTone(controller.clients.satisfaction);
+  const drops = controller.events.filter(isDropEvent).length;
+  // MAC -> nome (o id do aparelho termina no MAC, com ou sem prefixo da controladora).
+  const deviceNames = new Map<string, string>([...controller.aps, ...controller.switches].map((device) => [device.id.slice(-17).toLowerCase(), device.name]));
 
   return (
     <div className="noc-page noc-unifi">
@@ -1078,10 +1107,10 @@ function ControllerPage({ controller }: { controller: UnifiController }) {
           <strong>{controller.clients.satisfaction === null ? "—" : `${controller.clients.satisfaction}%`}</strong>
           <small>satisfação média dos clientes</small>
         </div>
-        <div className={controller.alarms.length || upgrades ? "tone-warning" : "tone-good"}>
-          <span>Alarmes (7 dias)</span>
-          <strong>{controller.alarms.length}</strong>
-          <small>{upgrades ? `${upgrades} com firmware novo` : `UniFi ${controller.version}`}</small>
+        <div className={drops ? "tone-warning" : "tone-good"}>
+          <span>Quedas em 24 h</span>
+          <strong>{drops}</strong>
+          <small>{controller.alarms.length ? `${controller.alarms.length} alarmes abertos` : upgrades ? `${upgrades} com firmware novo` : `UniFi ${controller.version}`}</small>
         </div>
       </div>
 
@@ -1157,9 +1186,18 @@ function ControllerPage({ controller }: { controller: UnifiController }) {
               <p className="noc-all-clear small"><ShieldCheck size={20} /> Nenhum canal congestionado</p>
             )}
           </section>
-          <section className="noc-card noc-unifi-alarms">
-            <h3><AlertTriangle size={20} /> Alarmes recentes</h3>
-            {controller.alarms.length ? (
+          <section className="noc-card noc-unifi-alarms noc-unifi-log">
+            <h3><AlertTriangle size={20} /> Log da controladora <small>últimas 24 h</small></h3>
+            {controller.events.length ? (
+              <ol>
+                {controller.events.slice(0, 8).map((event, index) => (
+                  <li key={`${event.time}-${index}`} className={isDropEvent(event) ? "drop" : /voltou|connected/i.test(event.message) ? "back" : ""}>
+                    <time>{eventTime(event.time)}</time>
+                    <span>{translateUnifiEvent(event.message, deviceNames)}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : controller.alarms.length ? (
               <ol>
                 {controller.alarms.slice(0, 4).map((alarm) => (
                   <li key={alarm.id}>
@@ -1169,7 +1207,7 @@ function ControllerPage({ controller }: { controller: UnifiController }) {
                 ))}
               </ol>
             ) : (
-              <p className="noc-all-clear small"><ShieldCheck size={20} /> Nenhum alarme nos últimos 7 dias</p>
+              <p className="noc-all-clear small"><ShieldCheck size={20} /> Nenhum evento nas últimas 24 h</p>
             )}
           </section>
         </div>
