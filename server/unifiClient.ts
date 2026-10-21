@@ -112,6 +112,12 @@ class Controller {
   cookie = "";
   blockedUntil = 0;
   lastLoginError = "";
+  // Reaproveita conexoes (keep-alive): abrir uma conexao nova por consulta fez a controladora da CPM68
+  // bloquear o IP de origem por alguns minutos.
+  private readonly agents = {
+    https: new https.Agent({ keepAlive: true, maxSockets: 2 }),
+    http: new http.Agent({ keepAlive: true, maxSockets: 2 }),
+  };
 
   constructor(readonly cfg: ControllerConfig) {}
 
@@ -136,6 +142,7 @@ class Controller {
         url,
         {
           method,
+          agent: url.protocol === "http:" ? this.agents.http : this.agents.https,
           rejectUnauthorized: this.cfg.rejectUnauthorized,
           timeout: 15000,
           headers: {

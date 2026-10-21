@@ -1,4 +1,4 @@
-// Item Script do Zabbix "NOC: resumo da controladora UniFi" (chave noc.unifi.summary, texto, a cada 30 s).
+// Item Script do Zabbix "NOC: resumo da controladora UniFi" (chave noc.unifi.summary, texto, a cada 1 min).
 // Usado pelo Painel NOC para controladoras que o portal nao alcanca (ex.: 192.168.2.10 no host CPM68).
 // Parametros do item: url, user, password, sites -> macros NOC.UNIFI.URL / .USER / .PASSWORD / .SITES
 // (usuario e senha como macros GLOBAIS, senha secreta). Nao escreva nomes de macro neste texto:
@@ -15,8 +15,8 @@ if (!p.user || !p.password || p.password === 'PREENCHER') {
   var reply = probe.get(base + '/status');
   var ver = '';
   try { ver = JSON.parse(reply).meta.server_version; } catch (e) { ver = ''; }
-  if (probe.getStatus() === 200 && ver) throw 'Controladora alcanÃ§ada (UniFi ' + ver + '). Falta preencher as macros NOC.UNIFI.USER e NOC.UNIFI.PASSWORD no host.';
-  throw 'Sem resposta da controladora em ' + base + ' (HTTP ' + probe.getStatus() + '). Confira o endereÃ§o/porta.';
+  if (probe.getStatus() === 200 && ver) throw 'Controladora alcancada (UniFi ' + ver + '). Falta preencher as macros NOC.UNIFI.USER e NOC.UNIFI.PASSWORD no host.';
+  throw 'Sem resposta da controladora em ' + base + ' (HTTP ' + probe.getStatus() + '). Confira o endereco/porta.';
 }
 
 function headerValues(headers, name) {
@@ -31,8 +31,11 @@ function headerValues(headers, name) {
 }
 
 var cookie = '';
+// Um unico objeto para todas as chamadas: reaproveita a mesma conexao (keep-alive), como um navegador.
+// Abrir uma conexao nova por chamada (~12 em 1 s) fazia a CPM68 bloquear o IP do Zabbix por alguns minutos.
+var req = new HttpRequest();
 function call(method, path, body) {
-  var req = new HttpRequest();
+  req.clearHeader();
   req.addHeader('Content-Type: application/json');
   req.addHeader('Accept: application/json');
   if (cookie) req.addHeader('Cookie: ' + cookie);
@@ -79,8 +82,9 @@ function recentEvents(siteName) {
 }
 var satSum = 0, satCount = 0;
 try {
-  var st = new HttpRequest();
-  out.version = JSON.parse(st.get(base + '/status')).meta.server_version || '';
+  // Versao pela mesma conexao (sem abrir outra).
+  req.clearHeader();
+  out.version = JSON.parse(req.get(base + '/status')).meta.server_version || '';
 } catch (e) { /* sem versao */ }
 
 try {
