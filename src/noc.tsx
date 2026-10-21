@@ -36,7 +36,7 @@ import {
 
 type NocHost = { id: string; name: string; ip: string; up: boolean | null; latencyMs: number | null; loss: number | null; problems: number };
 type NocGroup = { key: string; title: string; total: number; up: number; down: number; unknown: number; hosts: NocHost[] };
-type NocProblem = { id: string; host: string; hostId: string; name: string; severity: number; since: string };
+type NocProblem = { id: string; host: string; hostId: string; name: string; severity: number; since: string; category: string };
 type Firewall = {
   id: string;
   name: string;
@@ -298,22 +298,51 @@ function DomainTile({ title, icon, tone, main, sub, children }: { title: string;
   );
 }
 
+const CATEGORY_LABEL: Record<string, string> = {
+  links: "Internet",
+  switches: "Switch",
+  servidores: "Servidor",
+  videowall: "Videowall",
+  antenas: "Antena",
+  cftv: "CFTV",
+  outros: "Rede",
+};
+// Problema sem mudanca ha mais de 7 dias sai da lista principal (vai para o rodape de antigos).
+const RECENT_MS = 7 * 24 * 3600 * 1000;
+const isRecent = (problem: NocProblem) => Date.now() - new Date(problem.since).getTime() < RECENT_MS;
+
 function ProblemList({ problems, limit }: { problems: NocProblem[]; limit: number }) {
   if (!problems.length) {
     return <p className="noc-all-clear"><ShieldCheck size={28} /> Nenhum problema ativo no Zabbix</p>;
   }
+  const recent = problems.filter(isRecent);
+  const old = problems.filter((problem) => !isRecent(problem));
   return (
-    <ol className="noc-problems">
-      {problems.slice(0, limit).map((problem) => (
-        <li key={problem.id} className={SEVERITY[problem.severity]?.tone}>
-          <span className="noc-sev">{SEVERITY[problem.severity]?.label}</span>
-          <strong>{problem.host}</strong>
-          <span className="noc-problem-name">{translateProblem(problem.name)}</span>
-          <time>há {duration(problem.since)}</time>
-        </li>
-      ))}
-      {problems.length > limit ? <li className="noc-more">+ {problems.length - limit} problemas</li> : null}
-    </ol>
+    <div className="noc-problems-wrap">
+      {recent.length ? (
+        <ol className="noc-problems">
+          {recent.slice(0, limit).map((problem) => (
+            <li key={problem.id} className={SEVERITY[problem.severity]?.tone}>
+              <span className="noc-sev">{SEVERITY[problem.severity]?.label}</span>
+              <div className="noc-problem-main">
+                <strong>{problem.host}</strong>
+                <small>{CATEGORY_LABEL[problem.category] || "Rede"} · {translateProblem(problem.name)}</small>
+              </div>
+              <time>há {duration(problem.since)}</time>
+            </li>
+          ))}
+          {recent.length > limit ? <li className="noc-more">+ {recent.length - limit} problemas novos</li> : null}
+        </ol>
+      ) : (
+        <p className="noc-all-clear small"><ShieldCheck size={22} /> Nenhum problema novo nos últimos 7 dias</p>
+      )}
+      {old.length ? (
+        <div className="noc-problems-old">
+          <span>{old.length} {old.length === 1 ? "problema antigo" : "problemas antigos"} · sem mudança há mais de 7 dias</span>
+          <p>{old.slice(0, 14).map((problem) => problem.host).join(" · ")}{old.length > 14 ? " · …" : ""}</p>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -330,9 +359,45 @@ function translateProblem(name: string) {
     .replace(/^One or more Acces+ Point is disconnected$/i, "Antena desconectada da controladora");
 }
 
+// Grupo pequeno (ate 12, ex.: videowall): cartoes com detalhes, sem esticar para a tela toda.
+function DeviceCards({ group, problems }: { group: NocGroup; problems: NocProblem[] }) {
+  return (
+    <div className="noc-devcards">
+      {group.hosts.map((host) => {
+        const tone = host.up === null ? "unknown" : host.up ? (host.loss && host.loss > 0 ? "warning" : "good") : "critical";
+        const down = problems.find((problem) => problem.hostId === host.id && /icmp|ping/i.test(problem.name));
+        return (
+          <div key={host.id} className={`noc-devcard tone-${tone}`}>
+            <span className="noc-devcard-dot" aria-hidden="true">{tone === "critical" ? <WifiOff size={18} /> : toneIcon(tone, 18)}</span>
+            <div className="noc-devcard-main">
+              <strong title={host.name}>{host.name}</strong>
+              <small>{host.ip || "sem IP"}</small>
+            </div>
+            <div className="noc-devcard-state">
+              {host.up ? (
+                <>
+                  <b>{host.latencyMs ?? "—"} ms</b>
+                  <small>{host.loss ? `perda ${host.loss}%` : "online"}</small>
+                </>
+              ) : host.up === false ? (
+                <>
+                  <b>OFFLINE</b>
+                  <small>{down ? `há ${duration(down.since)}` : "sem resposta"}</small>
+                </>
+              ) : (
+                <small>sem dados</small>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function HostGrid({ group, compact }: { group: NocGroup; compact?: boolean }) {
   const allDown = group.total > 3 && group.down === group.total;
-  const size = group.total > 60 ? "xs" : group.total > 36 ? "sm" : group.total <= 12 ? "lg" : "md";
+  const size = group.total > 60 ? "xs" : group.total > 36 ? "sm" : "md";
   return (
     <div className="noc-hostgrid-wrap">
       {allDown ? (
@@ -498,8 +563,11 @@ function OverviewPage({ data }: { data: NocData }) {
 
       <div className="noc-overview-bottom">
         <section className="noc-card noc-problems-card">
-          <h3><AlertOctagon size={20} /> Problemas ativos <small>{data.problems.length} no Zabbix</small></h3>
-          <ProblemList problems={data.problems} limit={14} />
+          <h3>
+            <AlertOctagon size={20} /> Problemas ativos
+            <small>{data.problems.filter(isRecent).length} novos · {data.problems.filter((problem) => !isRecent(problem)).length} antigos</small>
+          </h3>
+          <ProblemList problems={data.problems} limit={10} />
         </section>
         <div className="noc-overview-side">
           <section className="noc-card">
@@ -677,7 +745,7 @@ function GroupPage({ data, keys }: { data: NocData; keys: string[] }) {
         <section key={group.key} className="noc-group">
           {groups.length > 1 ? <h3 className="noc-group-title">{group.title}</h3> : null}
           <GroupHeader group={group} />
-          <HostGrid group={group} compact={groups.length > 1 && group.total > 30} />
+          {group.total <= 12 ? <DeviceCards group={group} problems={data.problems} /> : <HostGrid group={group} compact={groups.length > 1 && group.total > 30} />}
         </section>
       ))}
     </div>
@@ -1116,10 +1184,176 @@ function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () 
   );
 }
 
+/* ---------- Cadastro de dispositivos (ping no Zabbix) ---------- */
+
+type Device = { id: string; name: string; ip: string; groupId: string; group: string; enabled: boolean; editable: boolean; removable: boolean; up: boolean | null; latencyMs: number | null };
+type DeviceGroup = { groupid: string; name: string };
+
+async function devicesApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}/api/devices${path}`, { ...init, headers: { ...headersFor(), ...(init?.body ? { "Content-Type": "application/json" } : {}) } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error((payload as { message?: string }).message || `Servidor respondeu ${response.status}`);
+  return payload as T;
+}
+
+function DevicesManager({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const [groups, setGroups] = useState<DeviceGroup[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [form, setForm] = useState({ name: "", ip: "", groupId: "" });
+  const [filter, setFilter] = useState("");
+  const [editing, setEditing] = useState<{ id: string; name: string; ip: string; groupId: string } | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const data = await devicesApi<{ groups: DeviceGroup[]; devices: Device[] }>("");
+      setGroups(data.groups);
+      setDevices(data.devices);
+      // Tipo padrao: Switch (o mais comum); senao o primeiro da lista.
+      setForm((value) => (value.groupId || !data.groups.length ? value : { ...value, groupId: (data.groups.find((group) => /switch/i.test(group.name)) || data.groups[0]).groupid }));
+    } catch (error) {
+      setMessage({ ok: false, text: error instanceof Error ? error.message : "Falha ao carregar." });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  async function run(label: string, action: () => Promise<unknown>, success: string) {
+    setBusy(label);
+    setMessage(null);
+    try {
+      await action();
+      setMessage({ ok: true, text: success });
+      await reload();
+      onChanged();
+    } catch (error) {
+      setMessage({ ok: false, text: error instanceof Error ? error.message : "Falha." });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const add = (event: React.FormEvent) => {
+    event.preventDefault();
+    run("add", () => devicesApi("", { method: "POST", body: JSON.stringify(form) }), `${form.name} cadastrado. O Zabbix começa a pingar em até 1 minuto.`).then(() =>
+      setForm((value) => ({ ...value, name: "", ip: "" })),
+    );
+  };
+
+  const term = filter.trim().toLowerCase();
+  const shown = devices.filter((device) => !term || `${device.name} ${device.ip} ${device.group}`.toLowerCase().includes(term));
+  const byGroup = groups.map((group) => ({ group, items: shown.filter((device) => device.groupId === group.groupid) })).filter((entry) => entry.items.length);
+
+  return (
+    <>
+      <div className="noc-modal-backdrop" onClick={onClose} />
+      <div className="noc-modal noc-dev-modal" role="dialog" aria-modal="true" aria-label="Dispositivos monitorados">
+        <header>
+          <h3><Network size={20} /> Dispositivos monitorados</h3>
+          <button type="button" aria-label="Fechar" onClick={onClose}><X size={18} /></button>
+        </header>
+        <p className="noc-modal-hint">Cada dispositivo vira um host no Zabbix com ping a cada 1 minuto. Se ficar mais de 5 minutos sem responder, o alerta vai para o WhatsApp.</p>
+
+        <form className="noc-dev-add" onSubmit={add}>
+          <label><span>Nome</span><input value={form.name} maxLength={80} placeholder="ex.: Switch Portaria 3" onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+          <label><span>IP</span><input value={form.ip} placeholder="10.0.1.50" inputMode="decimal" onChange={(event) => setForm({ ...form, ip: event.target.value })} /></label>
+          <label>
+            <span>Tipo</span>
+            <select value={form.groupId} onChange={(event) => setForm({ ...form, groupId: event.target.value })}>
+              {groups.map((group) => <option key={group.groupid} value={group.groupid}>{group.name}</option>)}
+            </select>
+          </label>
+          <button type="submit" className="primary" disabled={busy === "add" || !form.name || !form.ip}>{busy === "add" ? "Cadastrando..." : "+ Adicionar"}</button>
+        </form>
+
+        {message ? <p className={`noc-modal-result ${message.ok ? "ok" : "bad"}`}>{message.ok ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {message.text}</p> : null}
+
+        <input className="noc-dev-filter" value={filter} placeholder={`Buscar entre ${devices.length} dispositivos (nome, IP ou tipo)`} onChange={(event) => setFilter(event.target.value)} />
+
+        <div className="noc-dev-list">
+          {loading ? <p className="noc-modal-hint">Carregando do Zabbix...</p> : null}
+          {!loading && !byGroup.length ? <p className="noc-modal-hint">Nenhum dispositivo encontrado.</p> : null}
+          {byGroup.map(({ group, items }) => (
+            <section key={group.groupid}>
+              <h4>{group.name} <small>{items.length}</small></h4>
+              <ul>
+                {items.map((device) => {
+                  const tone = !device.enabled ? "unknown" : device.up === null ? "unknown" : device.up ? "good" : "critical";
+                  const isEditing = editing?.id === device.id;
+                  return (
+                    <li key={device.id} className={`tone-${tone}`}>
+                      <span className="noc-dev-dot" aria-hidden="true" />
+                      {isEditing ? (
+                        <>
+                          <input value={editing.name} maxLength={80} aria-label="Nome" onChange={(event) => setEditing({ ...editing, name: event.target.value })} />
+                          <input value={editing.ip} aria-label="IP" onChange={(event) => setEditing({ ...editing, ip: event.target.value })} />
+                          <select value={editing.groupId} aria-label="Tipo" onChange={(event) => setEditing({ ...editing, groupId: event.target.value })}>
+                            {groups.map((entry) => <option key={entry.groupid} value={entry.groupid}>{entry.name}</option>)}
+                          </select>
+                          <div className="noc-dev-actions">
+                            <button type="button" className="primary" disabled={busy === device.id} onClick={() => run(device.id, () => devicesApi(`/${device.id}`, { method: "PATCH", body: JSON.stringify(editing) }), `${editing.name} atualizado.`).then(() => setEditing(null))}>Salvar</button>
+                            <button type="button" onClick={() => setEditing(null)}>Cancelar</button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <strong title={device.name}>{device.name}</strong>
+                          <span className="noc-dev-ip">{device.ip}</span>
+                          <span className="noc-dev-state">{!device.enabled ? "pausado" : device.up === null ? "sem dados" : device.up ? `${device.latencyMs ?? "—"} ms` : "sem resposta"}</span>
+                          <div className="noc-dev-actions">
+                            {device.editable ? (
+                              <>
+                                <button type="button" onClick={() => setEditing({ id: device.id, name: device.name, ip: device.ip, groupId: device.groupId })}>Editar</button>
+                                <button type="button" disabled={busy === device.id} onClick={() => run(device.id, () => devicesApi(`/${device.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !device.enabled }) }), device.enabled ? `${device.name} pausado.` : `${device.name} voltou a ser monitorado.`)}>
+                                  {device.enabled ? "Pausar" : "Retomar"}
+                                </button>
+                                {device.removable ? (
+                                <button
+                                  type="button"
+                                  className="danger"
+                                  disabled={busy === device.id}
+                                  onClick={() => {
+                                    if (window.confirm(`Remover ${device.name} (${device.ip}) do monitoramento? O histórico dele no Zabbix também é apagado.`)) {
+                                      run(device.id, () => devicesApi(`/${device.id}`, { method: "DELETE" }), `${device.name} removido.`);
+                                    }
+                                  }}
+                                >
+                                  Remover
+                                </button>
+                                ) : null}
+                              </>
+                            ) : (
+                              <small title="Tem outros monitoramentos além do ping (ex.: SNMP, links, firewall)">gerenciado no Zabbix</small>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
+        <footer>
+          <button type="button" onClick={onClose}>Fechar</button>
+        </footer>
+      </div>
+    </>
+  );
+}
+
 /* ---------- Painel (carrossel) ---------- */
 
 export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: string; kiosk?: boolean; isAdmin?: boolean }) {
   const [showUnifi, setShowUnifi] = useState(false);
+  const [showDevices, setShowDevices] = useState(false);
   const [data, setData] = useState<NocData | null>(null);
   const [error, setError] = useState("");
   const [page, setPage] = useState(0);
@@ -1148,7 +1382,9 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
       const response = await fetch(`${API_BASE}/api/noc`, { headers: headersFor(tvKey) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error((payload as { message?: string }).message || `Servidor respondeu ${response.status}`);
-      setData(payload as NocData);
+      // Cameras do CFTV sairam do painel: seus problemas tambem nao entram em contagens, lista e faixa.
+      const next = payload as NocData;
+      setData({ ...next, problems: next.problems.filter((problem) => problem.category !== "cftv") });
       setError("");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Falha ao atualizar.");
@@ -1215,6 +1451,8 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
   }, [intervalSec]);
 
   const current = pages[page % pageCount];
+  // Faixa de alertas: so o que mudou nos ultimos 7 dias (antigos ficam no rodape da Visao geral).
+  const tickerProblems = data ? data.problems.filter(isRecent) : [];
   const critical = data ? data.problems.filter((problem) => problem.severity >= 4).length : 0;
   const warnings = data ? data.problems.filter((problem) => problem.severity >= 2 && problem.severity < 4).length : 0;
   const globalTone = !data ? "unknown" : critical ? "critical" : warnings ? "warning" : "good";
@@ -1272,6 +1510,11 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
             {[10, 15, 20, 30, 45, 60].map((value) => <option key={value} value={value}>{value}s</option>)}
           </select>
           {!kiosk && isAdmin ? (
+            <button type="button" aria-label="Dispositivos monitorados" title="Dispositivos monitorados (cadastrar, editar, remover)" onClick={() => setShowDevices(true)}>
+              <Server size={18} />
+            </button>
+          ) : null}
+          {!kiosk && isAdmin ? (
             <button type="button" className={data && !data.unifiConfigured ? "noc-attn" : ""} aria-label="Configurar controladora UniFi" title="Configurar controladora UniFi" onClick={() => setShowUnifi(true)}>
               <Wifi size={18} />
             </button>
@@ -1315,21 +1558,22 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
       <footer className="noc-ticker" aria-label="Alertas ativos">
         <span className="noc-ticker-label"><AlertOctagon size={16} /> Alertas</span>
         <div className="noc-ticker-track">
-          {data?.problems.length ? (
-            <div className="noc-ticker-run" style={{ animationDuration: `${Math.max(40, data.problems.length * 4)}s` }}>
-              {[...data.problems.slice(0, 40), ...data.problems.slice(0, 40)].map((problem, index) => (
+          {tickerProblems.length ? (
+            <div className="noc-ticker-run" style={{ animationDuration: `${Math.max(40, tickerProblems.length * 4)}s` }}>
+              {[...tickerProblems.slice(0, 40), ...tickerProblems.slice(0, 40)].map((problem, index) => (
                 <span key={`${problem.id}-${index}`} className={SEVERITY[problem.severity]?.tone}>
                   <b>{SEVERITY[problem.severity]?.label}</b> {problem.host} · {translateProblem(problem.name)} · há {duration(problem.since)}
                 </span>
               ))}
             </div>
           ) : (
-            <span className="noc-ticker-ok"><ShieldCheck size={16} /> Nenhum alerta ativo</span>
+            <span className="noc-ticker-ok"><ShieldCheck size={16} /> Nenhum alerta novo nos últimos 7 dias</span>
           )}
         </div>
         <span className="noc-updated">{data ? `atualizado ${new Date(data.generatedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}</span>
       </footer>
       {showUnifi ? <UnifiSettings onClose={() => setShowUnifi(false)} onSaved={() => window.setTimeout(load, 1500)} /> : null}
+      {showDevices ? <DevicesManager onClose={() => setShowDevices(false)} onChanged={() => window.setTimeout(load, 1500)} /> : null}
     </div>
   );
 }

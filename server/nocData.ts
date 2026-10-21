@@ -83,9 +83,10 @@ async function loadGroups() {
 }
 
 async function loadProblems() {
-  const triggers = await zbx<{ triggerid: string; description: string; priority: string; lastchange: string; hosts: { hostid: string; name: string }[] }[]>("trigger.get", {
+  const triggers = await zbx<{ triggerid: string; description: string; priority: string; lastchange: string; hosts: { hostid: string; name: string }[]; hostgroups?: { name: string }[] }[]>("trigger.get", {
     output: ["triggerid", "description", "priority", "lastchange"],
     selectHosts: ["hostid", "name"],
+    selectHostGroups: ["name"],
     filter: { value: 1 },
     monitored: true,
     skipDependent: true,
@@ -94,6 +95,11 @@ async function loadProblems() {
     sortorder: "DESC",
     limit: 300,
   });
+  // Categoria = secao do painel do grupo do host (links tem prioridade, como na grade de hosts).
+  const categoryOf = (groups: { name: string }[] = []) => {
+    if (groups.some((group) => /^links$/i.test(group.name))) return "links";
+    return sections.find((section) => groups.some((group) => section.match.test(group.name)))?.key || "outros";
+  };
   return triggers.map((trigger) => ({
     id: trigger.triggerid,
     host: trigger.hosts?.[0]?.name || "",
@@ -101,6 +107,7 @@ async function loadProblems() {
     name: trigger.description,
     severity: Number(trigger.priority),
     since: new Date(Number(trigger.lastchange) * 1000).toISOString(),
+    category: categoryOf(trigger.hostgroups),
   }));
 }
 

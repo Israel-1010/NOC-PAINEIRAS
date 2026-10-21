@@ -112,6 +112,7 @@ import { getLinkConfig, getLinksHistory, getLinksLive, listLinkCandidates, saveL
 import { getNocOverview } from "./nocData";
 import { allowTvKey, createTvKey, listTvKeys, revokeTvKey } from "./tvKeys";
 import { getUnifiSettings, saveUnifiSettings, testUnifi } from "./unifiClient";
+import { createDevice, deleteDevice, listDevices, updateDevice } from "./devices";
 import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
 import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
 import {
@@ -579,6 +580,24 @@ app.get("/api/noc", nocAuth, asyncRoute(() => getNocOverview()));
 app.get("/api/tv-keys", requireAuth, requireAdmin, asyncRoute(async () => ({ keys: listTvKeys() })));
 app.post("/api/tv-keys", requireAuth, requireAdmin, asyncRoute((req) => createTvKey(String(req.body?.name || ""), req.res?.locals.user)));
 app.delete("/api/tv-keys/:id", requireAuth, requireAdmin, asyncRoute((req) => revokeTvKey(String(req.params.id))));
+/* ---------- Dispositivos monitorados por ping (cadastro no Zabbix) ---------- */
+app.get("/api/devices", requireAuth, requireAdmin, asyncRoute(() => listDevices()));
+app.post("/api/devices", requireAuth, requireAdmin, asyncRoute(async (req) => {
+  const created = await createDevice(req.body || {});
+  writeAudit({ event: "dispositivo-cadastrado", user: req.res?.locals.user?.login, ip: req.ip, name: created?.name, deviceIp: created?.ip });
+  return created;
+}));
+app.patch("/api/devices/:id", requireAuth, requireAdmin, asyncRoute(async (req) => {
+  const updated = await updateDevice(String(req.params.id), req.body || {});
+  writeAudit({ event: "dispositivo-alterado", user: req.res?.locals.user?.login, ip: req.ip, deviceId: String(req.params.id), changes: Object.keys(req.body || {}).join(",") });
+  return updated;
+}));
+app.delete("/api/devices/:id", requireAuth, requireAdmin, asyncRoute(async (req) => {
+  const removed = await deleteDevice(String(req.params.id));
+  writeAudit({ event: "dispositivo-removido", user: req.res?.locals.user?.login, ip: req.ip, deviceId: String(req.params.id), name: removed?.name });
+  return removed;
+}));
+
 app.get("/api/unifi/settings", requireAuth, requireAdmin, asyncRoute(async () => getUnifiSettings()));
 app.post("/api/unifi/test", requireAuth, requireAdmin, asyncRoute(() => testUnifi()));
 app.put("/api/unifi/settings", requireAuth, requireAdmin, asyncRoute(async (req) => {

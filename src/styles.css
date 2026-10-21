@@ -11637,3 +11637,279 @@ thead .ac-person-col {
   font-size: 0.78em;
   pointer-events: none;
 }
+
+/* NOC: lista de problemas (novos x antigos) */
+.noc-problems-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.noc-problems li {
+  grid-template-columns: 6.5em minmax(0, 1fr) auto;
+  padding: 7px 12px;
+}
+
+.noc-problem-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.noc-problem-main strong,
+.noc-problem-main small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.noc-problem-main small {
+  color: var(--noc-ink-2, #b9c3d9);
+  font-size: 0.86em;
+}
+
+.noc-problems-old {
+  display: grid;
+  gap: 4px;
+  margin-top: auto;
+  padding: 10px 12px;
+  color: var(--noc-muted);
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  font-size: 0.85em;
+}
+
+.noc-problems-old span {
+  font-weight: 700;
+}
+
+.noc-problems-old p {
+  margin: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.noc-problems-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.noc-problems-card > .noc-problems-wrap {
+  flex: 1;
+}
+
+/* NOC: cartoes de dispositivo (grupos pequenos, ex.: videowall) */
+.noc-devcards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 12px;
+}
+
+.noc-devcard {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--noc-panel);
+  border: 1px solid var(--noc-line);
+  border-left: 4px solid var(--tone, var(--noc-line));
+  border-radius: 12px;
+}
+
+.noc-devcard.tone-critical {
+  background: rgba(240, 68, 56, 0.1);
+}
+
+.noc-devcard-dot {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--tone);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+}
+
+.noc-devcard-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.noc-devcard-main strong {
+  overflow: hidden;
+  font-size: 1.15em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.noc-devcard-main small,
+.noc-devcard-state small {
+  color: var(--noc-muted);
+  font-size: 0.85em;
+}
+
+.noc-devcard-state {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.noc-devcard-state b {
+  font-size: 1.15em;
+}
+
+.noc-devcard.tone-critical .noc-devcard-state b {
+  color: var(--noc-critical);
+}
+
+/* NOC: cadastro de dispositivos */
+.noc-dev-modal {
+  width: min(980px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto;
+}
+
+.noc-dev-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1.1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.noc-modal select,
+.noc-dev-filter {
+  min-height: 38px;
+  padding: 0 10px;
+  color: var(--noc-ink);
+  background: var(--noc-page);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.noc-dev-list {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-height: 160px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.noc-dev-list h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  color: var(--noc-muted);
+  font-size: 0.8em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.noc-dev-list h4 small {
+  padding: 1px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 99px;
+}
+
+.noc-dev-list ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.noc-dev-list li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1.6fr) minmax(0, 0.9fr) minmax(0, 0.8fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+}
+
+.noc-dev-list li input,
+.noc-dev-list li select {
+  min-height: 32px !important;
+}
+
+.noc-dev-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--tone, var(--noc-unknown));
+  border-radius: 50%;
+}
+
+.noc-dev-list li strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.noc-dev-ip {
+  color: var(--noc-muted);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.noc-dev-state {
+  color: var(--noc-muted);
+  font-size: 0.88em;
+}
+
+.noc-dev-list li.tone-critical .noc-dev-state {
+  color: var(--noc-critical);
+  font-weight: 700;
+}
+
+.noc-dev-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.noc-dev-actions button {
+  min-height: 30px !important;
+  padding: 0 10px !important;
+  font-size: 0.85em !important;
+}
+
+.noc-dev-actions button.danger {
+  color: #fda29b;
+  border-color: rgba(240, 68, 56, 0.45);
+}
+
+.noc-dev-actions small {
+  color: var(--noc-muted);
+  font-size: 0.8em;
+}
+
+@media (max-width: 760px) {
+  .noc-dev-add {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .noc-dev-list li {
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+  }
+
+  .noc-dev-ip,
+  .noc-dev-state {
+    display: none;
+  }
+}
