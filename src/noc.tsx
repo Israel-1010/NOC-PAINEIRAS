@@ -20,7 +20,9 @@ import {
   Network,
   Pause,
   Play,
+  Printer,
   Radio,
+  ScanFace,
   Server,
   Shield,
   ShieldCheck,
@@ -34,7 +36,7 @@ import {
 
 /* ---------- Tipos (espelham server/nocData.ts) ---------- */
 
-type NocHost = { id: string; name: string; ip: string; up: boolean | null; latencyMs: number | null; loss: number | null; problems: number };
+type NocHost = { id: string; name: string; ip: string; up: boolean | null; latencyMs: number | null; loss: number | null; problems: number; set: string; role: string };
 type NocGroup = { key: string; title: string; total: number; up: number; down: number; unknown: number; hosts: NocHost[] };
 type NocProblem = { id: string; host: string; hostId: string; name: string; severity: number; since: string; category: string };
 type Firewall = {
@@ -203,8 +205,12 @@ const FIXED_PAGES: NocPage[] = [
   { id: "internet", title: "Internet e Firewall", icon: Globe },
   { id: "antenas", title: "Antenas (ping do Zabbix)", icon: Radio },
   { id: "servidores", title: "Servidores e Datacenter", icon: Server },
+  { id: "acesso", title: "Catracas, totens e impressoras", icon: ScanFace },
   { id: "videowall", title: "Videowall", icon: MonitorPlay },
 ];
+
+// Grupos da pagina "Catracas, totens e impressoras".
+const ACCESS_KEYS = ["catracas", "totens", "impressoras"];
 
 function buildPages(data: NocData | null): NocPage[] {
   const controllers = data?.unifi?.controllers || [];
@@ -221,6 +227,7 @@ function buildPages(data: NocData | null): NocPage[] {
   const fixed = FIXED_PAGES.filter((page) => {
     if (page.id === "antenas") return !hasUnifiAps && hasHosts("antenas");
     if (page.id === "videowall") return !data || hasHosts("videowall");
+    if (page.id === "acesso") return ACCESS_KEYS.some(hasHosts);
     return true;
   });
   // Servidores Docker (Beszel) logo depois de "Servidores e Datacenter".
@@ -337,6 +344,9 @@ const CATEGORY_LABEL: Record<string, string> = {
   switches: "Switch",
   servidores: "Servidor",
   videowall: "Videowall",
+  catracas: "Catraca",
+  totens: "Totem",
+  impressoras: "Impressora",
   antenas: "Antena",
   cftv: "CFTV",
   outros: "Rede",
@@ -425,6 +435,86 @@ function DeviceCards({ group, problems }: { group: NocGroup; problems: NocProble
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/* ---------- Catracas (conjuntos), totens e impressoras ---------- */
+
+const hostTone = (host: NocHost) => (host.up === null ? "unknown" : host.up ? (host.loss && host.loss > 0 ? "warning" : "good") : "critical");
+
+// Conjunto = hosts com a mesma tag "conjunto" (ex.: Catraca 1 = 2 controladoras + 2 faciais).
+function SetCard({ name, hosts, problems }: { name: string; hosts: NocHost[]; problems: NocProblem[] }) {
+  const up = hosts.filter((host) => host.up === true).length;
+  const tone = up === hosts.length ? "good" : up === 0 ? "critical" : "warning";
+  const label = tone === "good" ? "Operando" : tone === "critical" ? "Fora do ar" : `${hosts.length - up} com falha`;
+  const ordered = [...hosts].sort((a, b) => (a.role || a.name).localeCompare(b.role || b.name, "pt-BR", { numeric: true }));
+  return (
+    <section className={`noc-set tone-${tone}`}>
+      <header>
+        <strong>{name}</strong>
+        <em>{toneIcon(tone, 15)} {label}</em>
+      </header>
+      <ul>
+        {ordered.map((host) => {
+          const hTone = hostTone(host);
+          const down = problems.find((problem) => problem.hostId === host.id && /icmp|ping/i.test(problem.name));
+          return (
+            <li key={host.id} className={`tone-${hTone}`} title={`${host.name} · ${host.ip}`}>
+              <span className="noc-dev-dot" aria-hidden="true" />
+              <span className="noc-set-role">{host.role || host.name}</span>
+              <span className="noc-set-ip">{host.ip}</span>
+              <b>{host.up ? `${host.latencyMs ?? "—"} ms` : host.up === false ? (down ? `OFFLINE há ${duration(down.since)}` : "OFFLINE") : "sem dados"}</b>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function AccessPage({ data }: { data: NocData }) {
+  const group = (key: string) => data.groups.find((entry) => entry.key === key);
+  const turnstiles = group("catracas");
+  const kiosks = group("totens");
+  const printers = group("impressoras");
+  // Catracas agrupadas por conjunto; sem conjunto, cada host vira o proprio "conjunto".
+  const sets = new Map<string, NocHost[]>();
+  for (const host of turnstiles?.hosts || []) {
+    const key = host.set || host.name;
+    sets.set(key, [...(sets.get(key) || []), host]);
+  }
+  const setList = Array.from(sets.entries()).sort((a, b) => {
+    const bad = (hosts: NocHost[]) => hosts.some((host) => host.up === false);
+    return Number(bad(b[1])) - Number(bad(a[1])) || a[0].localeCompare(b[0], "pt-BR", { numeric: true });
+  });
+  const summary = (entry?: NocGroup) => (entry ? `${entry.up}/${entry.total} online` : "");
+  return (
+    <div className="noc-page noc-access">
+      {turnstiles?.total ? (
+        <section className="noc-card noc-access-block">
+          <h3><ScanFace size={20} /> Catracas <small>{setList.length} {setList.length === 1 ? "conjunto" : "conjuntos"} · {summary(turnstiles)}</small></h3>
+          <div className="noc-sets">
+            {setList.map(([name, hosts]) => <SetCard key={name} name={name} hosts={hosts} problems={data.problems} />)}
+          </div>
+        </section>
+      ) : null}
+      {kiosks?.total || printers?.total ? (
+        <div className="noc-access-row">
+          {kiosks?.total ? (
+            <section className="noc-card noc-access-block">
+              <h3><MonitorPlay size={20} /> Totens de pagamento <small>{summary(kiosks)}</small></h3>
+              <DeviceCards group={kiosks} problems={data.problems} />
+            </section>
+          ) : null}
+          {printers?.total ? (
+            <section className="noc-card noc-access-block">
+              <h3><Printer size={20} /> Impressoras <small>{summary(printers)}</small></h3>
+              <DeviceCards group={printers} problems={data.problems} />
+            </section>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -545,6 +635,22 @@ function OverviewPage({ data }: { data: NocData }) {
     );
   };
 
+  // Catracas + totens + impressoras num quadro so (aparece quando ha algum cadastrado).
+  const accessTile = () => {
+    const parts = ACCESS_KEYS.map((key) => group(key)).filter(Boolean) as NocGroup[];
+    const total = parts.reduce((sum, entry) => sum + entry.total, 0);
+    if (!total) return null;
+    const up = parts.reduce((sum, entry) => sum + entry.up, 0);
+    const unknown = parts.reduce((sum, entry) => sum + entry.unknown, 0);
+    const combined: NocGroup = { key: "acesso", title: "Acesso e atendimento", total, up, down: total - up - unknown, unknown, hosts: [] };
+    const detail = parts.map((entry) => `${entry.title.toLowerCase()} ${entry.up}/${entry.total}`).join(" · ");
+    return (
+      <DomainTile title="Acesso e atendimento" icon={<ScanFace size={18} />} tone={groupTone(combined)} main={`${up}/${total}`} sub={detail}>
+        <AvailabilityBar group={combined} />
+      </DomainTile>
+    );
+  };
+
   // Antenas e switches: o numero real vem das controladoras UniFi (estado de cada aparelho na controladora).
   // Vale o ping do Zabbix quando a UniFi nao cobre a maior parte dos aparelhos (ex.: controladora de
   // switches ainda sem acesso e a outra so com 6 switches de CFTV).
@@ -593,6 +699,7 @@ function OverviewPage({ data }: { data: NocData }) {
         {unifiTile("aps", "antenas", "Antenas UniFi", <Radio size={18} />)}
         {groupTile("servidores", "Servidores", <Server size={18} />, data.hardware.length ? `hardware Dell ${data.hardware.length - hwBad}/${data.hardware.length} ok` : "")}
         {groupTile("videowall", "Videowall", <MonitorPlay size={18} />)}
+        {accessTile()}
       </div>
 
       <div className="noc-overview-bottom">
@@ -1392,7 +1499,8 @@ function UnifiSettings({ onClose, onSaved }: { onClose: () => void; onSaved: () 
 
 /* ---------- Cadastro de dispositivos (ping no Zabbix) ---------- */
 
-type Device = { id: string; name: string; ip: string; groupId: string; group: string; enabled: boolean; editable: boolean; removable: boolean; up: boolean | null; latencyMs: number | null };
+type Device = { id: string; name: string; ip: string; groupId: string; group: string; set: string; role: string; enabled: boolean; editable: boolean; removable: boolean; up: boolean | null; latencyMs: number | null };
+const ROLE_SUGGESTIONS = ["Controladora", "Facial", "Leitor", "Totem de pagamento", "Impressora"];
 type DeviceGroup = { groupid: string; name: string };
 
 async function devicesApi<T>(path: string, init?: RequestInit): Promise<T> {
@@ -1408,9 +1516,9 @@ function DevicesManager({ onClose, onChanged }: { onClose: () => void; onChanged
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const [form, setForm] = useState({ name: "", ip: "", groupId: "" });
+  const [form, setForm] = useState({ name: "", ip: "", groupId: "", set: "", role: "" });
   const [filter, setFilter] = useState("");
-  const [editing, setEditing] = useState<{ id: string; name: string; ip: string; groupId: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; name: string; ip: string; groupId: string; set: string; role: string } | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -1447,10 +1555,15 @@ function DevicesManager({ onClose, onChanged }: { onClose: () => void; onChanged
 
   const add = (event: React.FormEvent) => {
     event.preventDefault();
-    run("add", () => devicesApi("", { method: "POST", body: JSON.stringify(form) }), `${form.name} cadastrado. O Zabbix começa a pingar em até 1 minuto.`).then(() =>
-      setForm((value) => ({ ...value, name: "", ip: "" })),
+    const label = form.name || `${form.set} - ${form.role}`;
+    // Mantem tipo e conjunto para cadastrar o proximo aparelho do mesmo conjunto (ex.: o 2o facial da catraca).
+    run("add", () => devicesApi("", { method: "POST", body: JSON.stringify(form) }), `${label} cadastrado. O Zabbix começa a pingar em até 1 minuto.`).then(() =>
+      setForm((value) => ({ ...value, name: "", ip: "", role: "" })),
     );
   };
+  const knownSets = Array.from(new Set(devices.map((device) => device.set).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
+  const knownRoles = Array.from(new Set([...ROLE_SUGGESTIONS, ...devices.map((device) => device.role).filter(Boolean)]));
+  const groupLabel = (group: DeviceGroup) => (group.groupid.startsWith("novo:") ? `${group.name} (novo)` : group.name);
 
   const term = filter.trim().toLowerCase();
   const shown = devices.filter((device) => !term || `${device.name} ${device.ip} ${device.group}`.toLowerCase().includes(term));
@@ -1467,15 +1580,19 @@ function DevicesManager({ onClose, onChanged }: { onClose: () => void; onChanged
         <p className="noc-modal-hint">Cada dispositivo vira um host no Zabbix com ping a cada 1 minuto. Se ficar mais de 5 minutos sem responder, o alerta vai para o WhatsApp.</p>
 
         <form className="noc-dev-add" onSubmit={add}>
-          <label><span>Nome</span><input value={form.name} maxLength={80} placeholder="ex.: Switch Portaria 3" onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-          <label><span>IP</span><input value={form.ip} placeholder="10.0.1.50" inputMode="decimal" onChange={(event) => setForm({ ...form, ip: event.target.value })} /></label>
           <label>
             <span>Tipo</span>
             <select value={form.groupId} onChange={(event) => setForm({ ...form, groupId: event.target.value })}>
-              {groups.map((group) => <option key={group.groupid} value={group.groupid}>{group.name}</option>)}
+              {groups.map((group) => <option key={group.groupid} value={group.groupid}>{groupLabel(group)}</option>)}
             </select>
           </label>
-          <button type="submit" className="primary" disabled={busy === "add" || !form.name || !form.ip}>{busy === "add" ? "Cadastrando..." : "+ Adicionar"}</button>
+          <label><span>Conjunto (opcional)</span><input value={form.set} maxLength={60} list="noc-dev-sets" placeholder="ex.: Catraca 1" onChange={(event) => setForm({ ...form, set: event.target.value })} /></label>
+          <label><span>Função (opcional)</span><input value={form.role} maxLength={40} list="noc-dev-roles" placeholder="ex.: Facial" onChange={(event) => setForm({ ...form, role: event.target.value })} /></label>
+          <label><span>Nome</span><input value={form.name} maxLength={80} placeholder={form.set && form.role ? `${form.set} - ${form.role}` : "ex.: Switch Portaria 3"} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+          <label><span>IP</span><input value={form.ip} placeholder="10.0.1.50" inputMode="decimal" onChange={(event) => setForm({ ...form, ip: event.target.value })} /></label>
+          <button type="submit" className="primary" disabled={busy === "add" || !form.ip || (!form.name && !(form.set && form.role))}>{busy === "add" ? "Cadastrando..." : "+ Adicionar"}</button>
+          <datalist id="noc-dev-sets">{knownSets.map((set) => <option key={set} value={set} />)}</datalist>
+          <datalist id="noc-dev-roles">{knownRoles.map((role) => <option key={role} value={role} />)}</datalist>
         </form>
 
         {message ? <p className={`noc-modal-result ${message.ok ? "ok" : "bad"}`}>{message.ok ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {message.text}</p> : null}
@@ -1497,10 +1614,16 @@ function DevicesManager({ onClose, onChanged }: { onClose: () => void; onChanged
                       <span className="noc-dev-dot" aria-hidden="true" />
                       {isEditing ? (
                         <>
-                          <input value={editing.name} maxLength={80} aria-label="Nome" onChange={(event) => setEditing({ ...editing, name: event.target.value })} />
+                          <div className="noc-dev-edit-name">
+                            <input value={editing.name} maxLength={80} aria-label="Nome" onChange={(event) => setEditing({ ...editing, name: event.target.value })} />
+                            <div>
+                              <input value={editing.set} maxLength={60} list="noc-dev-sets" placeholder="Conjunto" aria-label="Conjunto" onChange={(event) => setEditing({ ...editing, set: event.target.value })} />
+                              <input value={editing.role} maxLength={40} list="noc-dev-roles" placeholder="Função" aria-label="Função" onChange={(event) => setEditing({ ...editing, role: event.target.value })} />
+                            </div>
+                          </div>
                           <input value={editing.ip} aria-label="IP" onChange={(event) => setEditing({ ...editing, ip: event.target.value })} />
                           <select value={editing.groupId} aria-label="Tipo" onChange={(event) => setEditing({ ...editing, groupId: event.target.value })}>
-                            {groups.map((entry) => <option key={entry.groupid} value={entry.groupid}>{entry.name}</option>)}
+                            {groups.map((entry) => <option key={entry.groupid} value={entry.groupid}>{groupLabel(entry)}</option>)}
                           </select>
                           <div className="noc-dev-actions">
                             <button type="button" className="primary" disabled={busy === device.id} onClick={() => run(device.id, () => devicesApi(`/${device.id}`, { method: "PATCH", body: JSON.stringify(editing) }), `${editing.name} atualizado.`).then(() => setEditing(null))}>Salvar</button>
@@ -1509,13 +1632,16 @@ function DevicesManager({ onClose, onChanged }: { onClose: () => void; onChanged
                         </>
                       ) : (
                         <>
-                          <strong title={device.name}>{device.name}</strong>
+                          <strong title={device.name}>
+                            {device.name}
+                            {device.set || device.role ? <small className="noc-dev-tag">{[device.set, device.role].filter(Boolean).join(" · ")}</small> : null}
+                          </strong>
                           <span className="noc-dev-ip">{device.ip}</span>
                           <span className="noc-dev-state">{!device.enabled ? "pausado" : device.up === null ? "sem dados" : device.up ? `${device.latencyMs ?? "—"} ms` : "sem resposta"}</span>
                           <div className="noc-dev-actions">
                             {device.editable ? (
                               <>
-                                <button type="button" onClick={() => setEditing({ id: device.id, name: device.name, ip: device.ip, groupId: device.groupId })}>Editar</button>
+                                <button type="button" onClick={() => setEditing({ id: device.id, name: device.name, ip: device.ip, groupId: device.groupId, set: device.set, role: device.role })}>Editar</button>
                                 <button type="button" disabled={busy === device.id} onClick={() => run(device.id, () => devicesApi(`/${device.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !device.enabled }) }), device.enabled ? `${device.name} pausado.` : `${device.name} voltou a ser monitorado.`)}>
                                   {device.enabled ? "Pausar" : "Retomar"}
                                 </button>
@@ -1758,6 +1884,8 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           <ServersPage data={data} />
         ) : current.id === "docker" && data.beszel ? (
           <DockerPage beszel={data.beszel} />
+        ) : current.id === "acesso" ? (
+          <AccessPage data={data} />
         ) : (
           <GroupPage data={data} keys={["videowall"]} />
         )}

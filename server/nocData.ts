@@ -10,10 +10,12 @@ type ZbxHost = {
   interfaces?: { ip: string }[];
   hostgroups?: { name: string }[];
   parentTemplates?: { name: string }[];
+  tags?: { tag: string; value: string }[];
 };
 type ZbxItem = { itemid: string; hostid: string; name: string; key_: string; lastvalue: string; lastclock: string; units: string };
 
-export type NocHost = { id: string; name: string; ip: string; up: boolean | null; latencyMs: number | null; loss: number | null; problems: number };
+// set/role = tags "conjunto"/"funcao" do host (ex.: Catraca 1 / Facial), cadastradas pelo painel.
+export type NocHost = { id: string; name: string; ip: string; up: boolean | null; latencyMs: number | null; loss: number | null; problems: number; set: string; role: string };
 export type NocGroup = { key: string; title: string; total: number; up: number; down: number; unknown: number; hosts: NocHost[] };
 
 // Grupos do Zabbix -> secoes do painel (por palavra-chave no nome do grupo).
@@ -23,6 +25,9 @@ const sections = [
   { key: "servidores", title: "Servidores", match: /servidor|server/i },
   { key: "cftv", title: "CFTV", match: /cftv|camera|câmera/i },
   { key: "videowall", title: "Videowall / Mini PCs", match: /mini|videowall/i },
+  { key: "catracas", title: "Catracas", match: /catraca/i },
+  { key: "totens", title: "Totens", match: /totem/i },
+  { key: "impressoras", title: "Impressoras", match: /impressora|printer/i },
   { key: "links", title: "Links", match: /^links$/i },
 ];
 
@@ -34,7 +39,7 @@ async function loadGroups() {
   const allIds = Array.from(new Set(sectionGroups.flatMap((section) => section.groupIds)));
   if (!allIds.length) return { groups: [] as NocGroup[], hostNames: new Map<string, string>() };
 
-  const hosts = await zbx<ZbxHost[]>("host.get", { groupids: allIds, output: ["hostid", "name"], selectInterfaces: ["ip"], selectHostGroups: ["groupid", "name"], monitored_hosts: true });
+  const hosts = await zbx<ZbxHost[]>("host.get", { groupids: allIds, output: ["hostid", "name"], selectInterfaces: ["ip"], selectHostGroups: ["groupid", "name"], selectTags: ["tag", "value"], monitored_hosts: true });
   const pings = await zbx<ZbxItem[]>("item.get", {
     hostids: hosts.map((host) => host.hostid),
     output: ["hostid", "key_", "lastvalue", "lastclock"],
@@ -66,6 +71,8 @@ async function loadGroups() {
           latencyMs: values.icmppingsec ? Math.round(Number(values.icmppingsec) * 10000) / 10 : null,
           loss: values.icmppingloss === undefined ? null : Math.round(Number(values.icmppingloss)),
           problems: 0,
+          set: host.tags?.find((tag) => tag.tag === "conjunto")?.value || "",
+          role: host.tags?.find((tag) => tag.tag === "funcao")?.value || "",
         };
       });
       // Problema primeiro, depois por nome.
