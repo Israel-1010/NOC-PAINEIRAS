@@ -26,7 +26,7 @@ const sections = [
   { key: "cftv", title: "CFTV", match: /cftv|camera|câmera/i },
   { key: "videowall", title: "Videowall / Mini PCs", match: /mini|videowall/i },
   { key: "catracas", title: "Catracas", match: /catraca/i },
-  { key: "totens", title: "Totens", match: /totem/i },
+  { key: "totens", title: "Totens", match: /totem|totens/i },
   { key: "impressoras", title: "Impressoras", match: /impressora|printer/i },
   { key: "links", title: "Links", match: /^links$/i },
 ];

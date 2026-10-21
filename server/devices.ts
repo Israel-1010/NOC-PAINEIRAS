@@ -19,7 +19,7 @@ class DeviceError extends Error {
 }
 
 // Grupos oferecidos no cadastro (mesmas secoes do Painel NOC; CFTV e antenas ficam de fora).
-const OFFERED_GROUPS = /switch|servidor|server|mini|videowall|links|impressora|printer|catraca|totem|rede|network/i;
+const OFFERED_GROUPS = /switch|servidor|server|mini|videowall|links|impressora|printer|catraca|totem|totens|rede|network/i;
 // Tipos padrao: aparecem mesmo que o grupo ainda nao exista no Zabbix (criado no primeiro cadastro).
 const STANDARD_TYPES = ["Catracas", "Totens", "Impressoras"];
 const NEW_GROUP_PREFIX = "novo:";
@@ -72,7 +72,7 @@ async function offeredGroups() {
   const offered = groups
     // Fora: cameras/antenas, grupos padrao do Zabbix e grupos vazios que nao sao secao do painel (ex.: "Network" da UniFi).
     .filter((group) => OFFERED_GROUPS.test(group.name) && !/cftv|camera|antena/i.test(group.name) && !/^(zabbix servers|linux servers)$/i.test(group.name))
-    .filter((group) => Number(group.hosts) > 0 || /switch|servidor|mini|videowall|^links$|catraca|totem|impressora/i.test(group.name))
+    .filter((group) => Number(group.hosts) > 0 || /switch|servidor|mini|videowall|^links$|catraca|totem|totens|impressora/i.test(group.name))
     .map(({ groupid, name }) => ({ groupid, name }));
   // Tipos padrao que ainda nao existem: oferecidos como "novo:<nome>".
   for (const type of STANDARD_TYPES) {
