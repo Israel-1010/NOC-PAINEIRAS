@@ -1,3 +1,4 @@
+import { getBeszelOverview, isBeszelConfigured, type BeszelOverview } from "./beszelClient";
 import { getUnifiOverview, isUnifiConfigured, type UnifiOverview } from "./unifiClient";
 import { getLinkConfig, getLinksHistory, getLinksLive, zbx } from "./zabbixClient";
 
@@ -376,7 +377,7 @@ function buildNocOverview() {
         return { data: fallback, error: error instanceof Error ? error.message : "Falha" };
       }
     };
-    const [groups, problems, firewalls, routers, hardware, links, traffic, unifi] = await Promise.all([
+    const [groups, problems, firewalls, routers, hardware, links, traffic, unifi, beszel] = await Promise.all([
       settle(loadGroups(), { groups: [] as NocGroup[], hostNames: new Map<string, string>() }),
       settle(loadProblems(), [] as Awaited<ReturnType<typeof loadProblems>>),
       settle(loadFirewalls(), [] as Awaited<ReturnType<typeof loadFirewalls>>),
@@ -386,6 +387,8 @@ function buildNocOverview() {
       settle(getLinksHistory("6h"), null as Awaited<ReturnType<typeof getLinksHistory>> | null),
       // Controladoras do portal e as lidas pelo Zabbix; null quando nao ha nenhuma.
       settle(getUnifiOverview(), null as UnifiOverview | null),
+      // Servidores e containers (Beszel), quando configurado.
+      isBeszelConfigured() ? settle(getBeszelOverview(), null as BeszelOverview | null) : Promise.resolve({ data: null as BeszelOverview | null, error: "" }),
     ]);
 
     // Liga cada link a porta do firewall (ex.: x2 = TELIUM) para cruzar com o SD-WAN.
@@ -421,7 +424,8 @@ function buildNocOverview() {
       traffic: traffic.data,
       unifi: unifi.data,
       unifiConfigured: isUnifiConfigured() || Boolean(unifi.data),
-      errors: [groups, problems, firewalls, routers, hardware, links, traffic, unifi].map((entry) => entry.error).filter(Boolean),
+      beszel: beszel.data,
+      errors: [groups, problems, firewalls, routers, hardware, links, traffic, unifi, beszel].map((entry) => entry.error).filter(Boolean),
     };
   })();
 }

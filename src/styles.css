@@ -11913,3 +11913,88 @@ thead .ac-person-col {
     display: none;
   }
 }
+
+/* NOC: servidores Docker e containers (Beszel) */
+.noc-docker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+}
+
+.noc-docker-systems {
+  display: grid;
+  gap: 14px;
+}
+
+.noc-docker-systems.count-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.noc-docker-systems.count-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.noc-docker-system {
+  display: grid;
+  gap: 10px;
+  border-top: 3px solid var(--tone);
+}
+
+.noc-docker-system header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.noc-docker-system header h3 {
+  margin: 0;
+}
+
+.noc-docker-system header em {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tone);
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.noc-docker-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.noc-docker-meters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.noc-docker-net {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 1.15em !important;
+}
+
+.noc-docker-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 170px;
+}
+
+.noc-docker-chart small {
+  color: var(--noc-muted);
+  font-size: 0.8em;
+}
+
+.noc-legend i.mem {
+  background: #199e70;
+}
+
+.noc-docker-containers {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}

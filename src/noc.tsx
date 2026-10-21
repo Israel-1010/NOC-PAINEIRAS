@@ -158,7 +158,30 @@ type Unifi = {
   clients: { total: number; wired: number; wireless: number; bySsid: { ssid: string; count: number }[] };
   alarms: UnifiAlarm[];
 };
+type BeszelSystem = {
+  id: string;
+  name: string;
+  host: string;
+  status: string;
+  cpu: number | null;
+  memPct: number | null;
+  memUsedGb: number | null;
+  memTotalGb: number | null;
+  diskPct: number | null;
+  diskUsedGb: number | null;
+  diskTotalGb: number | null;
+  netUpBps: number | null;
+  netDownBps: number | null;
+  load: number[];
+  threads: number | null;
+  uptimeSec: number | null;
+  agent: string;
+  history: { t: number; cpu: number | null; mem: number | null }[];
+};
+type BeszelContainer = { id: string; system: string; name: string; image: string; status: string; health: number; cpu: number | null; memoryMb: number | null };
+type Beszel = { systems: BeszelSystem[]; containers: BeszelContainer[] };
 type NocData = {
+  beszel?: Beszel | null;
   unifi?: Unifi | null;
   unifiConfigured?: boolean;
   generatedAt: string;
@@ -192,8 +215,18 @@ function buildPages(data: NocData | null): NocPage[] {
   }));
   // Com antenas vindas da UniFi, a grade de ping do Zabbix vira redundante.
   const hasUnifiAps = controllers.some((controller) => controller.ok && controller.aps.length);
-  const fixed = FIXED_PAGES.filter((page) => page.id !== "antenas" || !hasUnifiAps);
-  return [...fixed.slice(0, 2), ...unifiPages, ...fixed.slice(2)];
+  // Paginas de grupo so aparecem se o grupo existir e tiver hosts (ex.: grupo de ping das antenas foi esvaziado).
+  const hasHosts = (key: string) => Boolean(data?.groups.find((group) => group.key === key)?.total);
+  const fixed = FIXED_PAGES.filter((page) => {
+    if (page.id === "antenas") return !hasUnifiAps && hasHosts("antenas");
+    if (page.id === "videowall") return !data || hasHosts("videowall");
+    return true;
+  });
+  // Servidores Docker (Beszel) logo depois de "Servidores e Datacenter".
+  const docker: NocPage[] = data?.beszel?.systems.length ? [{ id: "docker", title: "Servidores Docker e containers", icon: HardDrive }] : [];
+  const serversIndex = fixed.findIndex((page) => page.id === "servidores");
+  const withDocker = serversIndex >= 0 ? [...fixed.slice(0, serversIndex + 1), ...docker, ...fixed.slice(serversIndex + 1)] : [...fixed, ...docker];
+  return [...withDocker.slice(0, 2), ...unifiPages, ...withDocker.slice(2)];
 }
 
 // Severidades no padrao do Zabbix (sempre com rotulo).
@@ -788,6 +821,107 @@ function ServersPage({ data }: { data: NocData }) {
           </section>
         ))}
       </div>
+    </div>
+  );
+}
+
+/* ---------- Servidores Docker e containers (Beszel) ---------- */
+
+// "Up 5 weeks (healthy)" -> "no ar há 5 semanas"
+const DOCKER_UNITS: Record<string, [string, string]> = {
+  second: ["segundo", "segundos"],
+  minute: ["minuto", "minutos"],
+  hour: ["hora", "horas"],
+  day: ["dia", "dias"],
+  week: ["semana", "semanas"],
+  month: ["mês", "meses"],
+  year: ["ano", "anos"],
+};
+function dockerStatus(status: string) {
+  const match = /^Up (?:About )?(an?|less than a|\d+) (second|minute|hour|day|week|month|year)s?/i.exec(status);
+  if (!match) return status.replace(/\s*\((un)?healthy\)|\s*\(health: starting\)/i, "");
+  const count = /^\d+$/.test(match[1]) ? Number(match[1]) : 1;
+  const unit = DOCKER_UNITS[match[2].toLowerCase()];
+  return `no ar há ${count} ${count === 1 ? unit[0] : unit[1]}`;
+}
+
+const HEALTH = [
+  { label: "", tone: "good" },
+  { label: "iniciando", tone: "warning" },
+  { label: "saudável", tone: "good" },
+  { label: "com falha", tone: "critical" },
+];
+
+function DockerPage({ beszel }: { beszel: Beszel }) {
+  const containers = [...beszel.containers].sort((a, b) => Number(b.health === 3) - Number(a.health === 3) || (b.memoryMb || 0) - (a.memoryMb || 0));
+  const heaviest = Math.max(1, ...containers.map((container) => container.memoryMb || 0));
+  const failing = containers.filter((container) => container.health === 3).length;
+  const healthy = containers.filter((container) => container.health === 2).length;
+  return (
+    <div className="noc-page noc-docker">
+      <div className={`noc-docker-systems count-${Math.min(beszel.systems.length, 3)}`}>
+        {beszel.systems.map((system) => {
+          const online = system.status === "up";
+          return (
+            <section key={system.id} className={`noc-card noc-docker-system tone-${online ? "good" : "critical"}`}>
+              <header>
+                <h3><HardDrive size={20} /> {system.name} <small>{system.host}</small></h3>
+                <em>{online ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {online ? "Online" : system.status === "paused" ? "Pausado" : "Fora do ar"}</em>
+              </header>
+              <div className="noc-docker-body">
+                <div className="noc-docker-meters">
+                  <Meter label="CPU" value={system.cpu} icon={<Cpu size={15} />} />
+                  <Meter label={`Memória ${system.memUsedGb ?? "—"}/${system.memTotalGb ?? "—"} GB`} value={system.memPct} icon={<MemoryStick size={15} />} warn={80} crit={92} />
+                  <Meter label={`Disco ${system.diskUsedGb ?? "—"}/${system.diskTotalGb ?? "—"} GB`} value={system.diskPct} icon={<HardDrive size={15} />} warn={80} crit={90} />
+                  <div className="noc-big-stat">
+                    <span>Rede agora</span>
+                    <strong className="noc-docker-net"><ArrowDown size={15} className="noc-in" /> {rate(system.netDownBps)} <ArrowUp size={15} className="noc-out" /> {rate(system.netUpBps)}</strong>
+                  </div>
+                </div>
+                <div className="noc-docker-chart">
+                  <span className="noc-legend"><i className="in" /> CPU % <i className="mem" /> Memória %</span>
+                  <div className="noc-fill">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={system.history} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                        <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} scale="time" hide />
+                        <YAxis hide domain={[0, 100]} />
+                        <Tooltip
+                          contentStyle={{ background: "#0b1430", border: "1px solid #2c3a5a", borderRadius: 8, color: "#eef2fb" }}
+                          labelFormatter={(t) => new Date(Number(t)).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                          formatter={(value, key) => [`${value}%`, key === "cpu" ? "CPU" : "Memória"]}
+                        />
+                        <Area type="monotone" dataKey="mem" stroke="#199e70" strokeWidth={2} fill="#199e70" fillOpacity={0.12} isAnimationActive={false} />
+                        <Area type="monotone" dataKey="cpu" stroke="#3987e5" strokeWidth={2} fill="#3987e5" fillOpacity={0.18} isAnimationActive={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <small>última hora · carga {system.load.join(" / ") || "—"} · {system.threads ?? "—"} núcleos · no ar há {uptime(system.uptimeSec)}</small>
+                </div>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      <section className="noc-card noc-docker-containers">
+        <h3>
+          <Server size={20} /> Containers <small>{containers.length} rodando · {healthy} saudáveis{failing ? ` · ${failing} com falha` : ""} · ordenados por memória</small>
+        </h3>
+        <div className={`noc-swgrid ${containers.length > 40 ? "size-xs" : "size-sm"}`}>
+          {containers.map((container) => {
+            const health = HEALTH[container.health] || HEALTH[0];
+            return (
+              <div key={container.id} className={`noc-sw tone-${health.tone}`} title={`${container.name} · ${container.image} · ${container.system} · ${container.status}`}>
+                <strong>{toneIcon(health.tone, 13)} {container.name}</strong>
+                <div className="noc-sw-ports" aria-label={`${container.memoryMb} MB de memória`}><i style={{ width: `${((container.memoryMb || 0) / heaviest) * 100}%` }} /></div>
+                <small>
+                  <b>{container.memoryMb ?? "—"} MB</b> · CPU {pct(container.cpu)} · {dockerStatus(container.status)}{health.label ? ` · ${health.label}` : ""}
+                </small>
+              </div>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }
@@ -1550,6 +1684,8 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           <GroupPage data={data} keys={["antenas"]} />
         ) : current.id === "servidores" ? (
           <ServersPage data={data} />
+        ) : current.id === "docker" && data.beszel ? (
+          <DockerPage beszel={data.beszel} />
         ) : (
           <GroupPage data={data} keys={["videowall"]} />
         )}
