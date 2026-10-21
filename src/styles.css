@@ -11998,3 +11998,63 @@ thead .ac-person-col {
   flex-direction: column;
   min-height: 0;
 }
+
+/* NOC: containers em faixas por ambiente (Producao / Homologacao / Infraestrutura) */
+.noc-docker-envs {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.noc-docker-env {
+  display: grid;
+  grid-template-columns: 11em minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 4px solid var(--tone, var(--noc-unknown));
+  border-radius: 10px;
+}
+
+.noc-docker-env h4 {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  color: var(--tone, var(--noc-ink));
+  font-size: 1.05em;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.noc-docker-env.tone-unknown h4 {
+  color: var(--noc-muted);
+}
+
+.noc-docker-env h4 small {
+  color: var(--noc-muted);
+  font-size: 0.72em;
+  font-weight: 600;
+  text-transform: none;
+}
+
+.noc-docker-env-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.noc-docker-env-grid .noc-sw {
+  gap: 3px;
+  padding: 5px 9px;
+}
+
+.noc-docker-env-grid .noc-sw strong {
+  font-size: 0.88em;
+}
+
+.noc-docker-env-grid .noc-sw small {
+  font-size: 0.74em;
+}

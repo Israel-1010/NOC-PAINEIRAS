@@ -129,10 +129,15 @@ async function build(): Promise<BeszelOverview> {
     }),
   );
   const systemName = new Map(enriched.map((system) => [system.id, system.name]));
+  // O Beszel guarda por um tempo o registro de containers recriados (ex.: apos redeploy):
+  // vale so o que foi atualizado na leitura mais recente de cada servidor (folga de 2 min).
+  const newest = new Map<string, number>();
+  for (const container of containers.items) newest.set(container.system, Math.max(newest.get(container.system) || 0, Number(container.updated) || 0));
+  const current = containers.items.filter((container) => (Number(container.updated) || 0) >= (newest.get(container.system) || 0) - 120000);
   return {
     generatedAt: new Date().toISOString(),
     systems: enriched,
-    containers: containers.items.map((container) => ({
+    containers: current.map((container) => ({
       id: container.id,
       system: systemName.get(container.system) || "",
       name: container.name,

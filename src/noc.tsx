@@ -852,11 +852,38 @@ const HEALTH = [
   { label: "com falha", tone: "critical" },
 ];
 
+// Ambiente pelo prefixo do nome (prd-/hml-), o resto e infraestrutura.
+const DOCKER_ENVS = [
+  { key: "prd", title: "Produção", match: /^prd[-_]/i, tone: "good" },
+  { key: "hml", title: "Homologação", match: /^hml[-_]/i, tone: "warning" },
+  { key: "infra", title: "Infraestrutura", match: /.*/, tone: "unknown" },
+] as const;
+const appName = (name: string) => name.replace(/^(prd|hml)[-_]/i, "");
+
+function ContainerTile({ container, heaviest }: { container: BeszelContainer; heaviest: number }) {
+  const health = HEALTH[container.health] || HEALTH[0];
+  return (
+    <div className={`noc-sw tone-${health.tone}`} title={`${container.name} · ${container.image} · ${container.system} · ${container.status}`}>
+      <strong>{toneIcon(health.tone, 13)} {appName(container.name)}</strong>
+      <div className="noc-sw-ports" aria-label={`${container.memoryMb} MB de memória`}><i style={{ width: `${((container.memoryMb || 0) / heaviest) * 100}%` }} /></div>
+      <small>
+        <b>{container.memoryMb ?? "—"} MB</b> · CPU {pct(container.cpu)} · {dockerStatus(container.status).replace("no ar há ", "")}{health.label ? ` · ${health.label}` : ""}
+      </small>
+    </div>
+  );
+}
+
 function DockerPage({ beszel }: { beszel: Beszel }) {
-  const containers = [...beszel.containers].sort((a, b) => Number(b.health === 3) - Number(a.health === 3) || (b.memoryMb || 0) - (a.memoryMb || 0));
+  const containers = beszel.containers;
   const heaviest = Math.max(1, ...containers.map((container) => container.memoryMb || 0));
   const failing = containers.filter((container) => container.health === 3).length;
   const healthy = containers.filter((container) => container.health === 2).length;
+  const envs = DOCKER_ENVS.map((env) => ({
+    ...env,
+    items: containers
+      .filter((container) => DOCKER_ENVS.find((entry) => entry.match.test(container.name))?.key === env.key)
+      .sort((a, b) => Number(b.health === 3) - Number(a.health === 3) || appName(a.name).localeCompare(appName(b.name), "pt-BR")),
+  })).filter((env) => env.items.length);
   return (
     <div className="noc-page noc-docker">
       <div className={`noc-docker-systems count-${Math.min(beszel.systems.length, 3)}`}>
@@ -905,18 +932,20 @@ function DockerPage({ beszel }: { beszel: Beszel }) {
 
       <section className="noc-card noc-docker-containers">
         <h3>
-          <Server size={20} /> Containers <small>{containers.length} rodando · {healthy} saudáveis{failing ? ` · ${failing} com falha` : ""} · ordenados por memória</small>
+          <Server size={20} /> Containers <small>{containers.length} rodando · {healthy} saudáveis{failing ? ` · ${failing} com falha` : ""}</small>
         </h3>
-        <div className={`noc-swgrid ${containers.length > 40 ? "size-xs" : "size-sm"}`}>
-          {containers.map((container) => {
-            const health = HEALTH[container.health] || HEALTH[0];
+        <div className="noc-docker-envs">
+          {envs.map((env) => {
+            const memory = env.items.reduce((sum, container) => sum + (container.memoryMb || 0), 0);
             return (
-              <div key={container.id} className={`noc-sw tone-${health.tone}`} title={`${container.name} · ${container.image} · ${container.system} · ${container.status}`}>
-                <strong>{toneIcon(health.tone, 13)} {container.name}</strong>
-                <div className="noc-sw-ports" aria-label={`${container.memoryMb} MB de memória`}><i style={{ width: `${((container.memoryMb || 0) / heaviest) * 100}%` }} /></div>
-                <small>
-                  <b>{container.memoryMb ?? "—"} MB</b> · CPU {pct(container.cpu)} · {dockerStatus(container.status)}{health.label ? ` · ${health.label}` : ""}
-                </small>
+              <div key={env.key} className={`noc-docker-env tone-${env.tone}`}>
+                <h4>
+                  {env.title}
+                  <small>{env.items.length} containers · {memory >= 1024 ? `${(memory / 1024).toFixed(1)} GB` : `${Math.round(memory)} MB`}</small>
+                </h4>
+                <div className="noc-docker-env-grid">
+                  {env.items.map((container) => <ContainerTile key={container.id} container={container} heaviest={heaviest} />)}
+                </div>
               </div>
             );
           })}
