@@ -228,7 +228,7 @@ function LinkPanel({ live, history, range, loadingHistory }: { live: LiveLink; h
             <table className="lk-table">
               <thead><tr><th>Horário</th><th>Download</th><th>Upload</th><th>Latência</th></tr></thead>
               <tbody>
-                {[...series].reverse().map((point) => (
+                {series.filter((point) => point.in !== null || point.out !== null || point.latency !== null).reverse().map((point) => (
                   <tr key={point.t}>
                     <td>{formatWhen(point.t)}</td>
                     <td>{formatRate(point.in)}</td>
@@ -256,8 +256,8 @@ function LinkPanel({ live, history, range, loadingHistory }: { live: LiveLink; h
               <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} scale="time" tickFormatter={(t) => formatTick(t, range)} tick={{ fill: "var(--lk-muted)", fontSize: 11 }} axisLine={{ stroke: "var(--lk-axis)" }} tickLine={false} minTickGap={40} />
               <YAxis tickFormatter={(v) => axisRate(Number(v))} tick={{ fill: "var(--lk-muted)", fontSize: 11 }} axisLine={false} tickLine={false} width={44} />
               <Tooltip content={<ChartTooltip unit="rate" />} cursor={{ stroke: "var(--lk-axis)", strokeWidth: 1 }} />
-              <Area type="monotone" dataKey="in" stroke="var(--lk-in)" strokeWidth={2} fill={`url(#in-${live.id})`} isAnimationActive={false} connectNulls activeDot={{ r: 4, stroke: "var(--lk-surface)", strokeWidth: 2 }} />
-              <Area type="monotone" dataKey="out" stroke="var(--lk-out)" strokeWidth={2} fill={`url(#out-${live.id})`} isAnimationActive={false} connectNulls activeDot={{ r: 4, stroke: "var(--lk-surface)", strokeWidth: 2 }} />
+              <Area type="monotone" dataKey="in" stroke="var(--lk-in)" strokeWidth={2} fill={`url(#in-${live.id})`} isAnimationActive={false} activeDot={{ r: 4, stroke: "var(--lk-surface)", strokeWidth: 2 }} />
+              <Area type="monotone" dataKey="out" stroke="var(--lk-out)" strokeWidth={2} fill={`url(#out-${live.id})`} isAnimationActive={false} activeDot={{ r: 4, stroke: "var(--lk-surface)", strokeWidth: 2 }} />
             </AreaChart>
           </ResponsiveContainer>
         ) : (
@@ -284,7 +284,7 @@ function LinkPanel({ live, history, range, loadingHistory }: { live: LiveLink; h
               <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} scale="time" hide />
               <YAxis tick={{ fill: "var(--lk-muted)", fontSize: 10 }} axisLine={false} tickLine={false} width={44} />
               <Tooltip content={<ChartTooltip unit="ms" />} cursor={{ stroke: "var(--lk-axis)", strokeWidth: 1 }} />
-              <Line type="monotone" dataKey="latency" stroke="var(--lk-latency)" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+              <Line type="monotone" dataKey="latency" stroke="var(--lk-latency)" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>

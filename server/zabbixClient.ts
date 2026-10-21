@@ -367,7 +367,11 @@ export async function getLinksHistory(rangeKey: string) {
       };
     });
 
-    const times = Array.from(timeline).sort((a, b) => a - b);
+    // Linha do tempo completa: 2+ baldes vazios seguidos (ex.: Zabbix parado) viram null para o grafico
+    // mostrar o buraco em vez de ligar os dois lados com uma reta. Um balde vazio isolado e so atraso de coleta.
+    const grid: number[] = [];
+    for (let t = from; t <= now; t += range.bucket) grid.push(t);
+    const times = grid.filter((t, index) => timeline.has(t) || !timeline.has(grid[index - 1]) || !timeline.has(grid[index + 1]));
     const mbps = (entry?: { sum: number; count: number }) => (entry ? Math.round((entry.sum / entry.count / 1e6) * 10) / 10 : null);
     const ms = (entry?: { sum: number; count: number }) => (entry ? Math.round((entry.sum / entry.count) * 10000) / 10 : null);
 

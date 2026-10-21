@@ -372,7 +372,28 @@ function GroupHeader({ group }: { group: NocGroup }) {
 
 function TrafficMini({ series, height = 110 }: { series: { t: number; in: number | null; out: number | null }[]; height?: number | "100%" }) {
   if (!series.length) return <p className="noc-empty">Sem histórico</p>;
+  // Buraco (null) = periodo sem coleta no Zabbix; nao liga os lados com reta.
+  if (series.filter((point) => point.in !== null || point.out !== null).length < 2) {
+    return <p className="noc-empty">Poucos dados nesta janela: o Zabbix ficou sem coletar e o histórico está sendo retomado.</p>;
+  }
+  // Maior intervalo sem coleta (30 min ou mais) vira uma legenda no grafico.
+  let gap: { from: number; to: number } | null = null;
+  let runStart: number | null = null;
+  series.forEach((point, index) => {
+    const empty = point.in === null && point.out === null;
+    if (empty && runStart === null) runStart = index;
+    if ((!empty || index === series.length - 1) && runStart !== null) {
+      const from = series[Math.max(0, runStart - 1)].t;
+      const to = empty ? point.t : point.t;
+      if (to - from >= 30 * 60000 && (!gap || to - from > gap.to - gap.from)) gap = { from, to };
+      runStart = null;
+    }
+  });
+  const hhmm = (t: number) => new Date(t).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const gapNote = gap as { from: number; to: number } | null;
   return (
+    <>
+    {gapNote ? <span className="noc-gap-note">sem coleta do Zabbix {hhmm(gapNote.from)}–{hhmm(gapNote.to)}</span> : null}
     <ResponsiveContainer width="100%" height={height} minHeight={60}>
       <AreaChart data={series} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
         <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} scale="time" hide />
@@ -382,10 +403,11 @@ function TrafficMini({ series, height = 110 }: { series: { t: number; in: number
           labelFormatter={(t) => new Date(Number(t)).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
           formatter={(value, key) => [rate(Number(value) * 1e6), key === "in" ? "Download" : "Upload"]}
         />
-        <Area type="monotone" dataKey="in" stroke="#3987e5" strokeWidth={2} fill="#3987e5" fillOpacity={0.18} isAnimationActive={false} connectNulls />
-        <Area type="monotone" dataKey="out" stroke="#d95926" strokeWidth={2} fill="#d95926" fillOpacity={0.12} isAnimationActive={false} connectNulls />
+        <Area type="monotone" dataKey="in" stroke="#3987e5" strokeWidth={2} fill="#3987e5" fillOpacity={0.18} isAnimationActive={false} />
+        <Area type="monotone" dataKey="out" stroke="#d95926" strokeWidth={2} fill="#d95926" fillOpacity={0.12} isAnimationActive={false} />
       </AreaChart>
     </ResponsiveContainer>
+    </>
   );
 }
 
@@ -402,12 +424,13 @@ function OverviewPage({ data }: { data: NocData }) {
   const hwBad = data.hardware.filter((hw) => hw.health !== "ok").length;
   const bySeverity = [5, 4, 3, 2].map((severity) => ({ severity, count: data.problems.filter((problem) => problem.severity === severity).length }));
   const combined = useMemo(() => {
-    const series = new Map<number, { t: number; in: number; out: number }>();
+    // Soma dos links; se nenhum link tem dado naquele momento, fica null (buraco), e nao zero.
+    const series = new Map<number, { t: number; in: number | null; out: number | null }>();
     for (const link of data.traffic?.links || []) {
       for (const point of link.series) {
-        const entry = series.get(point.t) || { t: point.t, in: 0, out: 0 };
-        entry.in += point.in || 0;
-        entry.out += point.out || 0;
+        const entry = series.get(point.t) || { t: point.t, in: null, out: null };
+        if (point.in !== null) entry.in = (entry.in ?? 0) + point.in;
+        if (point.out !== null) entry.out = (entry.out ?? 0) + point.out;
         series.set(point.t, entry);
       }
     }
