@@ -145,9 +145,13 @@ try {
       out.alarms.push({ id: alarms[a]._id, site: title, time: alarms[a].datetime || '', msg: alarms[a].msg || alarms[a].key || 'Alarme' });
     }
 
-    var evs = recentEvents(site.name);
-    for (var v = 0; v < evs.length; v++) {
-      out.events.push({ t: evs[v].datetime || (evs[v].time ? new Date(evs[v].time).toISOString() : ''), k: evs[v].key || '', m: evs[v].msg || '', site: title });
+    // Eventos (stat/event) DESLIGADOS: logo apos as leituras com essa consulta, a controladora da CPM68
+    // passou a recusar conexoes por varios minutos. O log vem dos alarmes (list/alarm), mais leves.
+    if (p.events === '1') {
+      var evs = recentEvents(site.name);
+      for (var v = 0; v < evs.length; v++) {
+        out.events.push({ t: evs[v].datetime || (evs[v].time ? new Date(evs[v].time).toISOString() : ''), k: evs[v].key || '', m: evs[v].msg || '', site: title });
+      }
     }
   }
   out.events.sort(function (x, y) { return x.t < y.t ? 1 : x.t > y.t ? -1 : 0; });

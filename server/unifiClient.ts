@@ -643,7 +643,8 @@ type ZabbixSummary = {
 };
 type ZabbixSource = { id: string; name: string; ok: boolean; message: string; data: ControllerData | null };
 
-const ZABBIX_STALE_SEC = 5 * 60;
+// Item roda a cada 5 min: aceita a ultima leitura boa por ate 15 min.
+const ZABBIX_STALE_SEC = 15 * 60;
 const ALARM_WINDOW_MS = 7 * 24 * 3600 * 1000;
 
 async function loadFromZabbix(): Promise<ZabbixSource[]> {
@@ -657,10 +658,12 @@ async function loadFromZabbix(): Promise<ZabbixSource[]> {
   return items.map((item) => {
     const host = item.hosts[0];
     const base = { id: `zbx-${host?.hostid || item.itemid}`, name: host?.name || "Controladora (Zabbix)" };
-    if (item.state === "1") return { ...base, ok: false, message: (item.error || "Item não suportado no Zabbix.").replace(/^Cannot execute script:\s*/i, ""), data: null };
     const age = Date.now() / 1000 - Number(item.lastclock || 0);
-    if (!Number(item.lastclock)) return { ...base, ok: false, message: "O Zabbix ainda não coletou esta controladora.", data: null };
-    if (age > ZABBIX_STALE_SEC) return { ...base, ok: false, message: `Última coleta do Zabbix há ${Math.round(age / 60)} min.`, data: null };
+    const failure = item.state === "1" ? (item.error || "Item não suportado no Zabbix.").replace(/^Cannot execute script:\s*/i, "").split("\n")[0] : "";
+    // A controladora as vezes recusa a conexao: se a ultima leitura boa e recente, mostra ela com aviso.
+    if (!Number(item.lastclock) || !item.lastvalue) return { ...base, ok: false, message: failure || "O Zabbix ainda não coletou esta controladora.", data: null };
+    if (age > ZABBIX_STALE_SEC) return { ...base, ok: false, message: failure || `Última coleta do Zabbix há ${Math.round(age / 60)} min.`, data: null };
+    const notice = failure ? `Leitura de ${Math.max(1, Math.round(age / 60))} min atrás · a controladora não respondeu na última tentativa.` : "";
     let summary: ZabbixSummary;
     try {
       summary = JSON.parse(item.lastvalue) as ZabbixSummary;
@@ -721,7 +724,7 @@ async function loadFromZabbix(): Promise<ZabbixSource[]> {
       bands: new Map(Object.entries(summary.bands || {})),
       satisfaction: summary.sat ?? null,
     };
-    return { ...base, ok: true, message: "", data };
+    return { ...base, ok: true, message: notice, data };
   });
 }
 
@@ -744,7 +747,8 @@ function toView(id: string, name: string, via: UnifiControllerView["via"], data:
     id,
     name,
     ok: Boolean(data),
-    message: data ? "" : message,
+    // Com dado, a mensagem e um aviso (ex.: ultima tentativa falhou); sem dado, e o motivo da falha.
+    message,
     version: data?.version || "",
     via,
     sites: data?.sites || [],

@@ -1075,12 +1075,17 @@ function ControllerPage({ controller }: { controller: UnifiController }) {
   const apTone = onlineTone(apsOnline, controller.aps.length);
   const swTone = onlineTone(swOnline, controller.switches.length);
   const satTone = satisfactionTone(controller.clients.satisfaction);
-  const drops = controller.events.filter(isDropEvent).length;
+  // Quedas em 24 h: pelo log de eventos; sem eventos (consulta desligada), pelos alarmes de desconexao.
+  const dayAgo = Date.now() - 24 * 3600 * 1000;
+  const drops = controller.events.length
+    ? controller.events.filter(isDropEvent).length
+    : controller.alarms.filter((alarm) => /disconnected|lost contact/i.test(alarm.message) && new Date(alarm.time).getTime() >= dayAgo).length;
   // MAC -> nome (o id do aparelho termina no MAC, com ou sem prefixo da controladora).
   const deviceNames = new Map<string, string>([...controller.aps, ...controller.switches].map((device) => [device.id.slice(-17).toLowerCase(), device.name]));
 
   return (
     <div className="noc-page noc-unifi">
+      {controller.message ? <p className="noc-collect-warn"><AlertTriangle size={18} /> {controller.message}</p> : null}
       <div className="noc-group-head noc-ctrl-head">
         <div>
           <span>Clientes conectados</span>
@@ -1199,10 +1204,10 @@ function ControllerPage({ controller }: { controller: UnifiController }) {
               </ol>
             ) : controller.alarms.length ? (
               <ol>
-                {controller.alarms.slice(0, 4).map((alarm) => (
-                  <li key={alarm.id}>
-                    <span>{alarm.message}</span>
-                    <time>{alarm.time ? `há ${duration(alarm.time)}` : ""}</time>
+                {controller.alarms.slice(0, 8).map((alarm) => (
+                  <li key={alarm.id} className={/disconnected|lost contact/i.test(alarm.message) ? "drop" : ""}>
+                    <time>{alarm.time ? eventTime(alarm.time) : ""}</time>
+                    <span>{translateUnifiEvent(alarm.message, deviceNames)}</span>
                   </li>
                 ))}
               </ol>
