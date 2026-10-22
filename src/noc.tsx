@@ -1555,7 +1555,8 @@ function DevicesManager({ onClose, onChanged }: { onClose: () => void; onChanged
 
   const add = (event: React.FormEvent) => {
     event.preventDefault();
-    const label = form.name || `${form.set} - ${form.role}`;
+    const base = form.name || form.role;
+    const label = form.set && !base.toLowerCase().includes(form.set.toLowerCase()) ? `${form.set} - ${base}` : base;
     // Mantem tipo e conjunto para cadastrar o proximo aparelho do mesmo conjunto (ex.: o 2o facial da catraca).
     run("add", () => devicesApi("", { method: "POST", body: JSON.stringify(form) }), `${label} cadastrado. O Zabbix começa a pingar em até 1 minuto.`).then(() =>
       setForm((value) => ({ ...value, name: "", ip: "", role: "" })),
@@ -1588,9 +1589,10 @@ function DevicesManager({ onClose, onChanged }: { onClose: () => void; onChanged
           </label>
           <label><span>Conjunto (opcional)</span><input value={form.set} maxLength={60} list="noc-dev-sets" placeholder="ex.: Catraca 1" onChange={(event) => setForm({ ...form, set: event.target.value })} /></label>
           <label><span>Função (opcional)</span><input value={form.role} maxLength={40} list="noc-dev-roles" placeholder="ex.: Facial" onChange={(event) => setForm({ ...form, role: event.target.value })} /></label>
-          <label><span>Nome</span><input value={form.name} maxLength={80} placeholder={form.set && form.role ? `${form.set} - ${form.role}` : "ex.: Switch Portaria 3"} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+          <label><span>Nome</span><input value={form.name} maxLength={80} placeholder={form.set ? (form.role ? `${form.set} - ${form.role}` : "ex.: FACIAL-ENTRADA") : "ex.: Switch Portaria 3"} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
           <label><span>IP</span><input value={form.ip} placeholder="10.0.1.50" inputMode="decimal" onChange={(event) => setForm({ ...form, ip: event.target.value })} /></label>
-          <button type="submit" className="primary" disabled={busy === "add" || !form.ip || (!form.name && !(form.set && form.role))}>{busy === "add" ? "Cadastrando..." : "+ Adicionar"}</button>
+          <button type="submit" className="primary" disabled={busy === "add" || !form.ip || (!form.name && !(form.set && form.role))}
+            title={form.set ? `No Zabbix fica "${form.set} - ..." (o nome se repete entre catracas)` : undefined}>{busy === "add" ? "Cadastrando..." : "+ Adicionar"}</button>
           <datalist id="noc-dev-sets">{knownSets.map((set) => <option key={set} value={set} />)}</datalist>
           <datalist id="noc-dev-roles">{knownRoles.map((role) => <option key={role} value={role} />)}</datalist>
         </form>

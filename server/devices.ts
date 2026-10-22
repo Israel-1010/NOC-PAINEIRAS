@@ -139,11 +139,20 @@ export async function listDevices() {
 
 const clean = (value: unknown, max: number) => String(value || "").trim().replace(/\s+/g, " ").slice(0, max);
 
+// O nome do host e unico no Zabbix: dentro de um conjunto ele leva o conjunto na frente
+// ("Catraca 2 - FACIAL-ENTRADA"), assim cada catraca pode ter o seu "FACIAL-ENTRADA".
+function composeName(name: string, set: string, role: string) {
+  if (!set) return name;
+  if (!name) return role ? `${set} - ${role}` : "";
+  return name.toLowerCase().includes(set.toLowerCase()) ? name : `${set} - ${name}`;
+}
+
 function validate(input: Record<string, unknown>, groups: { groupid: string }[]) {
   const set = clean(input.set, 60);
-  const role = clean(input.role, 40);
-  // Sem nome, mas com conjunto e funcao: "Catraca 1 - Facial".
-  const name = clean(input.name, 120) || (set && role ? `${set} - ${role}` : "");
+  const typed = clean(input.name, 120);
+  // Conjunto sem funcao: o nome digitado vira a funcao (e o que aparece no cartao da catraca).
+  const role = clean(input.role, 40) || (set ? typed.slice(0, 40) : "");
+  const name = composeName(typed, set, role);
   const ip = String(input.ip || "").trim();
   const groupId = String(input.groupId || "");
   if (!name || name.length > 80) throw new DeviceError("Informe o nome do dispositivo (até 80 caracteres), ou o conjunto e a função.");
@@ -209,7 +218,12 @@ export async function updateDevice(id: string, input: Record<string, unknown>) {
     set: tagValue(host, SET_TAG),
     role: tagValue(host, ROLE_TAG),
   };
-  const next = validate({ ...current, ...input }, groups);
+  const merged = { ...current, ...input };
+  // Tira o prefixo do conjunto antigo do nome: trocar de conjunto nao empilha "Catraca 2 - Catraca 1 - ...".
+  const oldPrefix = current.set ? `${current.set} - ` : "";
+  const mergedName = String(merged.name || "");
+  if (oldPrefix && mergedName.toLowerCase().startsWith(oldPrefix.toLowerCase())) merged.name = mergedName.slice(oldPrefix.length);
+  const next = validate(merged, groups);
   try {
     const groupid = await resolveGroupId(next.groupId);
     // Mantem outras tags do host; troca so conjunto/funcao.
