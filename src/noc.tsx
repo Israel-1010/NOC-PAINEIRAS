@@ -403,10 +403,11 @@ function translateProblem(name: string) {
     .replace(/^One or more Acces+ Point is disconnected$/i, "Antena desconectada da controladora");
 }
 
-// Grupo pequeno (ate 12, ex.: videowall): cartoes com detalhes, sem esticar para a tela toda.
-function DeviceCards({ group, problems }: { group: NocGroup; problems: NocProblem[] }) {
+// Grupo pequeno (ex.: videowall): cartoes com nome inteiro e detalhes. Na pagina inteira (ate 24)
+// ocupam a tela em 3 colunas, ou 4 quando passam de 18.
+function DeviceCards({ group, problems, page = false }: { group: NocGroup; problems: NocProblem[]; page?: boolean }) {
   return (
-    <div className="noc-devcards">
+    <div className={`noc-devcards${page ? " is-page" : ""}${page && group.total > 18 ? " cols-4" : ""}`}>
       {group.hosts.map((host) => {
         const tone = host.up === null ? "unknown" : host.up ? (host.loss && host.loss > 0 ? "warning" : "good") : "critical";
         const down = problems.find((problem) => problem.hostId === host.id && /icmp|ping/i.test(problem.name));
@@ -886,7 +887,7 @@ function GroupPage({ data, keys }: { data: NocData; keys: string[] }) {
         <section key={group.key} className="noc-group">
           {groups.length > 1 ? <h3 className="noc-group-title">{group.title}</h3> : null}
           <GroupHeader group={group} />
-          {group.total <= 12 ? <DeviceCards group={group} problems={data.problems} /> : <HostGrid group={group} compact={groups.length > 1 && group.total > 30} />}
+          {group.total <= (groups.length === 1 ? 24 : 12) ? <DeviceCards group={group} problems={data.problems} page={groups.length === 1} /> : <HostGrid group={group} compact={groups.length > 1 && group.total > 30} />}
         </section>
       ))}
     </div>

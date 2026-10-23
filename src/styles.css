@@ -11706,15 +11706,29 @@ thead .ac-person-col {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: start;
-  gap: 12px;
+  gap: 14px;
+}
+
+/* Pagina inteira (ex.: Videowall): 3 colunas, cartoes altos ocupando a tela. */
+.noc-devcards.is-page {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(120px, 1fr);
+  align-content: stretch;
+  flex: 1;
+  min-height: 0;
+}
+
+.noc-devcards.is-page.cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(100px, 1fr);
 }
 
 .noc-devcard {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
-  padding: 16px 18px;
+  gap: 16px;
+  padding: 18px 22px;
   background: var(--noc-panel);
   border: 1px solid var(--noc-line);
   border-left: 4px solid var(--tone, var(--noc-line));
@@ -11728,8 +11742,8 @@ thead .ac-person-col {
 .noc-devcard-dot {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  height: 46px;
   color: var(--tone);
   background: rgba(255, 255, 255, 0.05);
   border-radius: 50%;
@@ -11737,21 +11751,25 @@ thead .ac-person-col {
 
 .noc-devcard-main {
   display: grid;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
 }
 
+/* Nome inteiro: quebra em ate 2 linhas em vez de cortar com "..." */
 .noc-devcard-main strong {
+  display: -webkit-box;
   overflow: hidden;
-  font-size: 1.15em;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  font-size: 1.35em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .noc-devcard-main small,
 .noc-devcard-state small {
   color: var(--noc-muted);
-  font-size: 0.85em;
+  font-size: 0.95em;
 }
 
 .noc-devcard-state {
@@ -11762,7 +11780,7 @@ thead .ac-person-col {
 }
 
 .noc-devcard-state b {
-  font-size: 1.15em;
+  font-size: 1.4em;
 }
 
 .noc-devcard.tone-critical .noc-devcard-state b {
