@@ -1141,6 +1141,20 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
                   <span className="rounded border border-emerald-300/30 bg-emerald-300/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-100">
                     {mappedSwitches}/{switches.length} switches em áreas
                   </span>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (!window.confirm('Voltar aos backbones do desenho original? As áreas e ligações atuais serão substituídas.')) return;
+                      setFiberCityNodes(initialBackboneConfig.nodes);
+                      setBackboneLinks(initialBackboneConfig.links);
+                      setEditingFiberId(null);
+                    }}
+                    title="Restaura os backbones do desenho original (útil depois de importar pontos demais)"
+                    className="rounded border border-slate-500/40 bg-white/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-100"
+                  >
+                    Voltar ao desenho original
+                  </button>
                   {mappedSwitches < switches.length && (
                     <button
                       type="button"
