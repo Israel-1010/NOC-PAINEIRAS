@@ -114,6 +114,7 @@ import { allowTvKey, createTvKey, listTvKeys, revokeTvKey } from "./tvKeys";
 import { getUnifiSettings, saveUnifiSettings, testUnifi } from "./unifiClient";
 import { createDevice, deleteDevice, listDevices, updateDevice } from "./devices";
 import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
+import { getBackbones, saveBackbones } from "./infraStore";
 import { addAttachment, createContract, deleteContract, listContracts, readAttachment, removeAttachment, updateContract } from "./contractStore";
 import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
 import {
@@ -574,11 +575,15 @@ function nocAuth(req: express.Request, res: express.Response, next: express.Next
       next();
       return;
     }
-    requireAuth(req, res, () => requireViews(["noc", "tv", "links"])(req, res, next));
+    requireAuth(req, res, () => requireViews(["noc", "tv", "links", "infra3d"])(req, res, next));
   });
 }
 
 app.get("/api/noc", nocAuth, asyncRoute(() => getNocOverview()));
+
+/* ---------- Infraestrutura 3D (Digital Twin): desenho dos backbones ---------- */
+app.get("/api/infra/backbones", requireAuth, requireViews(["infra3d"]), asyncRoute(() => getBackbones()));
+app.put("/api/infra/backbones", requireAuth, requireAdmin, asyncRoute((req) => saveBackbones(req.body)));
 app.get("/api/tv-keys", requireAuth, requireAdmin, asyncRoute(async () => ({ keys: listTvKeys() })));
 app.post("/api/tv-keys", requireAuth, requireAdmin, asyncRoute((req) => createTvKey(String(req.body?.name || ""), req.res?.locals.user)));
 app.delete("/api/tv-keys/:id", requireAuth, requireAdmin, asyncRoute((req) => revokeTvKey(String(req.params.id))));

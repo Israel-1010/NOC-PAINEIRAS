@@ -18,6 +18,7 @@ import {
   Flower2,
   FolderKanban,
   Receipt,
+  Boxes,
   FolderOpen,
   KeyRound,
   LockKeyhole,
@@ -68,6 +69,9 @@ import { DiagnosticsDashboard } from "./diagnostics";
 import { LinksDashboard } from "./links";
 import { NocWall } from "./noc";
 import { ContractsDashboard } from "./contracts";
+
+// O 3D (three.js) so e baixado quando alguem abre a tela.
+const InfraView = React.lazy(() => import("./infra/InfraView"));
 import "./styles.css";
 
 type Status = "online" | "warning" | "offline";
@@ -787,7 +791,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" || value === "noc" || value === "contracts" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" || value === "noc" || value === "contracts" || value === "infra3d" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1218,6 +1222,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
       { label: "Visão geral (TV)", icon: Tv, view: "tv" },
       { label: "Links de internet", icon: Zap, view: "links" },
       { label: "Topologia", icon: Network, view: "topology" },
+      { label: "Infraestrutura 3D", icon: Boxes, view: "infra3d" },
       { label: "SNMP", icon: Signal, view: "snmp" },
     ],
   },
@@ -1259,7 +1264,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
   },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links" | "noc" | "contracts";
+type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links" | "noc" | "contracts" | "infra3d";
 
 function statusLabel(status: Status) {
   return {
@@ -1281,6 +1286,7 @@ function viewEyebrow(view: View) {
   if (view === "pop") return "Procedimento operacional padrao";
   if (view === "projects") return "Gestão de projetos da TI";
   if (view === "contracts") return "Gestão de fornecedores";
+  if (view === "infra3d") return "Digital Twin · dados ao vivo";
   if (view === "links") return "Monitoramento via Zabbix";
   if (view === "noc") return "Central de monitoramento";
   if (view === "access") return "Administração do portal";
@@ -1301,6 +1307,7 @@ function viewTitle(view: View) {
   if (view === "pop") return "POP";
   if (view === "projects") return "Projetos";
   if (view === "contracts") return "Contratos de fornecedores";
+  if (view === "infra3d") return "Infraestrutura 3D";
   if (view === "links") return "Links de internet";
   if (view === "noc") return "Painel NOC";
   if (view === "access") return "Acessos";
@@ -2087,6 +2094,10 @@ function App() {
           <LinksDashboard isAdmin={Boolean(access?.isAdmin)} />
         ) : activeView === "contracts" ? (
           <ContractsDashboard />
+        ) : activeView === "infra3d" ? (
+          <React.Suspense fallback={<div className="view-loading">Carregando a infraestrutura 3D...</div>}>
+            <InfraView isAdmin={Boolean(access?.isAdmin)} />
+          </React.Suspense>
         ) : activeView === "noc" ? (
           <NocWall isAdmin={Boolean(access?.isAdmin)} />
         ) : activeView === "tv" ? (
@@ -5478,7 +5489,7 @@ function HealthTile({
   value,
   tone,
 }: {
-  icon: React.ElementType;
+  icon: LucideIcon;
   label: string;
   value: string;
   tone: "good" | "warn" | "danger";
@@ -5499,7 +5510,7 @@ function TvMetric({
   detail,
   tone,
 }: {
-  icon: React.ElementType;
+  icon: LucideIcon;
   label: string;
   value: string;
   detail: string;
@@ -5524,7 +5535,7 @@ function TicketStatusCard({
   active,
   onClick,
 }: {
-  icon: React.ElementType;
+  icon: LucideIcon;
   label: string;
   value: number;
   detail: string;

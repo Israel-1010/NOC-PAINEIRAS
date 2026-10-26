@@ -11,6 +11,7 @@ export const portalViews = [
   { id: "noc", label: "Painel NOC (TV)", sensitive: false },
   { id: "links", label: "Links de internet", sensitive: false },
   { id: "topology", label: "Topologia", sensitive: true },
+  { id: "infra3d", label: "Infraestrutura 3D", sensitive: true },
   { id: "snmp", label: "SNMP", sensitive: true },
   { id: "projects", label: "Projetos", sensitive: false },
   { id: "contracts", label: "Contratos", sensitive: true },
