@@ -11,8 +11,8 @@ import './infra.css';
 // Pagina do Painel NOC (TV): so a cena dos switches (grade, uplinks, Rack Switch e rack VMware),
 // com os dados que o NOC ja carregou (funciona tambem com a chave de TV, sem login).
 
-const TARGET = new Vector3(-1.6, 0.1, -1.1);
-const CAMERA = new Vector3(-1.4, 6.0, 5.3);
+const TARGET = new Vector3(-2.0, 0.1, -1.1);
+const CAMERA = new Vector3(-1.8, 6.1, 5.4);
 
 // Camera fixa com um balanco lento (a imagem nao fica parada na TV, sem atrapalhar a leitura).
 function SlowSway() {

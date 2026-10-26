@@ -14,7 +14,7 @@ import InternetLink3D, { DOWN_COLOR } from '../components/three/InternetLink3D';
 import SwitchGrid from '../components/three/SwitchGrid';
 
 // Switches de acesso no lugar dos antigos backbones, ao lado do Rack Switch.
-const SWITCH_GRID_CENTER: Vector3Tuple = [-3.6, 0, -1.3];
+const SWITCH_GRID_CENTER: Vector3Tuple = [-4.3, 0, -1.3];
 // Porta do Rack Switch (no mundo) de onde saem os uplinks.
 const SWITCH_RACK_PORT_WORLD: Vector3Tuple = [0.6, 0.06, -1.28];
 const SWITCH_GRID_SCENES: SceneId[] = ['overview', 'datacenter', 'racks', 'network', 'switches'];

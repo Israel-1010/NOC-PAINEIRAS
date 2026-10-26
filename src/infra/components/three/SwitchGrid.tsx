@@ -60,7 +60,8 @@ function DownBeam() {
   );
 }
 
-function SwitchUnit({ sw, position, showLabel }: { sw: SwitchStatus; position: Vector3Tuple; showLabel: boolean }) {
+// aggregation: o switch de agregacao (maior, rotulo de destaque), de onde saem os uplinks dos outros.
+function SwitchUnit({ sw, position, showLabel, aggregation = false }: { sw: SwitchStatus; position: Vector3Tuple; showLabel: boolean; aggregation?: boolean }) {
   const [hovered, setHovered] = useState(false);
   const color = sw.up === true ? UP : sw.up === false ? DOWN : UNKNOWN;
   const down = sw.up === false;
@@ -81,7 +82,7 @@ function SwitchUnit({ sw, position, showLabel }: { sw: SwitchStatus; position: V
           <meshBasicMaterial color={color} transparent opacity={sw.up ? 0.1 : 0.05} depthWrite={false} />
         </mesh>
       )}
-      <group position={[0, 0.08, 0]} scale={hovered ? 1.08 : 1}>
+      <group position={[0, aggregation ? 0.11 : 0.08, 0]} scale={(aggregation ? 1.4 : 1) * (hovered ? 1.08 : 1)}>
         {/* Corpo 1U */}
         <mesh castShadow receiveShadow>
           <boxGeometry args={[0.62, 0.075, 0.32]} />
@@ -109,18 +110,21 @@ function SwitchUnit({ sw, position, showLabel }: { sw: SwitchStatus; position: V
         </mesh>
       </group>
       {down && <DownBeam />}
-      {(showLabel || down || hovered) && (
+      {(showLabel || down || hovered || aggregation) && (
         // Nome em cima do switch (o caido sobe acima do feixe).
-        <Html position={[0, down ? 1.55 : 0.3, 0]} center zIndexRange={[18, 0]}>
+        <Html position={[0, down ? 1.55 : aggregation ? 0.42 : 0.3, 0]} center zIndexRange={[18, 0]}>
           <div
             className={`pointer-events-none whitespace-nowrap rounded px-1.5 py-0.5 text-center text-[9px] font-semibold leading-tight ${
               down
                 ? 'border border-rose-400/70 bg-rose-950/90 text-rose-100 shadow-[0_0_20px_rgba(239,68,68,0.45)]'
                 : hovered
                   ? 'border border-emerald-300/50 bg-slate-950/92 text-emerald-50'
-                  : 'bg-slate-950/70 text-slate-200'
+                  : aggregation
+                    ? 'border border-cyan-300/60 bg-slate-950/90 text-[10px] text-cyan-50 shadow-glow'
+                    : 'bg-slate-950/70 text-slate-200'
             }`}
           >
+            {aggregation ? 'AGREGAÇÃO · ' : ''}
             {switchShortName(sw.name)}
             {down ? ' · SEM RESPOSTA' : hovered ? ` · ${sw.ip} · ${sw.latencyMs ?? '—'} ms` : ''}
           </div>
@@ -146,7 +150,10 @@ interface SwitchGridProps {
 export default function SwitchGrid({ switches, center, rackPort, showLabels, animate, floorEdgeX }: SwitchGridProps) {
   if (!switches.length) return null;
   // Ordem fixa pela numeracao do switch: cada um tem sempre o mesmo lugar (nao pula quando cai).
-  const ordered = [...switches].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true }));
+  const sorted = [...switches].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true }));
+  // Switch de agregacao (PRO-AGGREGATION): fica entre o rack e a grade; todos os outros saem dele.
+  const aggregation = sorted.find((sw) => /aggregat|agrega/i.test(sw.name));
+  const ordered = sorted.filter((sw) => sw !== aggregation);
   const grid = switchGridLayout(ordered.length, center);
   const spineX = center[0] + grid.width / 2 + 0.6;
   const rowZ = (row: number) => center[2] - grid.depth / 2 + row * SWITCH_GRID_SPACING[1];
@@ -155,8 +162,16 @@ export default function SwitchGrid({ switches, center, rackPort, showLabels, ani
   const floorRight = floorEdgeX ?? center[0] + grid.width / 2 + 0.9;
   const firstCable = cableZ(0);
   const lastCable = cableZ(grid.rows - 1);
-  // Tronco: da porta do rack, pelo piso, ate a espinha.
-  const trunkEnd: Vector3Tuple = [spineX, CABLE_Y, Math.min(Math.max(rackPort[2], firstCable), lastCable)];
+  // Tronco: da porta do rack ate a espinha (passando pela agregacao, quando existe).
+  const trunkZ = Math.min(Math.max(rackPort[2], firstCable), lastCable);
+  const trunkEnd: Vector3Tuple = [spineX, CABLE_Y, trunkZ];
+  const aggPos: Vector3Tuple = [(spineX + rackPort[0]) / 2, 0, trunkZ];
+  const aggHalf = 0.46; // metade da largura do switch de agregacao (1.4x) + folga
+  const aggState = aggregation?.up ?? null;
+  // Com a agregacao fora do ar, nada passa para os outros switches: espinha e ramais ficam cinza e parados.
+  const downstreamDead = aggState === false;
+  const downstreamColor = downstreamDead ? '#475569' : CABLE;
+  const flow = animate && !downstreamDead;
 
   return (
     <group>
@@ -167,17 +182,43 @@ export default function SwitchGrid({ switches, center, rackPort, showLabels, ani
         <meshStandardMaterial color="#0b1220" roughness={0.62} />
       </mesh>
 
-      <ConnectionLine
-        from={rackPort}
-        to={trunkEnd}
-        via={[[rackPort[0], CABLE_Y, rackPort[2]], [rackPort[0], CABLE_Y, trunkEnd[2]]]}
-        color={CABLE}
-        active
-        packets={animate ? 4 : 0}
-        bidirectional
-      />
+      {aggregation ? (
+        <group>
+          {/* Rack Switch -> agregacao (entra pela lateral direita) */}
+          <ConnectionLine
+            from={rackPort}
+            to={[aggPos[0] + aggHalf, PORT_Y + 0.03, aggPos[2]]}
+            via={[[rackPort[0], CABLE_Y, rackPort[2]], [aggPos[0] + aggHalf, CABLE_Y, aggPos[2]]]}
+            color={aggState === false ? DOWN : CABLE}
+            active
+            packets={animate && aggState !== false ? 4 : 0}
+            bidirectional
+          />
+          {/* Agregacao -> espinha (sai pela lateral esquerda) */}
+          <ConnectionLine
+            from={[aggPos[0] - aggHalf, PORT_Y + 0.03, aggPos[2]]}
+            to={trunkEnd}
+            via={[[aggPos[0] - aggHalf, CABLE_Y, aggPos[2]]]}
+            color={downstreamColor}
+            active
+            packets={flow ? 4 : 0}
+            bidirectional
+          />
+          <SwitchUnit sw={aggregation} position={aggPos} showLabel aggregation />
+        </group>
+      ) : (
+        <ConnectionLine
+          from={rackPort}
+          to={trunkEnd}
+          via={[[rackPort[0], CABLE_Y, rackPort[2]], [rackPort[0], CABLE_Y, trunkEnd[2]]]}
+          color={CABLE}
+          active
+          packets={animate ? 4 : 0}
+          bidirectional
+        />
+      )}
       {/* Espinha ao longo da lateral da grade */}
-      <ConnectionLine from={[spineX, CABLE_Y, firstCable]} to={[spineX, CABLE_Y, lastCable]} color={CABLE} active packets={animate ? 3 : 0} straight bidirectional />
+      <ConnectionLine from={[spineX, CABLE_Y, firstCable]} to={[spineX, CABLE_Y, lastCable]} color={downstreamColor} active packets={flow ? 3 : 0} straight bidirectional />
 
       {Array.from({ length: grid.rows }).map((_, row) => {
         const rowItems = ordered.slice(row * grid.columns, (row + 1) * grid.columns);
@@ -185,7 +226,7 @@ export default function SwitchGrid({ switches, center, rackPort, showLabels, ani
         return (
           <group key={`row-${row}`}>
             {/* Ramal da fileira, atras dos switches */}
-            <ConnectionLine from={[spineX, CABLE_Y, cableZ(row)]} to={[leftX, CABLE_Y, cableZ(row)]} color={CABLE} active packets={animate ? 3 : 0} straight thin />
+            <ConnectionLine from={[spineX, CABLE_Y, cableZ(row)]} to={[leftX, CABLE_Y, cableZ(row)]} color={downstreamColor} active packets={flow ? 3 : 0} straight thin />
             {/* Descida da bandeja ate a porta de uplink de cada switch, na cor do estado,
                 com trafego animado enquanto o switch responde (parado e vermelho quando cai). */}
             {rowItems.map((sw, column) => {
@@ -198,7 +239,7 @@ export default function SwitchGrid({ switches, center, rackPort, showLabels, ani
                   to={[x, PORT_Y, z - 0.17]}
                   color={color}
                   active
-                  packets={animate && sw.up === true ? 2 : 0}
+                  packets={flow && sw.up === true ? 2 : 0}
                   straight
                   bidirectional
                 />
