@@ -936,7 +936,7 @@ export default function InfraScene({ activeScene, selectedRackId, onSelectNode, 
           switches={live.switches}
           center={SWITCH_GRID_CENTER}
           rackPort={SWITCH_RACK_PORT_WORLD}
-          showLabels={activeScene === 'switches'}
+          showLabels={activeScene !== 'overview'}
           animate={activeScene !== 'overview'}
         />
       )}

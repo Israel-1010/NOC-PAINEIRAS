@@ -12,7 +12,10 @@ import ConnectionLine from './ConnectionLine';
 
 export const SWITCH_GRID_COLUMNS = 7;
 export const SWITCH_GRID_SPACING: [number, number] = [1.0, 0.95];
-const CABLE_Y = 0.03;
+// Bandeja de cabos elevada por tras das fileiras (fica visivel da camera, nao some atras dos switches).
+const CABLE_Y = 0.24;
+// Porta de uplink na traseira do switch (altura do corpo).
+const PORT_Y = 0.08;
 const UP = '#34d399';
 const DOWN = '#ef4444';
 const UNKNOWN = '#64748b';
@@ -107,7 +110,8 @@ function SwitchUnit({ sw, position, showLabel }: { sw: SwitchStatus; position: V
       </group>
       {down && <DownBeam />}
       {(showLabel || down || hovered) && (
-        <Html position={[0, down ? 1.55 : 0.02, down ? 0 : 0.34]} center zIndexRange={[18, 0]}>
+        // Nome em cima do switch (o caido sobe acima do feixe).
+        <Html position={[0, down ? 1.55 : 0.3, 0]} center zIndexRange={[18, 0]}>
           <div
             className={`pointer-events-none whitespace-nowrap rounded px-1.5 py-0.5 text-center text-[9px] font-semibold leading-tight ${
               down
@@ -159,16 +163,16 @@ export default function SwitchGrid({ switches, center, rackPort, showLabels, ani
       </mesh>
 
       <ConnectionLine
-        from={[rackPort[0], CABLE_Y, rackPort[2]]}
+        from={rackPort}
         to={trunkEnd}
-        via={[[rackPort[0], CABLE_Y, trunkEnd[2]]]}
+        via={[[rackPort[0], CABLE_Y, rackPort[2]], [rackPort[0], CABLE_Y, trunkEnd[2]]]}
         color={CABLE}
         active
-        packets={animate ? 3 : 0}
+        packets={animate ? 4 : 0}
         bidirectional
       />
       {/* Espinha ao longo da lateral da grade */}
-      <ConnectionLine from={[spineX, CABLE_Y, firstCable]} to={[spineX, CABLE_Y, lastCable]} color={CABLE} active packets={0} straight />
+      <ConnectionLine from={[spineX, CABLE_Y, firstCable]} to={[spineX, CABLE_Y, lastCable]} color={CABLE} active packets={animate ? 3 : 0} straight bidirectional />
 
       {Array.from({ length: grid.rows }).map((_, row) => {
         const rowItems = ordered.slice(row * grid.columns, (row + 1) * grid.columns);
@@ -176,12 +180,24 @@ export default function SwitchGrid({ switches, center, rackPort, showLabels, ani
         return (
           <group key={`row-${row}`}>
             {/* Ramal da fileira, atras dos switches */}
-            <ConnectionLine from={[spineX, CABLE_Y, cableZ(row)]} to={[leftX, CABLE_Y, cableZ(row)]} color={CABLE} active packets={animate ? 1 : 0} straight thin />
-            {/* Descida ate a porta de uplink de cada switch, na cor do estado */}
+            <ConnectionLine from={[spineX, CABLE_Y, cableZ(row)]} to={[leftX, CABLE_Y, cableZ(row)]} color={CABLE} active packets={animate ? 3 : 0} straight thin />
+            {/* Descida da bandeja ate a porta de uplink de cada switch, na cor do estado,
+                com trafego animado enquanto o switch responde (parado e vermelho quando cai). */}
             {rowItems.map((sw, column) => {
               const [x, , z] = grid.position(row * grid.columns + column);
               const color = sw.up === true ? UP : sw.up === false ? DOWN : UNKNOWN;
-              return <ConnectionLine key={`drop-${sw.id}`} from={[x, CABLE_Y, cableZ(row)]} to={[x, CABLE_Y + 0.05, z - 0.17]} color={color} active packets={0} straight />;
+              return (
+                <ConnectionLine
+                  key={`drop-${sw.id}`}
+                  from={[x, CABLE_Y, cableZ(row)]}
+                  to={[x, PORT_Y, z - 0.17]}
+                  color={color}
+                  active
+                  packets={animate && sw.up === true ? 2 : 0}
+                  straight
+                  bidirectional
+                />
+              );
             })}
           </group>
         );
