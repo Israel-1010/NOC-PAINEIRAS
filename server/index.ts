@@ -114,6 +114,7 @@ import { allowTvKey, createTvKey, listTvKeys, revokeTvKey } from "./tvKeys";
 import { getUnifiSettings, saveUnifiSettings, testUnifi } from "./unifiClient";
 import { createDevice, deleteDevice, listDevices, updateDevice } from "./devices";
 import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
+import { addAttachment, createContract, deleteContract, listContracts, readAttachment, removeAttachment, updateContract } from "./contractStore";
 import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
 import {
   addItemNote,
@@ -169,7 +170,8 @@ app.use(cors({
 // Envio de imagens aceita corpo maior; o resto fica limitado a 2 MB.
 const jsonSmall = express.json({ limit: "2mb" });
 const jsonImages = express.json({ limit: "12mb" });
-app.use((req, res, next) => (req.method === "POST" && /\/checklist\/[^/]+\/images$/.test(req.path) ? jsonImages : jsonSmall)(req, res, next));
+const isUpload = (req: express.Request) => req.method === "POST" && (/\/checklist\/[^/]+\/images$/.test(req.path) || /^\/api\/contracts\/[^/]+\/files$/.test(req.path));
+app.use((req, res, next) => (isUpload(req) ? jsonImages : jsonSmall)(req, res, next));
 app.use("/api", auditMutations);
 
 function asyncRoute<T>(handler: (req: express.Request) => Promise<T>) {
@@ -612,6 +614,27 @@ app.get("/api/links/history", asyncRoute((req) => getLinksHistory(String(req.que
 app.get("/api/links/config", requireAdmin, asyncRoute(async () => ({ links: await getLinkConfig() })));
 app.put("/api/links/config", requireAdmin, asyncRoute((req) => saveLinkConfig(req.body)));
 app.get("/api/links/candidates", requireAdmin, asyncRoute(() => listLinkCandidates()));
+
+/* ---------- Contratos de fornecedores ---------- */
+app.use("/api/contracts", requireAuth, requireViews(["contracts"]));
+app.get("/api/contracts", asyncRoute(async () => listContracts()));
+app.post("/api/contracts", asyncRoute((req) => createContract(req.body || {}, req.res?.locals.user)));
+app.patch("/api/contracts/:id", asyncRoute((req) => updateContract(String(req.params.id), req.body || {}, req.res?.locals.user)));
+app.delete("/api/contracts/:id", asyncRoute((req) => deleteContract(String(req.params.id))));
+app.post("/api/contracts/:id/files", asyncRoute((req) => addAttachment(String(req.params.id), req.body, req.res?.locals.user)));
+app.delete("/api/contracts/:id/files/:fileId", asyncRoute((req) => removeAttachment(String(req.params.id), String(req.params.fileId))));
+app.get("/api/contracts/:id/files/:fileId", async (req, res) => {
+  try {
+    const { file, content } = await readAttachment(String(req.params.id), String(req.params.fileId));
+    res.setHeader("Content-Type", file.mimeType);
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.send(content);
+  } catch (error) {
+    const status = error && typeof error === "object" && "status" in error ? Number((error as { status?: unknown }).status) || 500 : 500;
+    res.status(status).json({ ok: false, message: formatApiError(error) });
+  }
+});
 
 app.use("/api/projects", requireAuth, requireViews(["projects"]));
 

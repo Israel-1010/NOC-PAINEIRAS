@@ -17,6 +17,7 @@ import {
   FileText,
   Flower2,
   FolderKanban,
+  Receipt,
   FolderOpen,
   KeyRound,
   LockKeyhole,
@@ -66,6 +67,7 @@ import { AccessDashboard } from "./access";
 import { DiagnosticsDashboard } from "./diagnostics";
 import { LinksDashboard } from "./links";
 import { NocWall } from "./noc";
+import { ContractsDashboard } from "./contracts";
 import "./styles.css";
 
 type Status = "online" | "warning" | "offline";
@@ -785,7 +787,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" || value === "noc" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" || value === "noc" || value === "contracts" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1223,6 +1225,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
     title: "Gestão",
     items: [
       { label: "Projetos", icon: FolderKanban, view: "projects" },
+      { label: "Contratos", icon: Receipt, view: "contracts" },
     ],
   },
   {
@@ -1256,7 +1259,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
   },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links" | "noc";
+type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links" | "noc" | "contracts";
 
 function statusLabel(status: Status) {
   return {
@@ -1277,6 +1280,7 @@ function viewEyebrow(view: View) {
   if (view === "wifi") return "Portal WiFi";
   if (view === "pop") return "Procedimento operacional padrao";
   if (view === "projects") return "Gestão de projetos da TI";
+  if (view === "contracts") return "Gestão de fornecedores";
   if (view === "links") return "Monitoramento via Zabbix";
   if (view === "noc") return "Central de monitoramento";
   if (view === "access") return "Administração do portal";
@@ -1296,6 +1300,7 @@ function viewTitle(view: View) {
   if (view === "wifi") return "WiFi";
   if (view === "pop") return "POP";
   if (view === "projects") return "Projetos";
+  if (view === "contracts") return "Contratos de fornecedores";
   if (view === "links") return "Links de internet";
   if (view === "noc") return "Painel NOC";
   if (view === "access") return "Acessos";
@@ -2080,6 +2085,8 @@ function App() {
           <DiagnosticsDashboard />
         ) : activeView === "links" ? (
           <LinksDashboard isAdmin={Boolean(access?.isAdmin)} />
+        ) : activeView === "contracts" ? (
+          <ContractsDashboard />
         ) : activeView === "noc" ? (
           <NocWall isAdmin={Boolean(access?.isAdmin)} />
         ) : activeView === "tv" ? (

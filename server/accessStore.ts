@@ -13,6 +13,7 @@ export const portalViews = [
   { id: "topology", label: "Topologia", sensitive: true },
   { id: "snmp", label: "SNMP", sensitive: true },
   { id: "projects", label: "Projetos", sensitive: false },
+  { id: "contracts", label: "Contratos", sensitive: true },
   { id: "ad", label: "Active Directory", sensitive: true },
   { id: "intune", label: "Intune", sensitive: true },
   { id: "office365", label: "Office 365", sensitive: true },
