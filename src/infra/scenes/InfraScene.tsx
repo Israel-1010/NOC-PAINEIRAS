@@ -5,8 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Group, Mesh, MeshBasicMaterial, Vector3Tuple } from 'three';
-import { fanOrder, fanPositions, matchByName, switchShortName } from '../backboneSwitches';
-import SwitchPin, { PIN_DOWN, PIN_UNKNOWN, PIN_UP } from '../components/three/SwitchPin';
+import { areaStatus, matchAreas, switchShortName, type AreaState } from '../backboneSwitches';
 import defaultBackbonesConfig from '../data/backbonesDefault.json';
 import { cloudProviders, infraNodes, internetLinks, racks } from '../data/infraData';
 import type { SceneId } from '../types/infra';
@@ -34,8 +33,11 @@ interface DataCenterRoomProps extends InfraSceneProps {
   simplifiedRacks?: boolean;
 }
 
-// hostId: switch do Zabbix que este ponto representa (cor ao vivo).
-type FiberCityNode = { id: string; label: string; position: Vector3Tuple; color: string; height: number; hostId?: string };
+// hostIds: switches do Zabbix da area deste backbone (a cor resume o estado deles).
+type FiberCityNode = { id: string; label: string; position: Vector3Tuple; color: string; height: number; hostIds?: string[] };
+
+// Cor de cada estado da area: todos ok, algum caido, todos caidos.
+const AREA_COLOR: Record<AreaState, string> = { ok: '#34d399', partial: '#f59e0b', down: '#ef4444', unknown: '#64748b', none: '' };
 
 const SWITCH_DOWN = '#ef4444';
 
@@ -94,7 +96,12 @@ function normalizeFiberNodes(value: unknown): FiberCityNode[] {
       position: [position[0], position[1], position[2]],
       color: node.color,
       height: node.height,
-      ...(typeof node.hostId === 'string' && node.hostId ? { hostId: node.hostId } : {}),
+      // hostId (um switch por ponto) era o formato anterior: vira lista.
+      ...(Array.isArray(node.hostIds)
+        ? { hostIds: node.hostIds.filter((id): id is string => typeof id === 'string') }
+        : typeof (node as { hostId?: unknown }).hostId === 'string'
+          ? { hostIds: [(node as { hostId: string }).hostId] }
+          : {}),
     }];
   });
 }
@@ -927,46 +934,42 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
     setPendingBackboneId(null);
   };
 
-  // Um ponto por switch do Zabbix: associa os pontos existentes pelo nome e cria os que faltam,
-  // ja ligados ao rack. Depois o gestor arrasta cada um para o lugar certo.
-  // Reorganiza todos os pontos em leque a partir do rack (ordem pela numeracao do switch).
-  const arrangeFan = (nodes: FiberCityNode[]) => {
-    const ordered = fanOrder(nodes, switches);
-    const spots = fanPositions(ordered.length, [backboneRackPort[0], backboneRackPort[2]]);
-    const byId = new Map(ordered.map((node, index) => [node.id, spots[index]]));
-    return nodes.map((node) => {
-      const spot = byId.get(node.id);
-      return spot ? { ...node, position: [spot[0], node.height / 2, spot[1]] as Vector3Tuple } : node;
-    });
-  };
-
-  const importSwitches = () => {
-    const matches = matchByName(fiberCityNodes, switches);
-    const linked = new Set([...fiberCityNodes.map((node) => node.hostId), ...matches.values()].filter(Boolean));
-    const missing = switches.filter((sw) => !linked.has(sw.id));
-    const height = 0.44;
-    const created: FiberCityNode[] = missing.map((sw, index) => ({
-      id: `fiber-${Date.now()}-${index}`,
-      label: switchShortName(sw.name),
-      position: [-1, height / 2, -1],
-      color: backboneColors[index % backboneColors.length],
-      height,
-      hostId: sw.id,
-    }));
-    const merged = [...fiberCityNodes.map((node) => (matches.has(node.id) ? { ...node, hostId: matches.get(node.id) } : node)), ...created];
-    setFiberCityNodes(arrangeFan(merged));
-    setBackboneLinks((current) => [...current, ...created.map((node): BackboneLink => ({ type: 'rack', nodeId: node.id, enabled: true }))]);
-    setBackboneSaveStatus(`${matches.size} associados pelo nome · ${created.length} criados`);
-  };
-
-  const setBackboneSwitch = (nodeId: string, hostId: string) => {
+  // Distribui os switches do Zabbix pelas areas, pelo nome (ex.: PORTARIA 01 e 02 -> Rack Portaria).
+  const distributeSwitches = () => {
+    const matches = matchAreas(fiberCityNodes, switches);
+    const count = [...matches.values()].reduce((sum, ids) => sum + ids.length, 0);
     setFiberCityNodes((current) =>
-      current.map((node) => {
-        if (node.id !== nodeId) return node;
-        const { hostId: _old, ...rest } = node;
-        return hostId ? { ...rest, hostId } : rest;
-      }),
+      current.map((node) => (matches.has(node.id) ? { ...node, hostIds: [...(node.hostIds ?? []), ...(matches.get(node.id) ?? [])] } : node)),
     );
+    setBackboneSaveStatus(`${count} switches distribuídos pelo nome`);
+  };
+
+  // Switches que sobraram vao para uma area "OUTROS" (cria se nao existir), para nao ficarem fora do mapa.
+  const groupUnassigned = () => {
+    const assigned = new Set(fiberCityNodes.flatMap((node) => node.hostIds ?? []));
+    const rest = switches.filter((sw) => !assigned.has(sw.id)).map((sw) => sw.id);
+    if (!rest.length) return;
+    const existing = fiberCityNodes.find((node) => node.label.trim().toUpperCase() === 'OUTROS');
+    if (existing) {
+      setFiberCityNodes((current) => current.map((node) => (node.id === existing.id ? { ...node, hostIds: [...(node.hostIds ?? []), ...rest] } : node)));
+      return;
+    }
+    const height = 0.44;
+    const node: FiberCityNode = { id: `fiber-${Date.now()}-outros`, label: 'OUTROS', position: [-3.3, height / 2, 0.05], color: '#38bdf8', height, hostIds: rest };
+    setFiberCityNodes((current) => [...current, node]);
+    setBackboneLinks((current) => [...current, { type: 'rack', nodeId: node.id, enabled: true }]);
+  };
+
+  // Marca/desmarca um switch na area; um switch fica em uma area so.
+  const toggleAreaSwitch = (nodeId: string, hostId: string) => {
+    setFiberCityNodes((current) => {
+      const owner = current.find((node) => node.id === nodeId);
+      const adding = !(owner?.hostIds ?? []).includes(hostId);
+      return current.map((node) => {
+        const ids = (node.hostIds ?? []).filter((id) => id !== hostId);
+        return { ...node, hostIds: node.id === nodeId && adding ? [...ids, hostId] : ids };
+      });
+    });
   };
 
   const removeBackbone = (nodeId: string) => {
@@ -974,7 +977,8 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
     setBackboneLinks((current) => current.filter((link) => (link.type === 'rack' ? link.nodeId !== nodeId : link.fromId !== nodeId && link.toId !== nodeId)));
   };
 
-  const mappedSwitches = new Set(fiberCityNodes.map((node) => node.hostId).filter(Boolean)).size;
+  const ownerOf = new Map(fiberCityNodes.flatMap((node) => (node.hostIds ?? []).map((id) => [id, node.label] as const)));
+  const mappedSwitches = switches.filter((sw) => ownerOf.has(sw.id)).length;
 
   const updateDraggingFiber = (event: ThreeEvent<PointerEvent>) => {
     if (!draggingFiberId) return;
@@ -1127,27 +1131,29 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
                     disabled={!switches.length}
                     onClick={(event) => {
                       event.stopPropagation();
-                      importSwitches();
+                      distributeSwitches();
                     }}
-                    title="Associa os pontos aos switches do Zabbix pelo nome e cria um ponto para cada switch que falta"
+                    title="Coloca cada switch do Zabbix na área de nome parecido (ex.: PORTARIA 01 e 02 na Rack Portaria)"
                     className="rounded bg-emerald-300 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-950 disabled:opacity-40"
                   >
-                    Importar switches do Zabbix
+                    Distribuir switches pelas áreas
                   </button>
                   <span className="rounded border border-emerald-300/30 bg-emerald-300/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-100">
-                    {mappedSwitches}/{switches.length} switches no mapa
+                    {mappedSwitches}/{switches.length} switches em áreas
                   </span>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setFiberCityNodes((current) => arrangeFan(current));
-                    }}
-                    title="Organiza todos os pontos em arcos saindo do rack, pela numeração do switch"
-                    className="rounded border border-emerald-300/35 bg-emerald-300/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-100"
-                  >
-                    Organizar em leque
-                  </button>
+                  {mappedSwitches < switches.length && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        groupUnassigned();
+                      }}
+                      title="Coloca os switches que ainda não têm área numa área OUTROS"
+                      className="rounded border border-emerald-300/35 bg-emerald-300/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-100"
+                    >
+                      {switches.length - mappedSwitches} sem área → OUTROS
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={(event) => {
@@ -1245,18 +1251,18 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
               if (link.type === 'rack') {
                 const node = fiberCityNodes.find((fiber) => fiber.id === link.nodeId);
                 if (!node) return null;
-                // Fibra na cor do estado do switch: ciano com trafego, vermelha parada quando cai.
-                const state = node.hostId ? switchById.get(node.hostId)?.up ?? null : null;
-                const down = state === false;
+                // Area toda caida: fibra vermelha e parada.
+                const down = areaStatus(node.hostIds, switchById).state === 'down';
                 return (
                   <ConnectionLine
                     key={`rack-backbone-link-${link.nodeId}`}
-                    from={[backboneRackPort[0], 0.06, backboneRackPort[2]]}
-                    to={[node.position[0], 0.06, node.position[2]]}
-                    color={!link.enabled ? '#334155' : down ? PIN_DOWN : state === true ? PIN_UP : PIN_UNKNOWN}
+                    from={backboneRackPort}
+                    to={[node.position[0], 0.24, node.position[2]]}
+                    color={down ? SWITCH_DOWN : link.enabled ? '#f59e0b' : '#64748b'}
                     active={(backboneActive || down) && link.enabled}
-                    packets={link.enabled && state === true ? 1 : 0}
+                    packets={link.enabled && !down ? 2 : 0}
                     straight
+                    bidirectional
                     thin
                   />
                 );
@@ -1280,11 +1286,27 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
               );
             })}
             {fiberCityNodes.map((fiber) => {
+              const rackLink = backboneLinks.find((item) => item.type === 'rack' && item.nodeId === fiber.id);
+              const peerLink = backboneLinks.find((item) =>
+                item.type === 'peer' && (item.fromId === fiber.id || item.toId === fiber.id),
+              );
               const pending = pendingBackboneId === fiber.id;
-              // Estado real do switch associado (null = ponto sem switch ou sem leitura).
-              const sw = fiber.hostId ? switchById.get(fiber.hostId) : undefined;
-              const status = sw ? sw.up : null;
+              const linked = Boolean(rackLink || peerLink || pending);
+              const linkEnabled = Boolean(rackLink?.enabled || peerLink?.enabled);
+              // Estado da area: resume os switches dela (sem switches = visual original).
+              const area = areaStatus(fiber.hostIds, switchById);
+              const hasSwitches = area.state !== 'none';
+              const tone = hasSwitches ? AREA_COLOR[area.state] : fiber.color;
+              const editing = backboneEditMode && editingFiberId === fiber.id;
               const hovered = hoveredFiberId === fiber.id;
+              const ledColor = (unitIndex: number, ledIndex: number) => {
+                if (area.state === 'ok') return '#34d399';
+                if (area.state === 'down') return '#ef4444';
+                if (area.state === 'unknown') return '#64748b';
+                if (area.state === 'partial') return (unitIndex + ledIndex) % 2 === 0 ? '#ef4444' : '#34d399';
+                return (unitIndex + ledIndex) % 3 === 0 ? '#ef4444' : '#34d399';
+              };
+              const count = area.members.length ? ` · ${area.up}/${area.members.length}` : '';
               return (
               <group key={fiber.id}>
                 <group
@@ -1307,71 +1329,123 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
                     if (!dragMovedRef.current) handleBackboneClick(fiber.id);
                   }}
                 >
-                  <SwitchPin
-                    status={status}
-                    floorY={-fiber.height / 2}
-                    selected={backboneEditMode && editingFiberId === fiber.id}
-                    pending={pending}
-                    hovered={hovered}
-                  />
-                  {status === false && <DownBeacon height={fiber.height} />}
-                  {backboneEditMode && editingFiberId === fiber.id ? (
-                    <Html position={[0, 0.28, 0]} center zIndexRange={[30, 0]}>
+                  <mesh castShadow receiveShadow>
+                    <boxGeometry args={[0.28, fiber.height, 0.22]} />
+                    <meshStandardMaterial
+                      color={area.state === 'down' ? '#3f1016' : '#123f63'}
+                      emissive={tone}
+                      emissiveIntensity={area.state === 'down' || area.state === 'partial' ? 0.9 : linkEnabled ? 0.92 : linked ? 0.38 : 0.24}
+                      roughness={0.34}
+                      metalness={0.24}
+                    />
+                  </mesh>
+                  <mesh position={[0, fiber.height / 2 + 0.018, 0]}>
+                    <boxGeometry args={[0.34, 0.036, 0.26]} />
+                    <meshStandardMaterial color="#3b82c4" emissive="#1d4ed8" emissiveIntensity={0.12} roughness={0.28} metalness={0.34} />
+                  </mesh>
+                  {[-0.11, 0.08].map((y, unitIndex) => (
+                    <group key={y} position={[0, y, 0.125]}>
+                      <mesh>
+                        <boxGeometry args={[0.22, 0.075, 0.026]} />
+                        <meshStandardMaterial color="#071827" emissive="#0ea5e9" emissiveIntensity={0.2} roughness={0.34} metalness={0.22} />
+                      </mesh>
+                      <mesh position={[-0.07, 0.004, 0.018]}>
+                        <boxGeometry args={[0.06, 0.015, 0.008]} />
+                        <meshStandardMaterial color="#22d3ee" emissive="#22d3ee" emissiveIntensity={1.5} />
+                      </mesh>
+                      {[0.02, 0.075].map((x, ledIndex) => (
+                        <mesh key={x} position={[x, 0.004, 0.018]}>
+                          <boxGeometry args={[0.018, 0.018, 0.008]} />
+                          <meshStandardMaterial color={ledColor(unitIndex, ledIndex)} emissive={ledColor(unitIndex, ledIndex)} emissiveIntensity={1.6} />
+                        </mesh>
+                      ))}
+                    </group>
+                  ))}
+                  {(linked || editing) && (
+                    <mesh position={[0, fiber.height / 2 + 0.055, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                      <torusGeometry args={[editing ? 0.24 : 0.18, 0.01, 8, 36]} />
+                      <meshBasicMaterial
+                        color={editing ? '#a7f3d0' : pending ? '#fef08a' : hasSwitches ? tone : linkEnabled ? '#f59e0b' : '#64748b'}
+                        transparent
+                        opacity={editing || pending || linkEnabled ? 0.9 : 0.55}
+                      />
+                    </mesh>
+                  )}
+                  {area.state === 'down' && <DownBeacon height={fiber.height} />}
+                  {editing ? (
+                    <Html position={[0, fiber.height / 2 + 0.3, 0]} center zIndexRange={[30, 0]}>
                       <div
-                        className="pointer-events-auto grid w-[132px] gap-1"
+                        className="pointer-events-auto grid w-[220px] gap-1.5 rounded-md border border-cyan-200/30 bg-slate-950/95 p-2 shadow-glow backdrop-blur"
                         onClick={(event) => event.stopPropagation()}
                         onPointerDown={(event) => event.stopPropagation()}
                         onPointerUp={(event) => event.stopPropagation()}
+                        onWheel={(event) => event.stopPropagation()}
                       >
                         <div className="flex gap-1">
                           <input
                             value={fiber.label}
                             maxLength={28}
                             onChange={(event) => renameBackbone(fiber.id, event.currentTarget.value)}
-                            className="min-w-0 flex-1 rounded-md border border-cyan-200/35 bg-slate-950/92 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wide text-white shadow-glow outline-none backdrop-blur focus:border-cyan-200"
+                            className="min-w-0 flex-1 rounded-md border border-cyan-200/35 bg-slate-900 px-2 py-1 text-center text-[10px] font-bold uppercase tracking-wide text-white outline-none focus:border-cyan-200"
                           />
                           <button
                             type="button"
-                            title="Remover este ponto"
+                            title="Remover esta área"
                             onClick={() => removeBackbone(fiber.id)}
-                            className="rounded-md border border-rose-300/40 bg-slate-950/92 px-1.5 text-[10px] font-bold text-rose-200 hover:bg-rose-500/30"
+                            className="rounded-md border border-rose-300/40 bg-slate-900 px-2 text-[11px] font-bold text-rose-200 hover:bg-rose-500/30"
                           >
                             ×
                           </button>
                         </div>
-                        <select
-                          value={fiber.hostId ?? ''}
-                          onChange={(event) => setBackboneSwitch(fiber.id, event.currentTarget.value)}
-                          className={`rounded-md border bg-slate-950/92 px-1 py-0.5 text-[9px] font-semibold outline-none ${fiber.hostId ? 'border-emerald-300/40 text-emerald-100' : 'border-slate-500/40 text-slate-400'}`}
-                          title="Switch do Zabbix que este ponto representa"
-                        >
-                          <option value="">— sem switch —</option>
-                          {switches.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {switchShortName(item.name)}
-                            </option>
-                          ))}
-                        </select>
+                        <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Switches desta área</p>
+                        <div className="max-h-[180px] space-y-0.5 overflow-y-auto pr-1">
+                          {switches.map((item) => {
+                            const mine = (fiber.hostIds ?? []).includes(item.id);
+                            const other = !mine ? ownerOf.get(item.id) : undefined;
+                            return (
+                              <label key={item.id} className={`flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 text-[10px] hover:bg-white/5 ${mine ? 'text-emerald-100' : 'text-slate-400'}`}>
+                                <input type="checkbox" checked={mine} onChange={() => toggleAreaSwitch(fiber.id, item.id)} className="accent-emerald-400" />
+                                <span className={`size-1.5 shrink-0 rounded-full ${item.up === false ? 'bg-rose-400' : item.up ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                                <span className="truncate">{switchShortName(item.name)}</span>
+                                {other && <span className="ml-auto shrink-0 truncate text-[9px] text-slate-500">({other})</span>}
+                              </label>
+                            );
+                          })}
+                        </div>
                       </div>
                     </Html>
-                  ) : status === false ? (
-                    // Caido: rotulo sempre visivel (inclusive na visao geral), para a TV.
-                    <Html position={[0, fiber.height / 2 + 1.3, 0]} center zIndexRange={[20, 0]}>
-                      <div className="pointer-events-none whitespace-nowrap rounded-md border border-rose-400/70 bg-rose-950/90 px-2.5 py-1 text-[10px] font-bold text-rose-100 shadow-[0_0_24px_rgba(239,68,68,0.45)]">
-                        {fiber.label} · SEM RESPOSTA
+                  ) : hovered && area.members.length ? (
+                    <Html position={[0, fiber.height / 2 + 0.3, 0]} center zIndexRange={[22, 0]}>
+                      <div className="pointer-events-none w-[210px] rounded-md border border-cyan-200/40 bg-slate-950/94 p-2 shadow-glow">
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-white">{fiber.label}{count}</p>
+                        {area.members.map((member) => (
+                          <p key={member.id} className="flex items-center gap-1.5 text-[10px] text-slate-300">
+                            <span className={`size-1.5 shrink-0 rounded-full ${member.up === false ? 'bg-rose-400' : member.up ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                            <span className="truncate">{switchShortName(member.name)}</span>
+                            <span className="ml-auto shrink-0 text-slate-500">{member.up === false ? 'sem resposta' : member.latencyMs !== null ? `${member.latencyMs} ms` : ''}</span>
+                          </p>
+                        ))}
                       </div>
                     </Html>
-                  ) : hovered && sw ? (
-                    <Html position={[0, 0.22, 0]} center zIndexRange={[20, 0]}>
-                      <div className="pointer-events-none whitespace-nowrap rounded-md border border-teal-300/50 bg-slate-950/92 px-2.5 py-1 text-[10px] font-semibold text-teal-50 shadow-glow">
-                        {sw.name} · {sw.ip} · {sw.latencyMs ?? '—'} ms
+                  ) : area.state === 'down' || area.state === 'partial' ? (
+                    // Com problema: rotulo sempre visivel (inclusive na visao geral), para a TV.
+                    <Html position={[0, fiber.height / 2 + (area.state === 'down' ? 1.3 : 0.3), 0]} center zIndexRange={[20, 0]}>
+                      <div
+                        className={`pointer-events-none whitespace-nowrap rounded-md border px-2.5 py-1 text-[10px] font-bold ${
+                          area.state === 'down'
+                            ? 'border-rose-400/70 bg-rose-950/90 text-rose-100 shadow-[0_0_24px_rgba(239,68,68,0.45)]'
+                            : 'border-amber-300/70 bg-amber-950/90 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.35)]'
+                        }`}
+                      >
+                        {fiber.label}{count} · {area.down.slice(0, 2).map((member) => switchShortName(member.name)).join(', ')}
+                        {area.down.length > 2 ? ` +${area.down.length - 2}` : ''} sem resposta
                       </div>
                     </Html>
-                  ) : hovered ? (
-                    <FloatingLabel position={[0, 0.22, 0]} active>
-                      {fiber.label} · sem switch associado
+                  ) : (
+                    <FloatingLabel position={[0, fiber.height / 2 + 0.22, 0]} active={backboneActive || hovered}>
+                      {fiber.label}{count}
                     </FloatingLabel>
-                  ) : null}
+                  )}
                 </group>
               </group>
               );
