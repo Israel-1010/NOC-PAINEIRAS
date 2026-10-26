@@ -661,7 +661,7 @@ function GlobeNode({ active, onClick }: { active: boolean; onClick: () => void }
 }
 
 function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, simplifiedRacks = false }: DataCenterRoomProps) {
-  const rackLabelsActive = !backgroundOnly && (activeScene === 'racks' || activeScene === 'datacenter');
+  const rackLabelsActive = !backgroundOnly && (activeScene === 'racks' || activeScene === 'datacenter' || activeScene === 'switches');
   const powerLineActive = !backgroundOnly && rackLabelsActive;
   const nobreaks: Array<{ label: string; position: Vector3Tuple; target: Vector3Tuple; via: Vector3Tuple[] }> = [
     {
@@ -684,7 +684,7 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
       ],
     },
   ];
-  const rackInterlinkActive = !backgroundOnly && (activeScene === 'racks' || activeScene === 'datacenter' || activeScene === 'network');
+  const rackInterlinkActive = !backgroundOnly && (activeScene === 'racks' || activeScene === 'datacenter' || activeScene === 'network' || activeScene === 'switches');
   const cftvRackActive = !backgroundOnly && (activeScene === 'racks' || activeScene === 'datacenter' || activeScene === 'network' || activeScene === 'cftv');
   const cftvRackPosition: Vector3Tuple = [5.18, 0.55, -1.38];
   const cftvRackPort: Vector3Tuple = [4.86, 0.24, -1.38];
@@ -709,11 +709,13 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
       ))}
       {!backgroundOnly && (
         <>
-          <ConnectionLine from={[1.3, 0.18, -0.92]} to={[2.0, 0.18, -0.92]} color="#22d3ee" active={rackInterlinkActive} packets={2} straight bidirectional />
+          {/* Uplink Rack Switch <-> rack VMware (servidores): o caminho dos switches ate os servidores. */}
+          <ConnectionLine from={[1.3, 0.18, -0.92]} to={[2.0, 0.18, -0.92]} color="#22d3ee" active={rackInterlinkActive} packets={activeScene === 'switches' ? 4 : 2} straight bidirectional />
           <FloatingLabel position={[1.65, 0.36, -0.92]} active={rackInterlinkActive}>
-            Uplink entre racks
+            Uplink Rack Switch ↔ VMware
           </FloatingLabel>
-          {nobreaks.map((nobreak, index) => (
+          {/* Na cena dos switches (e na TV do NOC) ficam so os dois racks: sem nobreaks e CFTV. */}
+          {activeScene !== 'switches' && nobreaks.map((nobreak, index) => (
             <group key={nobreak.label}>
               <group position={nobreak.position}>
                 <mesh castShadow receiveShadow>
@@ -739,8 +741,8 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
               <ConnectionLine from={[nobreak.position[0], 0.12, nobreak.position[2]]} to={nobreak.target} via={nobreak.via} color={index === 0 ? '#f59e0b' : '#34d399'} active={powerLineActive} packets={1} thin />
             </group>
           ))}
-          <CftvRack position={cftvRackPosition} active={cftvRackActive} />
-          <ConnectionLine
+          {activeScene !== 'switches' && <CftvRack position={cftvRackPosition} active={cftvRackActive} />}
+          {activeScene !== 'switches' && (<ConnectionLine
             from={cftvRackPort}
             to={switchRackCftvPort}
             via={[
@@ -752,7 +754,7 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
             packets={2}
             bidirectional
             thin
-          />
+          />)}
         </>
       )}
     </group>
@@ -902,6 +904,7 @@ export default function InfraScene({ activeScene, selectedRackId, onSelectNode, 
         ))}
       {!rackOnlyScene &&
         !isolatedScene &&
+        activeScene !== 'switches' &&
         firewallHaNodes.map((firewall) => (
           <Firewall3D
             key={firewall.label}

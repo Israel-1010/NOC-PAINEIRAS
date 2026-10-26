@@ -16,6 +16,13 @@
   color-scheme: dark;
 }
 
+/* Pagina do Painel NOC: ocupa o palco do carrossel. */
+.infra-root.infra-wall {
+  height: 100%;
+  min-height: 0;
+  border-radius: 12px;
+}
+
 .infra-root.is-fullscreen {
   height: 100vh;
   border-radius: 0;

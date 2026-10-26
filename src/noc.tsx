@@ -34,6 +34,9 @@ import {
   Zap,
 } from "lucide-react";
 
+// Pagina 3D dos switches: o three.js so e baixado quando a pagina entra no carrossel.
+const SwitchesWall = React.lazy(() => import("./infra/SwitchesWall"));
+
 /* ---------- Tipos (espelham server/nocData.ts) ---------- */
 
 type NocHost = { id: string; name: string; ip: string; up: boolean | null; latencyMs: number | null; loss: number | null; problems: number; set: string; role: string };
@@ -205,6 +208,7 @@ const FIXED_PAGES: NocPage[] = [
   { id: "internet", title: "Internet e Firewall", icon: Globe },
   { id: "antenas", title: "Antenas (ping do Zabbix)", icon: Radio },
   { id: "servidores", title: "Servidores e Datacenter", icon: Server },
+  { id: "switches3d", title: "Switches ao vivo (3D)", icon: Network },
   { id: "acesso", title: "Catracas, totens e impressoras", icon: ScanFace },
   { id: "videowall", title: "Videowall", icon: MonitorPlay },
 ];
@@ -228,6 +232,7 @@ function buildPages(data: NocData | null): NocPage[] {
     if (page.id === "antenas") return !hasUnifiAps && hasHosts("antenas");
     if (page.id === "videowall") return !data || hasHosts("videowall");
     if (page.id === "acesso") return ACCESS_KEYS.some(hasHosts);
+    if (page.id === "switches3d") return hasHosts("switches");
     return true;
   });
   // Servidores Docker (Beszel) logo depois de "Servidores e Datacenter".
@@ -1889,6 +1894,10 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           <DockerPage beszel={data.beszel} />
         ) : current.id === "acesso" ? (
           <AccessPage data={data} />
+        ) : current.id === "switches3d" ? (
+          <React.Suspense fallback={<p className="noc-empty">Carregando a visão 3D dos switches...</p>}>
+            <SwitchesWall data={data} />
+          </React.Suspense>
         ) : (
           <GroupPage data={data} keys={["videowall"]} />
         )}

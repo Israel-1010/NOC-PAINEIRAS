@@ -77,7 +77,8 @@ const avg = (values: (number | null)[]) => {
   return valid.length ? Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length) : null;
 };
 
-function reduce(data: NocPayload): InfraLive {
+// Exportado para o Painel NOC (pagina 3D dos switches), que ja tem o /api/noc carregado.
+export function toInfraLive(data: NocPayload): InfraLive {
   const links: InfraLive['links'] = {};
   for (const [id, match] of Object.entries(LINK_MATCH)) {
     const link = data.links.find((entry) => match.test(entry.name));
@@ -144,7 +145,7 @@ export function useInfraLive() {
         if (!response.ok) throw new Error(response.status === 403 ? 'Sem permissão para os dados do NOC.' : `Falha ao ler o NOC (${response.status}).`);
         const data = (await response.json()) as NocPayload;
         if (!cancelled) {
-          setLive(reduce(data));
+          setLive(toInfraLive(data));
           setError('');
         }
       } catch (loadError) {
