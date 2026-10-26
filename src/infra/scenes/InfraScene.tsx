@@ -68,7 +68,7 @@ function CloudflareNode({ position, active = false }: { position: Vector3Tuple; 
         <boxGeometry args={[0.94, 0.035, 0.06]} />
         <meshStandardMaterial color="#f97316" emissive="#f97316" emissiveIntensity={1.5} />
       </mesh>
-      <Html position={[0, 0.02, 0.14]} center zIndexRange={[18, 0]}>
+      <Html position={[0, 0.02, 0.14]} center distanceFactor={7} zIndexRange={[18, 0]}>
         <div className="pointer-events-none grid h-[54px] w-[134px] place-items-center rounded-md border border-orange-200/35 bg-white px-3 shadow-glow">
           <img src={cloudflareLogo} alt="Cloudflare" className="max-h-[34px] max-w-[112px] object-contain" />
         </div>
@@ -938,6 +938,7 @@ export default function InfraScene({ activeScene, selectedRackId, onSelectNode, 
           rackPort={SWITCH_RACK_PORT_WORLD}
           showLabels={activeScene !== 'overview'}
           animate={activeScene !== 'overview'}
+          floorEdgeX={5.2}
         />
       )}
       {serverRackScene && <ServerRackSanEnvironment />}

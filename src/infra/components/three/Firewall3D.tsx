@@ -37,7 +37,7 @@ export default function Firewall3D({ id, position, label = 'FortiGate | VPN | IP
         <meshStandardMaterial color="#0f172a" emissive="#020617" emissiveIntensity={0.2} roughness={0.45} metalness={0.28} />
       </mesh>
 
-      <Html position={[0, 0.1, 0.34]} center zIndexRange={[12, 0]}>
+      <Html position={[0, 0.1, 0.34]} center distanceFactor={7} zIndexRange={[12, 0]}>
         <div className="pointer-events-none grid h-[24px] w-[104px] place-items-center rounded-sm bg-white px-2 shadow-glow">
           <img src={fortinetLogo} alt="Fortinet" className="max-h-[15px] max-w-[88px] object-contain" />
         </div>

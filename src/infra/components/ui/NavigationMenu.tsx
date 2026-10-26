@@ -1,4 +1,4 @@
-import { Map, Maximize2, Minimize2, Play, RotateCcw } from 'lucide-react';
+import { Map, Maximize2, Minimize2, Play, RotateCcw, Tv } from 'lucide-react';
 import type { SceneId } from '../../types/infra';
 import PrimaryButton from './PrimaryButton';
 
@@ -8,6 +8,8 @@ interface NavigationMenuProps {
   onStartTour: () => void;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
+  // Modo TV: esconde os menus e roda o tour em loop.
+  onTvMode: () => void;
 }
 
 type MenuRow = {
@@ -57,11 +59,18 @@ function FullscreenButton({ fullscreen, onClick }: { fullscreen: boolean; onClic
   );
 }
 
-export default function NavigationMenu({ activeId, onSelect, onStartTour, fullscreen, onToggleFullscreen }: NavigationMenuProps) {
+export default function NavigationMenu({ activeId, onSelect, onStartTour, fullscreen, onToggleFullscreen, onTvMode }: NavigationMenuProps) {
   return (
     <>
       <div className="hud-panel pointer-events-auto absolute left-4 top-4 z-20 flex w-[min(360px,calc(100%-2rem))] items-center gap-2 rounded-lg p-3 lg:hidden">
         <FullscreenButton fullscreen={fullscreen} onClick={onToggleFullscreen} />
+        <button
+          onClick={onTvMode}
+          className="grid size-10 shrink-0 place-items-center rounded-md border border-slate-500/30 bg-white/5 text-slate-200 transition hover:bg-white/10"
+          title="Modo TV"
+        >
+          <Tv size={18} />
+        </button>
         <button
           onClick={onStartTour}
           className="grid size-10 shrink-0 place-items-center rounded-md border border-cyan-300/40 bg-cyan-300 text-slate-950 transition hover:bg-cyan-200"
@@ -98,6 +107,9 @@ export default function NavigationMenu({ activeId, onSelect, onStartTour, fullsc
           </PrimaryButton>
           <PrimaryButton icon={<RotateCcw size={16} />} variant="secondary" onClick={() => onSelect('overview')}>
             Geral
+          </PrimaryButton>
+          <PrimaryButton icon={<Tv size={16} />} variant="secondary" className="col-span-2" onClick={onTvMode} title="Esconde os menus e roda o tour sozinho, em loop (para a TV do NOC)">
+            Modo TV
           </PrimaryButton>
         </div>
 

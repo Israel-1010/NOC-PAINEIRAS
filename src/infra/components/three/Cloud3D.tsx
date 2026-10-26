@@ -28,7 +28,8 @@ export default function Cloud3D({ id, label, logo, color, position, active = fal
         <boxGeometry args={[1.38, 0.035, 0.08]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.45} />
       </mesh>
-      <Html position={[0, 0.02, 0.28]} center zIndexRange={[20, 0]}>
+      {/* distanceFactor: o cartao encolhe com a distancia (na visao geral nao cobre a cena). */}
+      <Html position={[0, 0.02, 0.28]} center distanceFactor={9} zIndexRange={[20, 0]}>
         <div className="pointer-events-none grid h-[78px] w-[178px] place-items-center rounded-md border border-slate-200 bg-white px-4 shadow-glow">
           <img src={logo} alt={label} className="max-h-[60px] max-w-[154px] object-contain" />
         </div>

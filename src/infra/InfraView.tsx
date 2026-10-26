@@ -30,11 +30,31 @@ export default function InfraView() {
   const selectedNode = useMemo<InfraNode | null>(() => infraNodes.find((node) => node.id === selectedNodeId) ?? null, [selectedNodeId]);
   const selectedRack = useMemo<RackInfo | null>(() => racks.find((rack) => rack.id === selectedRackId) ?? null, [selectedRackId]);
 
+  // Modo TV: menus escondidos e tour automatico em loop. Liga pelo botao "Modo TV" (TV que ja abre
+  // o navegador em tela cheia/kiosk) ou ao entrar em tela cheia.
+  const [tvMode, setTvMode] = useState(false);
+  const { start: startTour, finish: finishTour } = tour;
+  const enterTvMode = () => {
+    setTvMode(true);
+    startTour();
+  };
+  const exitTvMode = () => {
+    setTvMode(false);
+    finishTour();
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
+  };
   useEffect(() => {
-    const onChange = () => setFullscreen(document.fullscreenElement === rootRef.current);
+    const onChange = () => {
+      const isFull = document.fullscreenElement === rootRef.current;
+      setFullscreen(isFull);
+      if (isFull) {
+        setTvMode(true);
+        startTour();
+      }
+    };
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
-  }, []);
+  }, [startTour]);
 
   const toggleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
@@ -87,13 +107,35 @@ export default function InfraView() {
         </div>
 
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_35%,rgba(2,6,23,0.58))]" />
-        <NavigationMenu
-          activeId={tour.activeStep.id}
-          onSelect={tour.goToStep}
-          onStartTour={tour.start}
-          fullscreen={fullscreen}
-          onToggleFullscreen={toggleFullscreen}
-        />
+        {tvMode ? (
+          // Modo TV: so um selo discreto (cena atual) e o botao de sair; o 3D ocupa a tela.
+          <div className="hud-panel pointer-events-auto absolute left-4 top-4 z-20 flex items-center gap-3 rounded-lg px-4 py-3">
+            <span className="relative flex size-2.5">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+              <span className="relative inline-flex size-2.5 rounded-full bg-emerald-400" />
+            </span>
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.24em] text-cyan-200/80">InfraVision · ao vivo</p>
+              <p className="text-base font-semibold text-white">{tour.activeStep.title}</p>
+            </div>
+            <button
+              onClick={exitTvMode}
+              className="ml-2 rounded-md border border-slate-500/30 bg-white/5 px-2.5 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+              title="Sair do modo TV"
+            >
+              Sair
+            </button>
+          </div>
+        ) : (
+          <NavigationMenu
+            activeId={tour.activeStep.id}
+            onSelect={tour.goToStep}
+            onStartTour={tour.start}
+            fullscreen={fullscreen}
+            onToggleFullscreen={toggleFullscreen}
+            onTvMode={enterTvMode}
+          />
+        )}
         <InfoPanel
           activeStep={tour.activeStep}
           selectedNode={selectedNode}
@@ -105,7 +147,7 @@ export default function InfraView() {
             setSelectedRackId(null);
           }}
         />
-        {tour.isTouring && <TourController tour={tour} />}
+        {tour.isTouring && !tvMode && <TourController tour={tour} />}
 
         <div className="pointer-events-auto absolute bottom-4 right-4 z-20 flex items-center gap-2">
           {lowQuality && (

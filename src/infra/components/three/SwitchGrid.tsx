@@ -139,9 +139,11 @@ interface SwitchGridProps {
   showLabels: boolean;
   // Trafego animado nos cabos (desligado na visao geral para nao poluir).
   animate: boolean;
+  // Ate onde (x) a laje vai a direita (borda do piso do CPD), formando um piso so.
+  floorEdgeX?: number;
 }
 
-export default function SwitchGrid({ switches, center, rackPort, showLabels, animate }: SwitchGridProps) {
+export default function SwitchGrid({ switches, center, rackPort, showLabels, animate, floorEdgeX }: SwitchGridProps) {
   if (!switches.length) return null;
   // Ordem fixa pela numeracao do switch: cada um tem sempre o mesmo lugar (nao pula quando cai).
   const ordered = [...switches].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true }));
@@ -149,6 +151,8 @@ export default function SwitchGrid({ switches, center, rackPort, showLabels, ani
   const spineX = center[0] + grid.width / 2 + 0.6;
   const rowZ = (row: number) => center[2] - grid.depth / 2 + row * SWITCH_GRID_SPACING[1];
   const cableZ = (row: number) => rowZ(row) - 0.36; // atras da fileira
+  const floorLeft = center[0] - grid.width / 2 - 0.7;
+  const floorRight = floorEdgeX ?? center[0] + grid.width / 2 + 0.9;
   const firstCable = cableZ(0);
   const lastCable = cableZ(grid.rows - 1);
   // Tronco: da porta do rack, pelo piso, ate a espinha.
@@ -156,10 +160,11 @@ export default function SwitchGrid({ switches, center, rackPort, showLabels, ani
 
   return (
     <group>
-      {/* Piso da area dos switches */}
-      <mesh receiveShadow position={[center[0] + 0.3, center[1] - 0.012, center[2] - 0.15]}>
-        <boxGeometry args={[grid.width + 1.9, 0.025, grid.depth + 1.3]} />
-        <meshStandardMaterial color="#07111f" emissive="#0e7490" emissiveIntensity={0.06} roughness={0.6} />
+      {/* Laje unica (switches + CPD): mesma cor do piso do CPD, 1 cm abaixo dele para nao piscar
+          onde se sobrepoem. So aparece junto com a grade. */}
+      <mesh receiveShadow position={[(floorLeft + floorRight) / 2, -0.035, center[2]]}>
+        <boxGeometry args={[floorRight - floorLeft, 0.05, grid.depth + 1.3]} />
+        <meshStandardMaterial color="#0b1220" roughness={0.62} />
       </mesh>
 
       <ConnectionLine

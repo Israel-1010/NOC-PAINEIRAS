@@ -12,8 +12,8 @@ export const tourSteps: TourStep[] = [
     eyebrow: 'Cena 01',
     title: 'Visão Geral',
     description: 'Mapa isométrico da infraestrutura, conectando Internet, Cloud, Data Center, usuários, serviços e operações.',
-    camera: [13, 10, 13],
-    target: [0, 1.2, 0],
+    camera: [10.5, 9.5, 10.5],
+    target: [-1.2, 1.1, -1.4],
   },
   {
     id: 'internet',
