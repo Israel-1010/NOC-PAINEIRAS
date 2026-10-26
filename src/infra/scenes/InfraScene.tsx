@@ -3,7 +3,8 @@ import { useFrame } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import type { Group, Vector3Tuple } from 'three';
+import type { Group, Mesh, MeshBasicMaterial, Vector3Tuple } from 'three';
+import { freeSlots, matchByName, switchShortName } from '../backboneSwitches';
 import defaultBackbonesConfig from '../data/backbonesDefault.json';
 import { cloudProviders, infraNodes, internetLinks, racks } from '../data/infraData';
 import type { SceneId } from '../types/infra';
@@ -31,7 +32,39 @@ interface DataCenterRoomProps extends InfraSceneProps {
   simplifiedRacks?: boolean;
 }
 
-type FiberCityNode = { id: string; label: string; position: Vector3Tuple; color: string; height: number };
+// hostId: switch do Zabbix que este ponto representa (cor ao vivo).
+type FiberCityNode = { id: string; label: string; position: Vector3Tuple; color: string; height: number; hostId?: string };
+
+const SWITCH_UP = '#34d399';
+const SWITCH_DOWN = '#ef4444';
+const SWITCH_UNKNOWN = '#64748b';
+
+// Switch fora do ar: feixe vermelho pulsando acima do ponto, visivel de longe na TV.
+function DownBeacon({ height }: { height: number }) {
+  const ringRef = useRef<Mesh>(null);
+  const beamRef = useRef<Mesh>(null);
+  useFrame(({ clock }) => {
+    const pulse = Math.abs(Math.sin(clock.elapsedTime * 3));
+    if (ringRef.current) {
+      const scale = 1 + pulse * 0.9;
+      ringRef.current.scale.set(scale, scale, scale);
+      (ringRef.current.material as MeshBasicMaterial).opacity = 0.85 - pulse * 0.6;
+    }
+    if (beamRef.current) (beamRef.current.material as MeshBasicMaterial).opacity = 0.25 + pulse * 0.45;
+  });
+  return (
+    <group>
+      <mesh ref={ringRef} position={[0, -height / 2 + 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.24, 0.016, 8, 40]} />
+        <meshBasicMaterial color={SWITCH_DOWN} transparent opacity={0.8} />
+      </mesh>
+      <mesh ref={beamRef} position={[0, height / 2 + 0.6, 0]}>
+        <cylinderGeometry args={[0.025, 0.06, 1.2, 12, 1, true]} />
+        <meshBasicMaterial color={SWITCH_DOWN} transparent opacity={0.5} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+}
 type BackboneRackLink = { type: 'rack'; nodeId: string; enabled: boolean };
 type BackbonePeerLink = { type: 'peer'; fromId: string; toId: string; enabled: boolean };
 type BackboneLink = BackboneRackLink | BackbonePeerLink;
@@ -61,6 +94,7 @@ function normalizeFiberNodes(value: unknown): FiberCityNode[] {
       position: [position[0], position[1], position[2]],
       color: node.color,
       height: node.height,
+      ...(typeof node.hostId === 'string' && node.hostId ? { hostId: node.hostId } : {}),
     }];
   });
 }
@@ -724,7 +758,10 @@ function GlobeNode({ active, onClick }: { active: boolean; onClick: () => void }
   );
 }
 
-function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, simplifiedRacks = false, canEditBackbones = false }: DataCenterRoomProps) {
+function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, simplifiedRacks = false, canEditBackbones = false, live = null }: DataCenterRoomProps) {
+  const switches = live?.switches ?? [];
+  const switchById = new Map(switches.map((sw) => [sw.id, sw]));
+  const [hoveredFiberId, setHoveredFiberId] = useState<string | null>(null);
   const rackLabelsActive = !backgroundOnly && (activeScene === 'racks' || activeScene === 'datacenter');
   const backboneActive = !backgroundOnly && (activeScene === 'racks' || activeScene === 'datacenter' || activeScene === 'network' || activeScene === 'backbones');
   const backboneEditMode = activeScene === 'backbones' && canEditBackbones;
@@ -787,7 +824,9 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
       return fallback;
     }
   });
-  const [backboneLinkMode, setBackboneLinkMode] = useState<'rack' | 'peer'>('rack');
+  // 'edit': clique escolhe o ponto a editar (nome, switch, remover); 'rack'/'peer': clique liga fibras.
+  const [backboneLinkMode, setBackboneLinkMode] = useState<'edit' | 'rack' | 'peer'>('edit');
+  const [editingFiberId, setEditingFiberId] = useState<string | null>(null);
   const [pendingBackboneId, setPendingBackboneId] = useState<string | null>(null);
   const [backboneConfigReady, setBackboneConfigReady] = useState(false);
   const [backboneSaveStatus, setBackboneSaveStatus] = useState('Arquivo aguardando');
@@ -886,6 +925,40 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
     setPendingBackboneId(null);
   };
 
+  // Um ponto por switch do Zabbix: associa os pontos existentes pelo nome e cria os que faltam,
+  // ja ligados ao rack. Depois o gestor arrasta cada um para o lugar certo.
+  const importSwitches = () => {
+    const matches = matchByName(fiberCityNodes, switches);
+    const linked = new Set([...fiberCityNodes.map((node) => node.hostId), ...matches.values()].filter(Boolean));
+    const missing = switches.filter((sw) => !linked.has(sw.id));
+    const slots = freeSlots(fiberCityNodes.map((node) => node.position), missing.length);
+    const height = 0.44;
+    const created: FiberCityNode[] = missing.map((sw, index) => {
+      const [x, z] = slots[index] ?? [-0.5 - (index % 8) * 0.42, 0.1];
+      return { id: `fiber-${Date.now()}-${index}`, label: switchShortName(sw.name), position: [x, height / 2, z], color: backboneColors[index % backboneColors.length], height, hostId: sw.id };
+    });
+    setFiberCityNodes((current) => [...current.map((node) => (matches.has(node.id) ? { ...node, hostId: matches.get(node.id) } : node)), ...created]);
+    setBackboneLinks((current) => [...current, ...created.map((node): BackboneLink => ({ type: 'rack', nodeId: node.id, enabled: true }))]);
+    setBackboneSaveStatus(`${matches.size} associados pelo nome · ${created.length} criados`);
+  };
+
+  const setBackboneSwitch = (nodeId: string, hostId: string) => {
+    setFiberCityNodes((current) =>
+      current.map((node) => {
+        if (node.id !== nodeId) return node;
+        const { hostId: _old, ...rest } = node;
+        return hostId ? { ...rest, hostId } : rest;
+      }),
+    );
+  };
+
+  const removeBackbone = (nodeId: string) => {
+    setFiberCityNodes((current) => current.filter((node) => node.id !== nodeId));
+    setBackboneLinks((current) => current.filter((link) => (link.type === 'rack' ? link.nodeId !== nodeId : link.fromId !== nodeId && link.toId !== nodeId)));
+  };
+
+  const mappedSwitches = new Set(fiberCityNodes.map((node) => node.hostId).filter(Boolean)).size;
+
   const updateDraggingFiber = (event: ThreeEvent<PointerEvent>) => {
     if (!draggingFiberId) return;
     event.stopPropagation();
@@ -928,6 +1001,11 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
   };
 
   const handleBackboneClick = (nodeId: string) => {
+    if (backboneLinkMode === 'edit') {
+      setEditingFiberId((current) => (current === nodeId ? null : nodeId));
+      return;
+    }
+
     if (backboneLinkMode === 'rack') {
       setPendingBackboneId(null);
       toggleRackBackboneLink(nodeId);
@@ -1026,7 +1104,36 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
             {backboneEditMode && (
               <Html fullscreen zIndexRange={[24, 0]}>
                 <div className="pointer-events-none absolute bottom-20 left-1/2 flex -translate-x-1/2 justify-center">
-                  <div className="pointer-events-auto flex max-w-[620px] flex-wrap justify-center gap-2 rounded-md border border-cyan-200/25 bg-slate-950/90 p-2 shadow-glow backdrop-blur">
+                  <div className="pointer-events-auto flex max-w-[680px] flex-wrap justify-center gap-2 rounded-md border border-cyan-200/25 bg-slate-950/90 p-2 shadow-glow backdrop-blur">
+                  <button
+                    type="button"
+                    disabled={!switches.length}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      importSwitches();
+                    }}
+                    title="Associa os pontos aos switches do Zabbix pelo nome e cria um ponto para cada switch que falta"
+                    className="rounded bg-emerald-300 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-950 disabled:opacity-40"
+                  >
+                    Importar switches do Zabbix
+                  </button>
+                  <span className="rounded border border-emerald-300/30 bg-emerald-300/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-100">
+                    {mappedSwitches}/{switches.length} switches no mapa
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setPendingBackboneId(null);
+                      setBackboneLinkMode('edit');
+                    }}
+                    title="Clique num ponto para trocar o nome, escolher o switch ou remover"
+                    className={`rounded px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                      backboneLinkMode === 'edit' ? 'bg-emerald-300 text-slate-950' : 'border border-emerald-300/35 bg-emerald-300/10 text-emerald-100'
+                    }`}
+                  >
+                    Editar ponto
+                  </button>
                   <button
                     type="button"
                     onClick={(event) => {
@@ -1109,14 +1216,16 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
               if (link.type === 'rack') {
                 const node = fiberCityNodes.find((fiber) => fiber.id === link.nodeId);
                 if (!node) return null;
+                // Fibra ate um switch caido fica vermelha e sem trafego.
+                const down = node.hostId ? switchById.get(node.hostId)?.up === false : false;
                 return (
                   <ConnectionLine
                     key={`rack-backbone-link-${link.nodeId}`}
                     from={backboneRackPort}
                     to={[node.position[0], 0.24, node.position[2]]}
-                    color={link.enabled ? '#f59e0b' : '#64748b'}
-                    active={backboneActive && link.enabled}
-                    packets={link.enabled ? 2 : 0}
+                    color={down ? SWITCH_DOWN : link.enabled ? '#f59e0b' : '#64748b'}
+                    active={(backboneActive || down) && link.enabled}
+                    packets={link.enabled && !down ? 2 : 0}
                     straight
                     bidirectional
                     thin
@@ -1149,16 +1258,28 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
               const pending = pendingBackboneId === fiber.id;
               const linked = Boolean(rackLink || peerLink || pending);
               const linkEnabled = Boolean(rackLink?.enabled || peerLink?.enabled);
+              // Estado real do switch associado (null = ponto sem switch ou sem leitura).
+              const sw = fiber.hostId ? switchById.get(fiber.hostId) : undefined;
+              const status = sw ? sw.up : null;
+              const statusColor = status === true ? SWITCH_UP : status === false ? SWITCH_DOWN : SWITCH_UNKNOWN;
+              const hovered = hoveredFiberId === fiber.id;
               return (
               <group key={fiber.id}>
                 <group
                   position={fiber.position}
+                  onPointerOver={(event) => {
+                    event.stopPropagation();
+                    setHoveredFiberId(fiber.id);
+                  }}
+                  onPointerOut={() => setHoveredFiberId((current) => (current === fiber.id ? null : current))}
                   onPointerDown={(event) => {
+                    if (!backboneEditMode) return;
                     event.stopPropagation();
                     dragMovedRef.current = false;
                     setDraggingFiberId(fiber.id);
                   }}
                   onPointerUp={(event) => {
+                    if (!backboneEditMode) return;
                     event.stopPropagation();
                     setDraggingFiberId(null);
                     if (!dragMovedRef.current) handleBackboneClick(fiber.id);
@@ -1166,8 +1287,15 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
                 >
                   <mesh castShadow receiveShadow>
                     <boxGeometry args={[0.28, fiber.height, 0.22]} />
-                    <meshStandardMaterial color="#123f63" emissive={fiber.color} emissiveIntensity={linkEnabled ? 0.92 : linked ? 0.38 : 0.24} roughness={0.34} metalness={0.24} />
+                    <meshStandardMaterial
+                      color={status === false ? '#3f1016' : '#123f63'}
+                      emissive={sw ? statusColor : fiber.color}
+                      emissiveIntensity={status === false ? 0.9 : linkEnabled ? 0.92 : linked ? 0.38 : 0.24}
+                      roughness={0.34}
+                      metalness={0.24}
+                    />
                   </mesh>
+                  {status === false && <DownBeacon height={fiber.height} />}
                   <mesh position={[0, fiber.height / 2 + 0.018, 0]}>
                     <boxGeometry args={[0.34, 0.036, 0.26]} />
                     <meshStandardMaterial color="#3b82c4" emissive="#1d4ed8" emissiveIntensity={0.12} roughness={0.28} metalness={0.34} />
@@ -1182,38 +1310,79 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
                         <boxGeometry args={[0.06, 0.015, 0.008]} />
                         <meshStandardMaterial color="#22d3ee" emissive="#22d3ee" emissiveIntensity={1.5} />
                       </mesh>
-                      {[0.02, 0.075].map((x, ledIndex) => (
+                      {[0.02, 0.075].map((x) => (
                         <mesh key={x} position={[x, 0.004, 0.018]}>
                           <boxGeometry args={[0.018, 0.018, 0.008]} />
-                          <meshStandardMaterial
-                            color={(unitIndex + ledIndex) % 3 === 0 ? '#ef4444' : '#34d399'}
-                            emissive={(unitIndex + ledIndex) % 3 === 0 ? '#ef4444' : '#34d399'}
-                            emissiveIntensity={1.6}
-                          />
+                          {/* LEDs mostram o estado real: verde respondendo, vermelho caido, cinza sem leitura. */}
+                          <meshStandardMaterial color={statusColor} emissive={statusColor} emissiveIntensity={status === null ? 0.4 : 1.6} />
                         </mesh>
                       ))}
                     </group>
                   ))}
-                  {linked && (
+                  {(linked || (backboneEditMode && editingFiberId === fiber.id)) && (
                     <mesh position={[0, fiber.height / 2 + 0.055, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                      <torusGeometry args={[0.18, 0.01, 8, 36]} />
-                      <meshBasicMaterial color={pending ? '#fef08a' : linkEnabled ? '#f59e0b' : '#64748b'} transparent opacity={pending || linkEnabled ? 0.9 : 0.55} />
+                      <torusGeometry args={[backboneEditMode && editingFiberId === fiber.id ? 0.24 : 0.18, 0.012, 8, 36]} />
+                      <meshBasicMaterial
+                        color={backboneEditMode && editingFiberId === fiber.id ? '#a7f3d0' : pending ? '#fef08a' : linkEnabled ? '#f59e0b' : '#64748b'}
+                        transparent
+                        opacity={pending || linkEnabled || editingFiberId === fiber.id ? 0.9 : 0.55}
+                      />
                     </mesh>
                   )}
-                  {backboneEditMode ? (
-                    <Html position={[0, fiber.height / 2 + 0.24, 0]} center zIndexRange={[24, 0]}>
-                      <input
-                        value={fiber.label}
-                        maxLength={28}
-                        onChange={(event) => renameBackbone(fiber.id, event.currentTarget.value)}
+                  {backboneEditMode && editingFiberId === fiber.id ? (
+                    <Html position={[0, fiber.height / 2 + 0.3, 0]} center zIndexRange={[30, 0]}>
+                      <div
+                        className="pointer-events-auto grid w-[132px] gap-1"
                         onClick={(event) => event.stopPropagation()}
                         onPointerDown={(event) => event.stopPropagation()}
                         onPointerUp={(event) => event.stopPropagation()}
-                        className="pointer-events-auto w-[118px] rounded-md border border-cyan-200/35 bg-slate-950/92 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wide text-white shadow-glow outline-none backdrop-blur focus:border-cyan-200"
-                      />
+                      >
+                        <div className="flex gap-1">
+                          <input
+                            value={fiber.label}
+                            maxLength={28}
+                            onChange={(event) => renameBackbone(fiber.id, event.currentTarget.value)}
+                            className="min-w-0 flex-1 rounded-md border border-cyan-200/35 bg-slate-950/92 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wide text-white shadow-glow outline-none backdrop-blur focus:border-cyan-200"
+                          />
+                          <button
+                            type="button"
+                            title="Remover este ponto"
+                            onClick={() => removeBackbone(fiber.id)}
+                            className="rounded-md border border-rose-300/40 bg-slate-950/92 px-1.5 text-[10px] font-bold text-rose-200 hover:bg-rose-500/30"
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <select
+                          value={fiber.hostId ?? ''}
+                          onChange={(event) => setBackboneSwitch(fiber.id, event.currentTarget.value)}
+                          className={`rounded-md border bg-slate-950/92 px-1 py-0.5 text-[9px] font-semibold outline-none ${fiber.hostId ? 'border-emerald-300/40 text-emerald-100' : 'border-slate-500/40 text-slate-400'}`}
+                          title="Switch do Zabbix que este ponto representa"
+                        >
+                          <option value="">— sem switch —</option>
+                          {switches.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {switchShortName(item.name)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </Html>
-                  ) : [0, 4, 9, 14, 19, 25].includes(index) && (
-                    <FloatingLabel position={[0, fiber.height / 2 + 0.22, 0]} active={backboneActive}>
+                  ) : status === false ? (
+                    // Caido: rotulo sempre visivel (inclusive na visao geral), para a TV.
+                    <Html position={[0, fiber.height / 2 + 1.3, 0]} center zIndexRange={[20, 0]}>
+                      <div className="pointer-events-none whitespace-nowrap rounded-md border border-rose-400/70 bg-rose-950/90 px-2.5 py-1 text-[10px] font-bold text-rose-100 shadow-[0_0_24px_rgba(239,68,68,0.45)]">
+                        {fiber.label} · SEM RESPOSTA
+                      </div>
+                    </Html>
+                  ) : hovered && sw ? (
+                    <Html position={[0, fiber.height / 2 + 0.26, 0]} center zIndexRange={[20, 0]}>
+                      <div className="pointer-events-none whitespace-nowrap rounded-md border border-emerald-300/50 bg-slate-950/92 px-2.5 py-1 text-[10px] font-semibold text-emerald-50 shadow-glow">
+                        {sw.name} · {sw.ip} · {sw.latencyMs ?? '—'} ms
+                      </div>
+                    </Html>
+                  ) : (hovered || [0, 4, 9, 14, 19, 25].includes(index)) && (
+                    <FloatingLabel position={[0, fiber.height / 2 + 0.22, 0]} active={backboneActive || hovered}>
                       {fiber.label}
                     </FloatingLabel>
                   )}
@@ -1436,6 +1605,7 @@ export default function InfraScene({ activeScene, selectedRackId, onSelectNode, 
           onSelectNode={onSelectNode}
           onSelectRack={onSelectRack}
           canEditBackbones={canEditBackbones}
+          live={live}
           backgroundOnly={cloudSceneWithRackBase}
           simplifiedRacks={oracleTsplusScene}
         />

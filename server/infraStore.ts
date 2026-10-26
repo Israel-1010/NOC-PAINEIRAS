@@ -29,6 +29,8 @@ function validate(input: unknown) {
       position: entry.position,
       color: /^#[0-9a-f]{3,8}$/i.test(String(entry.color)) ? String(entry.color) : "#22d3ee",
       height: Math.min(Math.max(Number(entry.height) || 0.44, 0.05), 5),
+      // Switch do Zabbix representado pelo ponto (id numerico do host).
+      ...(/^\d{1,12}$/.test(String(entry.hostId ?? "")) ? { hostId: String(entry.hostId) } : {}),
     };
   });
   const links = raw.links.map((link) => {

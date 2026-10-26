@@ -126,6 +126,8 @@ export default function InfoPanel({ activeStep, selectedNode, selectedRack, live
   const metrics = live ? metricsFor(activeStep.id, live, selectedRack) : [];
   const updated = live ? new Date(live.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
   const showProblems = live && (activeStep.id === 'monitoring' || activeStep.id === 'overview') && !selectedRack && !selectedNode && live.problems.list.length > 0;
+  // Switches caidos (cada um e um backbone vermelho na cena).
+  const downSwitches = live && (['overview', 'datacenter', 'racks', 'network', 'backbones'] as SceneId[]).includes(activeStep.id) ? live.switches.filter((sw) => sw.up === false) : [];
 
   return (
     <motion.section
@@ -172,6 +174,22 @@ export default function InfoPanel({ activeStep, selectedNode, selectedRack, live
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {downSwitches.length > 0 && (
+        <div className="mb-5">
+          <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-rose-300">
+            <AlertTriangle size={13} /> Switches sem resposta
+          </p>
+          <ul className="space-y-1.5">
+            {downSwitches.map((sw) => (
+              <li key={sw.id} className="flex items-center justify-between gap-2 rounded-md border border-rose-400/40 bg-rose-500/10 px-3 py-2">
+                <span className="truncate text-xs font-semibold text-rose-100">{sw.name}</span>
+                <span className="shrink-0 font-mono text-[11px] text-rose-200/80">{sw.ip}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

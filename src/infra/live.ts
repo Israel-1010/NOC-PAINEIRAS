@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 // Dados reais para o Digital Twin: o mesmo /api/noc do Painel NOC (Zabbix, UniFi, Beszel),
 // reduzido ao que cada cena mostra.
 
-type NocHost = { up: boolean | null };
+type NocHost = { id: string; name: string; ip: string; up: boolean | null; latencyMs: number | null };
 type NocGroup = { key: string; total: number; up: number; down: number; hosts: NocHost[] };
 type NocLink = { name: string; online: boolean; latencyMs: number | null; lossPercent: number | null; inBps: number; outBps: number; contractedMbps: number; usagePercent: number | null };
 type NocFirewall = {
@@ -30,6 +30,7 @@ type NocPayload = {
 
 export type LinkStatus = { name: string; online: boolean; latencyMs: number | null; lossPercent: number | null; inBps: number; outBps: number; contractedMbps: number; usagePercent: number | null };
 export type GroupStatus = { up: number; total: number; down: number };
+export type SwitchStatus = { id: string; name: string; ip: string; up: boolean | null; latencyMs: number | null };
 
 export type InfraLive = {
   updatedAt: string;
@@ -37,6 +38,8 @@ export type InfraLive = {
   links: Record<string, LinkStatus | undefined>; // chave = id do link no infraData (wan-hostfiber...)
   firewall: { cpu: number | null; memory: number | null; sessions: number | null; haMode: string; nodes: number; synced: boolean | null; blocked24h: number | null; detected24h: number | null; tunnelsUp: number; tunnelsTotal: number; vpnUsers: number | null } | null;
   groups: Record<string, GroupStatus | undefined>;
+  // Switches do Zabbix (grupo Switch), um por backbone na cena.
+  switches: SwitchStatus[];
   hosts: { up: number; known: number };
   problems: { total: number; high: number; list: NocProblem[] };
   wifi: { aps: number; apsOnline: number; clients: number; topSsid: { ssid: string; count: number }[] } | null;
@@ -110,6 +113,7 @@ function reduce(data: NocPayload): InfraLive {
         }
       : null,
     groups,
+    switches: (data.groups.find((group) => group.key === 'switches')?.hosts || []).map(({ id, name, ip, up: hostUp, latencyMs }) => ({ id, name, ip, up: hostUp, latencyMs })),
     hosts: { up, known },
     problems: { total: problems.length, high: problems.filter((problem) => problem.severity >= 4).length, list: problems.slice(0, 6) },
     wifi: unifi && unifi.aps.length
