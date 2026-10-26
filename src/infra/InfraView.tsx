@@ -88,6 +88,8 @@ export default function InfraView({ isAdmin }: { isAdmin: boolean }) {
         </div>
 
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_35%,rgba(2,6,23,0.58))]" />
+        {/* Barra de edicao dos backbones (renderizada pela cena via portal, fixa no topo). */}
+        <div id="infra-backbone-toolbar" className="pointer-events-none absolute left-1/2 top-4 z-30 flex -translate-x-1/2 justify-center" />
         <NavigationMenu
           activeId={tour.activeStep.id}
           onSelect={tour.goToStep}

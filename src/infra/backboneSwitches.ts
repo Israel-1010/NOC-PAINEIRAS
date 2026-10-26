@@ -40,6 +40,46 @@ export function matchByName(nodes: BackboneNodeLike[], switches: SwitchStatus[])
   return result;
 }
 
+// Leque: arcos concentricos saindo da porta do rack (na direcao -x), como uma estrela de fibras.
+// Cada arco respeita a faixa do piso (|z - porta| <= 1.22) e um espaco minimo entre pinos.
+export function fanPositions(count: number, port: [number, number]): [number, number][] {
+  const spacing = 0.34;
+  const maxSpread = 1.22;
+  const rings: { r: number; angles: number }[] = [];
+  let capacity = 0;
+  for (let i = 0; capacity < count && i < 12; i += 1) {
+    const r = 0.95 + i * 0.52;
+    const theta = Math.min((55 * Math.PI) / 180, Math.asin(Math.min(1, maxSpread / r)));
+    const slots = Math.max(1, Math.floor((2 * r * theta) / spacing) + 1);
+    rings.push({ r, angles: slots });
+    capacity += slots;
+  }
+  const result: [number, number][] = [];
+  let left = count;
+  for (const ring of rings) {
+    const n = Math.min(ring.angles, left);
+    if (n <= 0) break;
+    const theta = Math.min((55 * Math.PI) / 180, Math.asin(Math.min(1, maxSpread / ring.r)));
+    for (let k = 0; k < n; k += 1) {
+      const angle = n === 1 ? 0 : -theta + (2 * theta * k) / (n - 1);
+      result.push([port[0] - ring.r * Math.cos(angle), port[1] + ring.r * Math.sin(angle)]);
+    }
+    left -= n;
+  }
+  return result;
+}
+
+// Ordem do leque: pela numeracao do switch ("01-USW-..."), depois pelo nome; pontos sem switch no fim.
+export function fanOrder<T extends BackboneNodeLike>(nodes: T[], switches: SwitchStatus[]) {
+  const nameOf = (node: T) => switches.find((sw) => sw.id === node.hostId)?.name ?? '';
+  return [...nodes].sort((a, b) => {
+    const na = nameOf(a);
+    const nb = nameOf(b);
+    if (!na !== !nb) return na ? -1 : 1;
+    return (na || a.label).localeCompare(nb || b.label, 'pt-BR', { numeric: true });
+  });
+}
+
 // Posicoes livres no piso dos backbones (mesma area que o arrastar permite).
 export function freeSlots(occupied: [number, number, number][], count: number) {
   const slots: [number, number][] = [];
