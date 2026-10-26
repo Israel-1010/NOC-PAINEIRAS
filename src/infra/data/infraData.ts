@@ -128,20 +128,12 @@ export const tourSteps: TourStep[] = [
     target: [0.6, 0.65, -4.6],
   },
   {
-    id: 'backbones',
-    eyebrow: 'Cena 09.1',
-    title: 'Backbones',
-    description: 'Editor visual dos backbones de fibra: mova os pontos, edite os nomes, use Link Rack para ligar ao rack de switch em laranja ou Link Backbone para ligar dois backbones entre si, e salve ou carregue o backbonesConfig.json da raiz.',
-    camera: [0.35, 5.2, 4.95],
-    target: [-1.75, 0.32, -1.25],
-  },
-  {
     id: 'switches',
-    eyebrow: 'Cena 09.2',
+    eyebrow: 'Cena 09.1',
     title: 'Switches ao vivo',
-    description: 'Cada switch do clube monitorado pelo Zabbix, sempre no mesmo lugar (pela numeração). Faixa verde: respondendo. Vermelho com feixe: sem resposta. Passe o mouse para ver IP e latência.',
-    camera: [-3, 8.4, 12.2],
-    target: [-3, 0, 4.2],
+    description: 'Cada switch do clube monitorado pelo Zabbix, ligado ao Rack Switch pelo seu uplink e sempre no mesmo lugar (pela numeração). Verde: respondendo. Vermelho com feixe: sem resposta. Passe o mouse para ver IP e latência.',
+    camera: [-3.4, 7.6, 5.4],
+    target: [-3.6, 0, -1.3],
   },
   {
     id: 'wifi',
@@ -175,7 +167,7 @@ export const racks: RackInfo[] = [
     label: 'Rack Switch UniFi',
     role: 'network',
     position: [0.75, 0.9, -1.3],
-    services: ['Switch Core UniFi', '26 backbones', 'Fibra optica', 'Distribuição do clube', 'VLANs', 'Uplink rack servidores'],
+    services: ['Switch Core UniFi', 'Uplinks dos switches de acesso', 'Fibra óptica', 'Distribuição do clube', 'VLANs', 'Uplink rack servidores'],
   },
   {
     id: 'rack-02',

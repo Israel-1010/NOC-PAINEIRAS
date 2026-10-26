@@ -2,24 +2,22 @@ import { Float, Grid, Html } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent } from 'react';
-import { createPortal } from 'react-dom';
 import type { Group, Vector3Tuple } from 'three';
-import defaultBackbonesConfig from '../data/backbonesDefault.json';
 import { cloudProviders, infraNodes, internetLinks, racks } from '../data/infraData';
 import type { SceneId } from '../types/infra';
-import { apiFetch, type InfraLive } from '../live';
+import type { InfraLive } from '../live';
 import Cloud3D from '../components/three/Cloud3D';
 import ConnectionLine from '../components/three/ConnectionLine';
 import Firewall3D from '../components/three/Firewall3D';
 import FloatingLabel from '../components/three/FloatingLabel';
 import InternetLink3D, { DOWN_COLOR } from '../components/three/InternetLink3D';
-import SwitchGrid, { switchGridLayout } from '../components/three/SwitchGrid';
+import SwitchGrid from '../components/three/SwitchGrid';
 
-// Area propria dos switches, a frente do CPD (espaco de sobra para nao ficarem amontoados).
-export const SWITCH_GRID_CENTER: Vector3Tuple = [-3, 0, 4.6];
-// Porta do rack de switch no mundo (backboneRackPort + deslocamento da sala do CPD).
+// Switches de acesso no lugar dos antigos backbones, ao lado do Rack Switch.
+const SWITCH_GRID_CENTER: Vector3Tuple = [-3.6, 0, -1.3];
+// Porta do Rack Switch (no mundo) de onde saem os uplinks.
 const SWITCH_RACK_PORT_WORLD: Vector3Tuple = [0.6, 0.06, -1.28];
+const SWITCH_GRID_SCENES: SceneId[] = ['overview', 'datacenter', 'racks', 'network', 'switches'];
 import Rack3D from '../components/three/Rack3D';
 import cloudflareLogo from '../assets/providers/cloudflare-logo.svg';
 
@@ -29,81 +27,11 @@ interface InfraSceneProps {
   onSelectNode: (id: string) => void;
   onSelectRack?: (id: string) => void;
   live?: InfraLive | null;
-  // Somente gestores do portal editam os backbones (salvos no servidor).
-  canEditBackbones?: boolean;
 }
 
 interface DataCenterRoomProps extends InfraSceneProps {
   backgroundOnly?: boolean;
   simplifiedRacks?: boolean;
-}
-
-type FiberCityNode = { id: string; label: string; position: Vector3Tuple; color: string; height: number };
-
-type BackboneRackLink = { type: 'rack'; nodeId: string; enabled: boolean };
-type BackbonePeerLink = { type: 'peer'; fromId: string; toId: string; enabled: boolean };
-type BackboneLink = BackboneRackLink | BackbonePeerLink;
-type BackbonesConfig = { nodes: FiberCityNode[]; links: BackboneLink[] };
-
-function normalizeFiberNodes(value: unknown): FiberCityNode[] {
-  if (!Array.isArray(value)) return [];
-
-  return value.flatMap((item) => {
-    const node = item as Partial<FiberCityNode>;
-    const position = node.position;
-    if (
-      typeof node.id !== 'string' ||
-      typeof node.label !== 'string' ||
-      typeof node.color !== 'string' ||
-      typeof node.height !== 'number' ||
-      !Array.isArray(position) ||
-      position.length !== 3 ||
-      !position.every((coordinate) => typeof coordinate === 'number')
-    ) {
-      return [];
-    }
-
-    return [{
-      id: node.id,
-      label: node.label,
-      position: [position[0], position[1], position[2]],
-      color: node.color,
-      height: node.height,
-    }];
-  });
-}
-
-function normalizeBackboneLinks(value: unknown): BackboneLink[] {
-  if (!Array.isArray(value)) return [];
-
-  return value.reduce<BackboneLink[]>((links, item) => {
-    if (typeof item === 'string') return [...links, { type: 'rack', nodeId: item, enabled: true }];
-
-    const link = item as Record<string, unknown>;
-    if (link.type === 'peer' && typeof link.fromId === 'string' && typeof link.toId === 'string') {
-      return [
-        ...links,
-        {
-        type: 'peer',
-        fromId: link.fromId,
-        toId: link.toId,
-        enabled: link.enabled !== false,
-        },
-      ];
-    }
-
-    if (typeof link.nodeId !== 'string') return links;
-
-    return [...links, { type: 'rack', nodeId: link.nodeId, enabled: link.enabled !== false }];
-  }, []);
-}
-
-function normalizeBackbonesConfig(value: unknown): BackbonesConfig {
-  const config = value as Partial<BackbonesConfig>;
-  return {
-    nodes: normalizeFiberNodes(config?.nodes),
-    links: normalizeBackboneLinks(config?.links),
-  };
 }
 
 function isActive(activeScene: SceneId, scene: SceneId) {
@@ -732,12 +660,8 @@ function GlobeNode({ active, onClick }: { active: boolean; onClick: () => void }
   );
 }
 
-function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, simplifiedRacks = false, canEditBackbones = false }: DataCenterRoomProps) {
-  // Espaco fixo no topo da tela (InfraView) onde a barra de edicao e desenhada.
-  const toolbarSlot = typeof document === 'undefined' ? null : document.getElementById('infra-backbone-toolbar');
+function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, simplifiedRacks = false }: DataCenterRoomProps) {
   const rackLabelsActive = !backgroundOnly && (activeScene === 'racks' || activeScene === 'datacenter');
-  const backboneActive = !backgroundOnly && (activeScene === 'racks' || activeScene === 'datacenter' || activeScene === 'network' || activeScene === 'backbones');
-  const backboneEditMode = activeScene === 'backbones' && canEditBackbones;
   const powerLineActive = !backgroundOnly && rackLabelsActive;
   const nobreaks: Array<{ label: string; position: Vector3Tuple; target: Vector3Tuple; via: Vector3Tuple[] }> = [
     {
@@ -765,245 +689,6 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
   const cftvRackPosition: Vector3Tuple = [5.18, 0.55, -1.38];
   const cftvRackPort: Vector3Tuple = [4.86, 0.24, -1.38];
   const switchRackCftvPort: Vector3Tuple = [1.3, 0.24, -1.02];
-  const backboneRackPort: Vector3Tuple = [0.2, 0.2, -1.08];
-  const backboneColors = ['#22d3ee', '#38bdf8', '#34d399', '#2dd4bf', '#60a5fa', '#22c55e'];
-  const backboneStorageKey = 'infravision.backbones.nodes';
-  const backboneLinksStorageKey = 'infravision.backbones.links';
-  const initialBackboneConfig = normalizeBackbonesConfig(defaultBackbonesConfig);
-  const [fiberCityNodes, setFiberCityNodes] = useState<FiberCityNode[]>(() => {
-    const fallback = initialBackboneConfig.nodes;
-    if (typeof window === 'undefined') return [];
-    try {
-      const stored = window.localStorage.getItem(backboneStorageKey);
-      if (!stored) return fallback;
-      const parsed = JSON.parse(stored) as unknown;
-      const nodes = normalizeFiberNodes(parsed);
-      return nodes.length > 0 ? nodes : fallback;
-    } catch {
-      return fallback;
-    }
-  });
-  const [draggingFiberId, setDraggingFiberId] = useState<string | null>(null);
-  const [backboneLinks, setBackboneLinks] = useState<BackboneLink[]>(() => {
-    const fallback = initialBackboneConfig.links;
-    if (typeof window === 'undefined') return fallback;
-    try {
-      const stored = window.localStorage.getItem(backboneLinksStorageKey);
-      if (!stored) return fallback;
-      const parsed = JSON.parse(stored) as unknown;
-      const links = normalizeBackboneLinks(parsed);
-      return links.length > 0 ? links : fallback;
-    } catch {
-      return fallback;
-    }
-  });
-  // 'edit': clique escolhe o ponto a editar (nome, switch, remover); 'rack'/'peer': clique liga fibras.
-  const [backboneLinkMode, setBackboneLinkMode] = useState<'edit' | 'rack' | 'peer'>('edit');
-  const [editingFiberId, setEditingFiberId] = useState<string | null>(null);
-  const [pendingBackboneId, setPendingBackboneId] = useState<string | null>(null);
-  const [backboneConfigReady, setBackboneConfigReady] = useState(false);
-  const [backboneSaveStatus, setBackboneSaveStatus] = useState('Arquivo aguardando');
-  const dragMovedRef = useRef(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    let cancelled = false;
-
-    apiFetch('/api/infra/backbones')
-      .then(async (response) => {
-        if (!response.ok) return null;
-        return normalizeBackbonesConfig(await response.json());
-      })
-      .then((config) => {
-        if (cancelled || !config) return;
-        if (config.nodes.length > 0 || config.links.length > 0) {
-          setFiberCityNodes(config.nodes);
-          setBackboneLinks(config.links);
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setBackboneConfigReady(true);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(backboneStorageKey, JSON.stringify(fiberCityNodes));
-  }, [fiberCityNodes]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(backboneLinksStorageKey, JSON.stringify(backboneLinks));
-  }, [backboneLinks]);
-
-  useEffect(() => {
-    // So grava no servidor quando um gestor esta editando (cena Backbones).
-    if (typeof window === 'undefined' || !backboneConfigReady || !backboneEditMode) return;
-
-    const saveTimer = window.setTimeout(() => {
-      setBackboneSaveStatus('Salvando...');
-      apiFetch('/api/infra/backbones', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodes: fiberCityNodes, links: backboneLinks }),
-      })
-        .then((response) => {
-          setBackboneSaveStatus(response.ok ? 'Salvo no portal' : 'Não salvou (sem permissão?)');
-        })
-        .catch(() => {
-          setBackboneSaveStatus('Sem conexão: salvo só neste navegador');
-        });
-    }, 600);
-
-    return () => window.clearTimeout(saveTimer);
-  }, [backboneConfigReady, backboneEditMode, backboneLinks, fiberCityNodes]);
-
-  const createBackbone = () => {
-    setFiberCityNodes((current) => {
-      const index = current.length;
-      const row = index % 4;
-      const column = Math.floor(index / 4);
-      const height = 0.44;
-      return [
-        ...current,
-        {
-          id: `fiber-${Date.now()}-${index}`,
-          label: `Backbone ${String(index + 1).padStart(2, '0')}`,
-          position: [-0.48 - column * 0.5, height / 2, -2.28 + row * 0.68],
-          color: backboneColors[index % backboneColors.length],
-          height,
-        },
-      ];
-    });
-  };
-
-  const renameBackbone = (nodeId: string, label: string) => {
-    setFiberCityNodes((current) =>
-      current.map((node) =>
-        node.id === nodeId
-          ? { ...node, label: label.slice(0, 28) }
-          : node,
-      ),
-    );
-  };
-
-  const clearBackboneLinks = () => {
-    setBackboneLinks([]);
-    setPendingBackboneId(null);
-  };
-
-  const removeBackbone = (nodeId: string) => {
-    setFiberCityNodes((current) => current.filter((node) => node.id !== nodeId));
-    setBackboneLinks((current) => current.filter((link) => (link.type === 'rack' ? link.nodeId !== nodeId : link.fromId !== nodeId && link.toId !== nodeId)));
-  };
-
-
-  const updateDraggingFiber = (event: ThreeEvent<PointerEvent>) => {
-    if (!draggingFiberId) return;
-    event.stopPropagation();
-    dragMovedRef.current = true;
-    const nextX = Math.min(-0.35, Math.max(-3.75, event.point.x - 0.4));
-    const nextZ = Math.min(0.18, Math.max(-2.55, event.point.z + 0.2));
-
-    setFiberCityNodes((current) =>
-      current.map((node) =>
-        node.id === draggingFiberId
-          ? { ...node, position: [nextX, node.height / 2, nextZ] }
-          : node,
-      ),
-    );
-  };
-
-  const toggleRackBackboneLink = (nodeId: string) => {
-    setBackboneLinks((current) => {
-      const existing = current.find((link) => link.type === 'rack' && link.nodeId === nodeId);
-      if (!existing) return [...current, { type: 'rack', nodeId, enabled: true }];
-      return current.map((link) =>
-        link.type === 'rack' && link.nodeId === nodeId ? { ...link, enabled: !link.enabled } : link,
-      );
-    });
-  };
-
-  const togglePeerBackboneLink = (fromId: string, toId: string) => {
-    const [firstId, secondId] = [fromId, toId].sort();
-    setBackboneLinks((current) => {
-      const existing = current.find((link) =>
-        link.type === 'peer' && link.fromId === firstId && link.toId === secondId,
-      );
-      if (!existing) return [...current, { type: 'peer', fromId: firstId, toId: secondId, enabled: true }];
-      return current.map((link) =>
-        link.type === 'peer' && link.fromId === firstId && link.toId === secondId
-          ? { ...link, enabled: !link.enabled }
-          : link,
-      );
-    });
-  };
-
-  const handleBackboneClick = (nodeId: string) => {
-    if (backboneLinkMode === 'edit') {
-      setEditingFiberId((current) => (current === nodeId ? null : nodeId));
-      return;
-    }
-
-    if (backboneLinkMode === 'rack') {
-      setPendingBackboneId(null);
-      toggleRackBackboneLink(nodeId);
-      return;
-    }
-
-    if (!pendingBackboneId) {
-      setPendingBackboneId(nodeId);
-      return;
-    }
-
-    if (pendingBackboneId === nodeId) {
-      setPendingBackboneId(null);
-      return;
-    }
-
-    togglePeerBackboneLink(pendingBackboneId, nodeId);
-    setPendingBackboneId(null);
-  };
-
-  const exportBackboneConfig = () => {
-    const config: BackbonesConfig = {
-      nodes: fiberCityNodes,
-      links: backboneLinks,
-    };
-    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
-    const url = window.URL.createObjectURL(blob);
-    const download = document.createElement('a');
-    download.href = url;
-    download.download = 'backbonesConfig.json';
-    download.click();
-    window.URL.revokeObjectURL(url);
-  };
-
-  const importBackboneConfig = (event: ChangeEvent<HTMLInputElement>) => {
-    const input = event.currentTarget;
-    const file = input.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result)) as unknown;
-        const config = normalizeBackbonesConfig(parsed);
-        setFiberCityNodes(config.nodes);
-        setBackboneLinks(config.links);
-      } finally {
-        input.value = '';
-      }
-    };
-    reader.readAsText(file);
-  };
-
   return (
     <group position={[0.4, 0, -0.2]}>
       <mesh receiveShadow position={[1.9, -0.025, -1.1]}>
@@ -1028,269 +713,6 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
           <FloatingLabel position={[1.65, 0.36, -0.92]} active={rackInterlinkActive}>
             Uplink entre racks
           </FloatingLabel>
-          <group>
-            <mesh
-              position={[-2.08, 0.025, -1.12]}
-              receiveShadow
-              onPointerMove={updateDraggingFiber}
-              onPointerUp={() => setDraggingFiberId(null)}
-              onPointerLeave={() => setDraggingFiberId(null)}
-            >
-              <boxGeometry args={[4.0, 0.035, 3.2]} />
-              <meshStandardMaterial color="#07111f" emissive="#0e7490" emissiveIntensity={0.08} roughness={0.58} />
-            </mesh>
-            <mesh position={backboneRackPort}>
-              <boxGeometry args={[0.08, 0.08, 0.16]} />
-              <meshStandardMaterial color="#0f172a" emissive="#22d3ee" emissiveIntensity={1.4} />
-            </mesh>
-            <FloatingLabel position={[-2.08, 0.66, -2.92]} active={backboneActive}>
-              Backbones | Saida do Rack Switch
-            </FloatingLabel>
-            {backboneEditMode && toolbarSlot && (
-              <Html>
-                {createPortal(
-                  <div className="pointer-events-auto flex w-[min(500px,calc(100vw-760px))] min-w-[300px] flex-wrap justify-center gap-1.5 rounded-md border border-cyan-200/25 bg-slate-950/90 p-2 shadow-glow backdrop-blur">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (!window.confirm('Voltar aos backbones do desenho original? Os pontos e ligações atuais serão substituídos.')) return;
-                      setFiberCityNodes(initialBackboneConfig.nodes);
-                      setBackboneLinks(initialBackboneConfig.links);
-                      setEditingFiberId(null);
-                    }}
-                    title="Restaura os backbones do desenho original (útil depois de importar pontos demais)"
-                    className="rounded border border-slate-500/40 bg-white/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-100"
-                  >
-                    Voltar ao desenho original
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setPendingBackboneId(null);
-                      setBackboneLinkMode('edit');
-                    }}
-                    title="Clique num ponto para trocar o nome, escolher o switch ou remover"
-                    className={`rounded px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                      backboneLinkMode === 'edit' ? 'bg-emerald-300 text-slate-950' : 'border border-emerald-300/35 bg-emerald-300/10 text-emerald-100'
-                    }`}
-                  >
-                    Editar ponto
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      createBackbone();
-                    }}
-                    className="rounded bg-cyan-300 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-950"
-                  >
-                    Novo backbone
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setPendingBackboneId(null);
-                      setBackboneLinkMode('rack');
-                    }}
-                    className={`rounded px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                      backboneLinkMode === 'rack'
-                        ? 'bg-amber-300 text-slate-950'
-                        : 'border border-amber-300/35 bg-amber-300/10 text-amber-100'
-                    }`}
-                  >
-                    Link Rack
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setBackboneLinkMode('peer');
-                    }}
-                    className={`rounded px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                      backboneLinkMode === 'peer'
-                        ? 'bg-cyan-300 text-slate-950'
-                        : 'border border-cyan-300/35 bg-cyan-300/10 text-cyan-100'
-                    }`}
-                  >
-                    Link Backbone
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      clearBackboneLinks();
-                    }}
-                    className="rounded border border-slate-500/40 bg-white/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-100"
-                  >
-                    Limpar links
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      exportBackboneConfig();
-                    }}
-                    className="rounded border border-cyan-300/35 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-cyan-100"
-                  >
-                    Salvar arquivo
-                  </button>
-                  <label
-                    className="cursor-pointer rounded border border-slate-500/40 bg-white/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-100"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    Carregar
-                    <input
-                      type="file"
-                      accept="application/json,.json"
-                      className="hidden"
-                      onChange={importBackboneConfig}
-                    />
-                  </label>
-                  <span className="rounded border border-slate-500/30 bg-slate-900/70 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-300">
-                    {backboneSaveStatus}
-                  </span>
-                  </div>,
-                  toolbarSlot,
-                )}
-              </Html>
-            )}
-            {backboneLinks.map((link) => {
-              if (link.type === 'rack') {
-                const node = fiberCityNodes.find((fiber) => fiber.id === link.nodeId);
-                if (!node) return null;
-                return (
-                  <ConnectionLine
-                    key={`rack-backbone-link-${link.nodeId}`}
-                    from={backboneRackPort}
-                    to={[node.position[0], 0.24, node.position[2]]}
-                    color={link.enabled ? '#f59e0b' : '#64748b'}
-                    active={backboneActive && link.enabled}
-                    packets={link.enabled ? 2 : 0}
-                    straight
-                    bidirectional
-                    thin
-                  />
-                );
-              }
-
-              const fromNode = fiberCityNodes.find((fiber) => fiber.id === link.fromId);
-              const toNode = fiberCityNodes.find((fiber) => fiber.id === link.toId);
-              if (!fromNode || !toNode) return null;
-              return (
-                <ConnectionLine
-                  key={`peer-backbone-link-${link.fromId}-${link.toId}`}
-                  from={[fromNode.position[0], 0.28, fromNode.position[2]]}
-                  to={[toNode.position[0], 0.28, toNode.position[2]]}
-                  color={link.enabled ? '#22d3ee' : '#64748b'}
-                  active={backboneActive && link.enabled}
-                  packets={link.enabled ? 2 : 0}
-                  straight
-                  bidirectional
-                  thin
-                />
-              );
-            })}
-            {fiberCityNodes.map((fiber, index) => {
-              const rackLink = backboneLinks.find((item) => item.type === 'rack' && item.nodeId === fiber.id);
-              const peerLink = backboneLinks.find((item) =>
-                item.type === 'peer' && (item.fromId === fiber.id || item.toId === fiber.id),
-              );
-              const pending = pendingBackboneId === fiber.id;
-              const linked = Boolean(rackLink || peerLink || pending);
-              const linkEnabled = Boolean(rackLink?.enabled || peerLink?.enabled);
-              const editing = backboneEditMode && editingFiberId === fiber.id;
-              return (
-              <group key={fiber.id}>
-                <group
-                  position={fiber.position}
-                  onPointerDown={(event) => {
-                    if (!backboneEditMode) return;
-                    event.stopPropagation();
-                    dragMovedRef.current = false;
-                    setDraggingFiberId(fiber.id);
-                  }}
-                  onPointerUp={(event) => {
-                    if (!backboneEditMode) return;
-                    event.stopPropagation();
-                    setDraggingFiberId(null);
-                    if (!dragMovedRef.current) handleBackboneClick(fiber.id);
-                  }}
-                >
-                  <mesh castShadow receiveShadow>
-                    <boxGeometry args={[0.28, fiber.height, 0.22]} />
-                    <meshStandardMaterial color="#123f63" emissive={fiber.color} emissiveIntensity={linkEnabled ? 0.92 : linked ? 0.38 : 0.24} roughness={0.34} metalness={0.24} />
-                  </mesh>
-                  <mesh position={[0, fiber.height / 2 + 0.018, 0]}>
-                    <boxGeometry args={[0.34, 0.036, 0.26]} />
-                    <meshStandardMaterial color="#3b82c4" emissive="#1d4ed8" emissiveIntensity={0.12} roughness={0.28} metalness={0.34} />
-                  </mesh>
-                  {[-0.11, 0.08].map((y, unitIndex) => (
-                    <group key={y} position={[0, y, 0.125]}>
-                      <mesh>
-                        <boxGeometry args={[0.22, 0.075, 0.026]} />
-                        <meshStandardMaterial color="#071827" emissive="#0ea5e9" emissiveIntensity={0.2} roughness={0.34} metalness={0.22} />
-                      </mesh>
-                      <mesh position={[-0.07, 0.004, 0.018]}>
-                        <boxGeometry args={[0.06, 0.015, 0.008]} />
-                        <meshStandardMaterial color="#22d3ee" emissive="#22d3ee" emissiveIntensity={1.5} />
-                      </mesh>
-                      {[0.02, 0.075].map((x, ledIndex) => (
-                        <mesh key={x} position={[x, 0.004, 0.018]}>
-                          <boxGeometry args={[0.018, 0.018, 0.008]} />
-                          <meshStandardMaterial
-                            color={(unitIndex + ledIndex) % 3 === 0 ? '#ef4444' : '#34d399'}
-                            emissive={(unitIndex + ledIndex) % 3 === 0 ? '#ef4444' : '#34d399'}
-                            emissiveIntensity={1.6}
-                          />
-                        </mesh>
-                      ))}
-                    </group>
-                  ))}
-                  {(linked || editing) && (
-                    <mesh position={[0, fiber.height / 2 + 0.055, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                      <torusGeometry args={[editing ? 0.24 : 0.18, 0.01, 8, 36]} />
-                      <meshBasicMaterial color={editing ? '#a7f3d0' : pending ? '#fef08a' : linkEnabled ? '#f59e0b' : '#64748b'} transparent opacity={editing || pending || linkEnabled ? 0.9 : 0.55} />
-                    </mesh>
-                  )}
-                  {editing ? (
-                    <Html position={[0, fiber.height / 2 + 0.24, 0]} center zIndexRange={[30, 0]}>
-                      <div
-                        className="pointer-events-auto flex gap-1"
-                        onClick={(event) => event.stopPropagation()}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onPointerUp={(event) => event.stopPropagation()}
-                      >
-                        <input
-                          value={fiber.label}
-                          maxLength={28}
-                          onChange={(event) => renameBackbone(fiber.id, event.currentTarget.value)}
-                          className="w-[118px] rounded-md border border-cyan-200/35 bg-slate-950/92 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wide text-white shadow-glow outline-none backdrop-blur focus:border-cyan-200"
-                        />
-                        <button
-                          type="button"
-                          title="Remover este backbone"
-                          onClick={() => removeBackbone(fiber.id)}
-                          className="rounded-md border border-rose-300/40 bg-slate-950/92 px-1.5 text-[10px] font-bold text-rose-200 hover:bg-rose-500/30"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </Html>
-                  ) : (
-                    [0, 4, 9, 14, 19, 25].includes(index) && (
-                      <FloatingLabel position={[0, fiber.height / 2 + 0.22, 0]} active={backboneActive}>
-                        {fiber.label}
-                      </FloatingLabel>
-                    )
-                  )}
-                </group>
-              </group>
-              );
-            })}
-          </group>
           {nobreaks.map((nobreak, index) => (
             <group key={nobreak.label}>
               <group position={nobreak.position}>
@@ -1337,7 +759,7 @@ function DataCenterRoom({ activeScene, onSelectRack, backgroundOnly = false, sim
   );
 }
 
-export default function InfraScene({ activeScene, selectedRackId, onSelectNode, onSelectRack, live = null, canEditBackbones = false }: InfraSceneProps) {
+export default function InfraScene({ activeScene, selectedRackId, onSelectNode, onSelectRack, live = null }: InfraSceneProps) {
   const linkState = (id: string) => live?.links[id];
   const rackOnlyScene = activeScene === 'datacenter' || activeScene === 'racks';
   const serverRackScene = activeScene === 'server-rack';
@@ -1504,32 +926,19 @@ export default function InfraScene({ activeScene, selectedRackId, onSelectNode, 
           selectedRackId={selectedRackId}
           onSelectNode={onSelectNode}
           onSelectRack={onSelectRack}
-          canEditBackbones={canEditBackbones}
           backgroundOnly={cloudSceneWithRackBase}
           simplifiedRacks={oracleTsplusScene}
         />
       )}
 
-      {!rackOnlyScene && !isolatedScene && (activeScene === 'switches' || activeScene === 'network' || activeScene === 'overview') && live && live.switches.length > 0 && (
-        <group>
-          {/* Fibra-tronco do rack de switch ate a area dos switches. */}
-          {(() => {
-            const grid = switchGridLayout(live.switches.length, SWITCH_GRID_CENTER);
-            const entry: Vector3Tuple = [SWITCH_GRID_CENTER[0] + grid.width / 2 + 0.6, 0.06, SWITCH_GRID_CENTER[2] - grid.depth / 2 - 0.55];
-            return (
-              <ConnectionLine
-                from={SWITCH_RACK_PORT_WORLD}
-                to={entry}
-                via={[[SWITCH_RACK_PORT_WORLD[0], 0.06, entry[2]]]}
-                color="#22d3ee"
-                active={activeScene !== 'overview'}
-                packets={3}
-                bidirectional
-              />
-            );
-          })()}
-          <SwitchGrid switches={live.switches} center={SWITCH_GRID_CENTER} showLabels={activeScene === 'switches'} />
-        </group>
+      {!isolatedScene && SWITCH_GRID_SCENES.includes(activeScene) && live && live.switches.length > 0 && (
+        <SwitchGrid
+          switches={live.switches}
+          center={SWITCH_GRID_CENTER}
+          rackPort={SWITCH_RACK_PORT_WORLD}
+          showLabels={activeScene === 'switches'}
+          animate={activeScene !== 'overview'}
+        />
       )}
       {serverRackScene && <ServerRackSanEnvironment />}
       {backupScene && <BackupEnvironment />}

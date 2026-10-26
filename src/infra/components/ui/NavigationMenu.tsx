@@ -35,7 +35,6 @@ const menuRows: MenuRow[] = [
   { id: 'backup', label: 'Backup', number: '07' },
   { id: 'services', label: 'Serviços', number: '08' },
   { id: 'network', label: 'Rede', number: '09' },
-  { id: 'backbones', label: 'Backbones', depth: 1 },
   { id: 'switches', label: 'Switches ao vivo', depth: 1 },
   { id: 'wifi', label: 'Wi-Fi', number: '10' },
   { id: 'cftv', label: 'CFTV', number: '11' },

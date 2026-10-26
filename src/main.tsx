@@ -2096,7 +2096,7 @@ function App() {
           <ContractsDashboard />
         ) : activeView === "infra3d" ? (
           <React.Suspense fallback={<div className="view-loading">Carregando a infraestrutura 3D...</div>}>
-            <InfraView isAdmin={Boolean(access?.isAdmin)} />
+            <InfraView />
           </React.Suspense>
         ) : activeView === "noc" ? (
           <NocWall isAdmin={Boolean(access?.isAdmin)} />

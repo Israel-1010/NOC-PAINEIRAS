@@ -74,7 +74,6 @@ function metricsFor(scene: SceneId, live: InfraLive, rack: RackInfo | null | und
       break;
     case 'rack-01':
     case 'network':
-    case 'backbones':
     case 'switches':
       list.push(groupMetric('Switches respondendo', live.groups.switches), live.wifi ? { label: 'Antenas UniFi', value: `${live.wifi.apsOnline}/${live.wifi.aps}`, state: live.wifi.apsOnline === live.wifi.aps ? 'ok' : 'warning' } : null);
       break;
@@ -128,7 +127,7 @@ export default function InfoPanel({ activeStep, selectedNode, selectedRack, live
   const updated = live ? new Date(live.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
   const showProblems = live && (activeStep.id === 'monitoring' || activeStep.id === 'overview') && !selectedRack && !selectedNode && live.problems.list.length > 0;
   // Switches caidos (cada um e um backbone vermelho na cena).
-  const downSwitches = live && (['overview', 'datacenter', 'racks', 'network', 'backbones', 'switches'] as SceneId[]).includes(activeStep.id) ? live.switches.filter((sw) => sw.up === false) : [];
+  const downSwitches = live && (['overview', 'datacenter', 'racks', 'network', 'switches'] as SceneId[]).includes(activeStep.id) ? live.switches.filter((sw) => sw.up === false) : [];
 
   return (
     <motion.section

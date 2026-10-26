@@ -16,7 +16,6 @@ export type SceneId =
   | 'backup'
   | 'services'
   | 'network'
-  | 'backbones'
   | 'switches'
   | 'wifi'
   | 'cftv'
