@@ -136,6 +136,14 @@ export const tourSteps: TourStep[] = [
     target: [-1.75, 0.32, -1.25],
   },
   {
+    id: 'switches',
+    eyebrow: 'Cena 09.2',
+    title: 'Switches ao vivo',
+    description: 'Cada switch do clube monitorado pelo Zabbix, sempre no mesmo lugar (pela numeração). Faixa verde: respondendo. Vermelho com feixe: sem resposta. Passe o mouse para ver IP e latência.',
+    camera: [-3, 8.4, 12.2],
+    target: [-3, 0, 4.2],
+  },
+  {
     id: 'wifi',
     eyebrow: 'Cena 10',
     title: 'Wi-Fi',

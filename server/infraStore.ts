@@ -29,11 +29,6 @@ function validate(input: unknown) {
       position: entry.position,
       color: /^#[0-9a-f]{3,8}$/i.test(String(entry.color)) ? String(entry.color) : "#22d3ee",
       height: Math.min(Math.max(Number(entry.height) || 0.44, 0.05), 5),
-      // Switches do Zabbix da area deste backbone (ids numericos dos hosts).
-      hostIds: (Array.isArray(entry.hostIds) ? entry.hostIds : entry.hostId ? [entry.hostId] : [])
-        .map(String)
-        .filter((id) => /^\d{1,12}$/.test(id))
-        .slice(0, 200),
     };
   });
   const links = raw.links.map((link) => {
