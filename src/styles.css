@@ -13180,6 +13180,40 @@ thead .ac-person-col {
   border-radius: 8px;
 }
 
+/* NOC: Microsoft Defender */
+.noc-def-of {
+  color: var(--noc-muted);
+  font-size: 0.55em;
+  font-weight: 700;
+}
+
+.noc-def-bar.tone-good .noc-hbar i {
+  background: var(--noc-good);
+}
+
+.noc-def-bar.tone-warning .noc-hbar i {
+  background: var(--noc-warning);
+}
+
+.noc-def-bar.tone-critical .noc-hbar i {
+  background: var(--noc-critical);
+}
+
+.noc-def-bar.tone-muted .noc-hbar i {
+  background: var(--noc-muted);
+}
+
+.noc-def-threat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  color: #ffd6d2;
+  background: rgba(240, 68, 56, 0.14);
+  border-radius: 8px;
+}
+
 /* NOC: VPN e acesso remoto */
 .noc-vpn {
   display: grid;

@@ -27,6 +27,7 @@ import {
   ScanFace,
   Server,
   Shield,
+  ShieldAlert,
   ShieldCheck,
   Thermometer,
   Wifi,
@@ -206,11 +207,23 @@ type Analyzer = {
     items: { reason: string; virus: string; srcip: string; iface: string; site: string; file: string; action: string; count: number; lastSeen: string }[];
   };
 };
+// Microsoft Defender (Graph); sem checkedAt enquanto a primeira consulta nao termina.
+type Defender = {
+  loading: boolean;
+  error: string;
+  checkedAt: string;
+  secureScore: { current: number; max: number } | null;
+  incidents: { id: string; severity: string; title: string; created: string; updated: string; assigned: string }[];
+  alerts: { id: string; time: string; severity: string; status: string; source: string; title: string; device: string; user: string; file: string; url: string }[];
+  devices: { total: number; secured: number; deactivated: number; unknown: number; threat: { name: string; user: string; state: string }[] };
+  malware: { name: string; category: string; severity: string; lastSeen: string; devices: string[] }[];
+};
 // Quem esta na SSL-VPN agora (item SNMP do FortiGate no Zabbix), com nome do AD.
 type VpnLive = { checkedAt: string; users: { login: string; name: string; department: string; remoteIp: string; connectedSec: number; bytesIn: number; bytesOut: number }[] };
 type NocData = {
   vpn?: VpnLive | null;
   analyzer?: Analyzer | null;
+  defender?: Defender | null;
   beszel?: Beszel | null;
   unifi?: Unifi | null;
   unifiConfigured?: boolean;
@@ -232,6 +245,7 @@ const FIXED_PAGES: NocPage[] = [
   { id: "internet", title: "Internet e Firewall", icon: Globe },
   { id: "seguranca", title: "Segurança e tráfego (24 h)", icon: Shield },
   { id: "alertas", title: "Alertas de segurança e antivírus", icon: Bug },
+  { id: "defender", title: "Microsoft Defender", icon: ShieldAlert },
   { id: "vpn", title: "VPN e acesso remoto", icon: KeyRound },
   { id: "antenas", title: "Antenas (ping do Zabbix)", icon: Radio },
   { id: "servidores", title: "Servidores e Datacenter", icon: Server },
@@ -261,6 +275,7 @@ function buildPages(data: NocData | null): NocPage[] {
     // So com o FortiAnalyzer configurado no servidor.
     if (page.id === "seguranca") return Boolean(data?.analyzer);
     if (page.id === "alertas") return Boolean(data?.analyzer?.alerts);
+    if (page.id === "defender") return Boolean(data?.defender?.checkedAt);
     if (page.id === "vpn") return Boolean(data?.vpn || data?.analyzer?.vpnUsers?.length);
     return true;
   });
@@ -1100,6 +1115,153 @@ function SecurityAlertsPage({ analyzer }: { analyzer: Analyzer }) {
         </section>
       </div>
       <small className="noc-faz-foot">FortiAnalyzer · atualizado às {new Date(analyzer.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</small>
+    </div>
+  );
+}
+
+/* ---------- Microsoft Defender (XDR + Intune) ---------- */
+const DEFENDER_NAMES: [RegExp, string][] = [
+  [/malicious URL click/i, "Clique em link malicioso"],
+  [/initial access/i, "Tentativa de acesso inicial (e-mail)"],
+  [/user compromise investigation/i, "Investigação de usuário comprometido"],
+  [/multi-stage.*command and control/i, "Ataque em etapas com comando e controle"],
+  [/password stealing/i, "Roubo de senhas em arquivos"],
+  [/unfamiliar sign-in/i, "Login com características incomuns"],
+  [/elevated privileges/i, "Privilégio de administrador dado e removido (suspeito)"],
+  [/impossible travel|atypical travel/i, "Login de lugares distantes ao mesmo tempo"],
+  [/password spray/i, "Ataque de senha em massa (password spray)"],
+  [/inbox (manipulation|forwarding)|forwarding rule/i, "Regra suspeita na caixa de e-mail"],
+  [/malware incident/i, "Malware em máquina"],
+  [/malware was prevented/i, "Malware bloqueado na máquina"],
+  [/custom network indicator/i, "Acesso a endereço bloqueado pela TI"],
+  [/not removed after delivery/i, "E-mail malicioso não removido (ação manual)"],
+  [/campaign removed after delivery/i, "E-mails de campanha removidos após a entrega"],
+  [/malicious URL removed after delivery/i, "E-mails com link malicioso removidos"],
+  [/removed after delivery/i, "E-mails removidos após a entrega"],
+  [/reported by user as malware or phish/i, "Usuário reportou phishing"],
+  [/reported by user as not junk/i, "Usuário reportou e-mail legítimo"],
+  [/release a quarantined/i, "Pedido de liberação da quarentena"],
+  [/admin submission/i, "Análise enviada pela TI concluída"],
+];
+const defenderName = (title: string) => DEFENDER_NAMES.find(([pattern]) => pattern.test(title))?.[1] || title;
+const DEFENDER_LEVEL: Record<string, string> = { high: "Alto", medium: "Médio", low: "Baixo", informational: "Info" };
+const DEFENDER_RANK: Record<string, number> = { high: 0, medium: 1, low: 2, informational: 3 };
+const defenderTone = (severity: string) => (severity === "high" ? "critical" : severity === "medium" ? "warning" : "muted");
+const daysAgo = (iso: string) => {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
+  return days <= 0 ? "hoje" : days === 1 ? "há 1 dia" : `há ${days} dias`;
+};
+
+function DefenderPage({ defender }: { defender: Defender }) {
+  if (!defender.checkedAt) {
+    return <p className="noc-empty">{defender.error ? `Microsoft Defender: ${defender.error}` : "Consultando o Microsoft Defender..."}</p>;
+  }
+  const { devices } = defender;
+  const score = defender.secureScore ? Math.round((defender.secureScore.current / defender.secureScore.max) * 100) : null;
+  const serious = defender.incidents.filter((incident) => incident.severity === "high" || incident.severity === "medium");
+  const unassigned = defender.incidents.filter((incident) => !incident.assigned).length;
+  const pending = defender.alerts.filter((alert) => alert.status !== "resolved").length;
+  // Incidentes iguais (ex.: varios "e-mails removidos") viram uma linha com a quantidade.
+  const groups = new Map<string, { title: string; original: string; severity: string; count: number; oldest: string; newest: string }>();
+  for (const incident of defender.incidents) {
+    const title = defenderName(incident.title);
+    const key = `${incident.severity}|${title}`;
+    const group = groups.get(key) || { title, original: incident.title, severity: incident.severity, count: 0, oldest: incident.created, newest: incident.created };
+    group.count++;
+    if (incident.created < group.oldest) group.oldest = incident.created;
+    if (incident.created > group.newest) group.newest = incident.created;
+    groups.set(key, group);
+  }
+  const incidentRows = [...groups.values()].sort((a, b) => (DEFENDER_RANK[a.severity] ?? 4) - (DEFENDER_RANK[b.severity] ?? 4) || b.newest.localeCompare(a.newest));
+  const deviceRows = [
+    { label: "Protegidas", value: devices.secured, tone: "good" },
+    { label: "Defender desativado / sem relatório", value: devices.deactivated, tone: "warning" },
+    { label: "Sem informação", value: devices.unknown, tone: "muted" },
+    { label: "Com ameaça ativa", value: devices.threat.length, tone: "critical" },
+  ];
+  return (
+    <div className="noc-page noc-vpn noc-secalerts">
+      <div className="noc-faz-kpis noc-secalerts-kpis">
+        <div className={score === null ? "" : score >= 70 ? "tone-good" : "tone-warning"}>
+          <span>Secure Score</span>
+          <strong>{score === null ? "—" : `${score}%`}</strong>
+          <small>{defender.secureScore ? `${Math.round(defender.secureScore.current)} de ${Math.round(defender.secureScore.max)} pontos` : "sem dados"}</small>
+        </div>
+        <div className={serious.length ? "tone-warning" : "tone-good"}>
+          <span>Incidentes abertos</span>
+          <strong>{defender.incidents.length}</strong>
+          <small>{serious.length} médios/altos · {unassigned} sem responsável</small>
+        </div>
+        <div className={pending ? "tone-warning" : "tone-good"}>
+          <span>Alertas (7 dias)</span>
+          <strong>{defender.alerts.length}</strong>
+          <small>{pending} aguardando análise</small>
+        </div>
+        <div className={devices.threat.length ? "tone-critical" : devices.deactivated ? "tone-warning" : "tone-good"}>
+          <span>Máquinas protegidas</span>
+          <strong>{devices.secured}<small className="noc-def-of">/{devices.total}</small></strong>
+          <small>{devices.threat.length ? `${devices.threat.length} com ameaça ativa` : `${devices.deactivated} sem Defender ativo`}</small>
+        </div>
+      </div>
+      <div className="noc-vpn-grid">
+        <section className="noc-card">
+          <h3><ShieldAlert size={20} /> Incidentes abertos <small>mais graves primeiro · agrupados</small></h3>
+          {incidentRows.length ? (
+            <ul className="noc-secalerts-list">
+              {incidentRows.slice(0, 9).map((row) => (
+                <li key={`${row.severity}-${row.title}`}>
+                  <em className={`noc-faz-level tone-${defenderTone(row.severity)}`}>{DEFENDER_LEVEL[row.severity] || row.severity}</em>
+                  <div className="noc-vpn-who">
+                    <strong title={row.original}>{row.title}{row.count > 1 ? <span className="noc-secalerts-count"> · {row.count} incidentes</span> : null}</strong>
+                    <small>{row.count > 1 ? `o mais antigo aberto ${daysAgo(row.oldest)}` : `aberto ${daysAgo(row.oldest)}`}</small>
+                  </div>
+                  <b className="noc-secalerts-when">{fmtWhen(row.newest)}</b>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nenhum incidente aberto.</p>
+          )}
+          {incidentRows.length > 9 ? <small className="noc-faz-foot">+{incidentRows.length - 9} tipos de incidente informativos</small> : null}
+        </section>
+        <section className="noc-card">
+          <h3><Cpu size={20} /> Máquinas <small>estado do Defender no Intune</small></h3>
+          <ul className="noc-faz-list">
+            {deviceRows.map((row) => (
+              <li key={row.label} className={`noc-def-bar tone-${row.tone}`}>
+                <div className="noc-faz-row">
+                  <span className="noc-faz-name">{row.label}</span>
+                  <b>{row.value}</b>
+                </div>
+                <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${row.value ? Math.max(2, (row.value / Math.max(1, devices.total)) * 100) : 0}%` }} /></div>
+              </li>
+            ))}
+          </ul>
+          {devices.threat.length ? (
+            <p className="noc-def-threat">
+              <AlertTriangle size={16} /> Com ameaça: {devices.threat.map((device) => `${device.name}${device.user ? ` (${device.user.split(" ")[0]})` : ""}`).join(", ")}
+            </p>
+          ) : null}
+          <h4 className="noc-secalerts-sub">Malware detectado <small>últimos 90 dias</small></h4>
+          {defender.malware.length ? (
+            <ul className="noc-secalerts-list">
+              {defender.malware.slice(0, 4).map((item) => (
+                <li key={item.name}>
+                  <em className={`noc-faz-level tone-${item.severity === "severe" ? "critical" : "warning"}`}>{item.category === "potentialUnwantedSoftware" ? "PUA" : item.category}</em>
+                  <div className="noc-vpn-who">
+                    <strong title={item.name}>{item.name}</strong>
+                    <small>{item.devices.length ? item.devices.join(", ") : "máquina não informada"}</small>
+                  </div>
+                  <b className="noc-secalerts-when">{fmtWhen(item.lastSeen)}</b>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nenhum malware nos últimos 90 dias.</p>
+          )}
+        </section>
+      </div>
+      <small className="noc-faz-foot">Microsoft Defender · atualizado às {new Date(defender.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}{defender.error ? ` · última consulta falhou: ${defender.error}` : ""}</small>
     </div>
   );
 }
@@ -2295,6 +2457,8 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           <AccessPage data={data} />
         ) : current.id === "alertas" && data.analyzer ? (
           <SecurityAlertsPage analyzer={data.analyzer} />
+        ) : current.id === "defender" && data.defender ? (
+          <DefenderPage defender={data.defender} />
         ) : (
           <GroupPage data={data} keys={["videowall"]} />
         )}

@@ -1,5 +1,6 @@
 import { getBeszelOverview, isBeszelConfigured, type BeszelOverview } from "./beszelClient";
 import { getAnalyzerOverview, isFortiAnalyzerConfigured } from "./fortiAnalyzerClient";
+import { getDefenderOverview, isDefenderConfigured } from "./defenderClient";
 import { adNames, maskIp } from "./adNames";
 
 /* ---------- VPN: quem esta conectado agora (SSL-VPN do FortiGate) ---------- */
@@ -463,6 +464,8 @@ function buildNocOverview() {
 
     // FortiAnalyzer (ameacas, origens, aplicacoes 24 h): leitura em cache, nunca segura o painel.
     const analyzer = isFortiAnalyzerConfigured() ? getAnalyzerOverview() : null;
+    // Microsoft Defender (incidentes, alertas, Secure Score, maquinas): mesmo esquema de cache.
+    const defender = isDefenderConfigured() ? getDefenderOverview() : null;
 
     // Conta problemas por host para destacar nos quadros.
     const byHost = new Map<string, number>();
@@ -482,6 +485,7 @@ function buildNocOverview() {
       unifiConfigured: isUnifiConfigured() || Boolean(unifi.data),
       beszel: beszel.data,
       analyzer: analyzer ? { ...analyzer.data, loading: analyzer.loading, error: analyzer.error } : null,
+      defender: defender ? { ...defender.data, loading: defender.loading, error: defender.error } : null,
       vpn: vpn.data,
       errors: [groups, problems, firewalls, routers, hardware, links, traffic, unifi, beszel, vpn].map((entry) => entry.error).filter(Boolean),
     };

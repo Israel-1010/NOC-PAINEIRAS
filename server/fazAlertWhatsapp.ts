@@ -26,7 +26,7 @@ const storePath = path.join(dataDir, "faz-alerts-sent.json");
 const DEVICE_EVENT = /local device event|disk full/i;
 
 export function isFazAlertWhatsappConfigured() {
-  return Boolean(isFortiAnalyzerConfigured() && evolutionUrl && instance && apiKey && group);
+  return isFortiAnalyzerConfigured() && isWhatsappConfigured();
 }
 
 // Mesmo assunto conta como o mesmo alerta: um ataque que dispara 3 handlers vira 1 mensagem.
@@ -71,20 +71,25 @@ export async function sendWhatsApp(text: string) {
   if (!response.ok) throw new Error(`Evolution API respondeu ${response.status} (${(await response.text()).slice(0, 120)}).`);
 }
 
-type Store = { sent: string[]; cooldown: Record<string, number> };
+export function isWhatsappConfigured() {
+  return Boolean(evolutionUrl && instance && apiKey && group);
+}
 
-async function readStore(): Promise<Store> {
+// Ids ja enviados (ou descartados) e ate quando segurar cada alerta repetido; um arquivo por fonte.
+export type SentStore = { sent: string[]; cooldown: Record<string, number> };
+
+export async function readStore(file = storePath): Promise<SentStore> {
   try {
-    const parsed = JSON.parse(await fs.readFile(storePath, "utf8")) as Partial<Store>;
+    const parsed = JSON.parse(await fs.readFile(file, "utf8")) as Partial<SentStore>;
     return { sent: Array.isArray(parsed.sent) ? parsed.sent : [], cooldown: parsed.cooldown && typeof parsed.cooldown === "object" ? parsed.cooldown : {} };
   } catch {
     return { sent: [], cooldown: {} };
   }
 }
 
-async function writeStore(store: Store) {
-  await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(storePath, JSON.stringify(store, null, 2));
+export async function writeStore(store: SentStore, file = storePath) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify({ sent: store.sent.slice(-500), cooldown: store.cooldown }, null, 2));
 }
 
 async function cycle() {
@@ -117,7 +122,7 @@ async function cycle() {
     count++;
     changed = true;
   }
-  if (changed) await writeStore({ sent: [...sent].slice(-500), cooldown: store.cooldown });
+  if (changed) await writeStore({ sent: [...sent], cooldown: store.cooldown });
   return count;
 }
 
