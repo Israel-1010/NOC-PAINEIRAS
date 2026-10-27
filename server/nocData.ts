@@ -1,4 +1,5 @@
 import { getBeszelOverview, isBeszelConfigured, type BeszelOverview } from "./beszelClient";
+import { getAnalyzerOverview, isFortiAnalyzerConfigured } from "./fortiAnalyzerClient";
 import { getUnifiOverview, isUnifiConfigured, type UnifiOverview } from "./unifiClient";
 import { getLinkConfig, getLinksHistory, getLinksLive, zbx } from "./zabbixClient";
 
@@ -415,6 +416,9 @@ function buildNocOverview() {
       /* sem cruzamento com SD-WAN */
     }
 
+    // FortiAnalyzer (ameacas, origens, aplicacoes 24 h): leitura em cache, nunca segura o painel.
+    const analyzer = isFortiAnalyzerConfigured() ? getAnalyzerOverview() : null;
+
     // Conta problemas por host para destacar nos quadros.
     const byHost = new Map<string, number>();
     for (const problem of problems.data) byHost.set(problem.hostId, (byHost.get(problem.hostId) || 0) + 1);
@@ -432,6 +436,7 @@ function buildNocOverview() {
       unifi: unifi.data,
       unifiConfigured: isUnifiConfigured() || Boolean(unifi.data),
       beszel: beszel.data,
+      analyzer: analyzer ? { ...analyzer.data, loading: analyzer.loading, error: analyzer.error } : null,
       errors: [groups, problems, firewalls, routers, hardware, links, traffic, unifi, beszel].map((entry) => entry.error).filter(Boolean),
     };
   })();

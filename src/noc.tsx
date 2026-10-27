@@ -186,7 +186,22 @@ type BeszelSystem = {
 };
 type BeszelContainer = { id: string; system: string; name: string; image: string; status: string; health: number; cpu: number | null; memoryMb: number | null };
 type Beszel = { systems: BeszelSystem[]; containers: BeszelContainer[] };
+// FortiAnalyzer (24 h); sem checkedAt enquanto a primeira consulta nao termina.
+type Analyzer = {
+  loading: boolean;
+  error: string;
+  checkedAt: string;
+  windowHours: number;
+  totals: { bandwidth: number; sessions: number; sessionsBlocked: number; threatsBlocked: number; threatIncidents: number };
+  threats: { name: string; type: string; level: string; incidents: number; blocked: number }[];
+  sources: { ip: string; name: string; iface: string; device: string; bandwidth: number; sessions: number; threatsBlocked: number }[];
+  destinations: { ip: string; app: string; bandwidth: number; upload: number; download: number; sessions: number }[];
+  applications: { name: string; category: string; risk: string; users: number; bandwidth: number; sessionsBlocked: number }[];
+  categories: { name: string; bandwidth: number; sessionsBlocked: number; threatsBlocked: number }[];
+  countries: { name: string; bandwidth: number; sessions: number; sessionsBlocked: number; threatsBlocked: number }[];
+};
 type NocData = {
+  analyzer?: Analyzer | null;
   beszel?: Beszel | null;
   unifi?: Unifi | null;
   unifiConfigured?: boolean;
@@ -206,6 +221,7 @@ type NocPage = { id: string; title: string; icon: typeof Activity; controllerId?
 const FIXED_PAGES: NocPage[] = [
   { id: "overview", title: "Visão geral", icon: Activity },
   { id: "internet", title: "Internet e Firewall", icon: Globe },
+  { id: "seguranca", title: "Segurança e tráfego (24 h)", icon: Shield },
   { id: "antenas", title: "Antenas (ping do Zabbix)", icon: Radio },
   { id: "servidores", title: "Servidores e Datacenter", icon: Server },
   { id: "switches3d", title: "Switches ao vivo (3D)", icon: Network },
@@ -233,13 +249,17 @@ function buildPages(data: NocData | null): NocPage[] {
     if (page.id === "videowall") return !data || hasHosts("videowall");
     if (page.id === "acesso") return ACCESS_KEYS.some(hasHosts);
     if (page.id === "switches3d") return hasHosts("switches");
+    // So com o FortiAnalyzer configurado no servidor.
+    if (page.id === "seguranca") return Boolean(data?.analyzer);
     return true;
   });
   // Servidores Docker (Beszel) logo depois de "Servidores e Datacenter".
   const docker: NocPage[] = data?.beszel?.systems.length ? [{ id: "docker", title: "Servidores Docker e containers", icon: HardDrive }] : [];
   const serversIndex = fixed.findIndex((page) => page.id === "servidores");
   const withDocker = serversIndex >= 0 ? [...fixed.slice(0, serversIndex + 1), ...docker, ...fixed.slice(serversIndex + 1)] : [...fixed, ...docker];
-  return [...withDocker.slice(0, 2), ...unifiPages, ...withDocker.slice(2)];
+  // Controladoras UniFi depois de "Internet e Firewall" (e de "Seguranca e trafego", quando existe).
+  const anchor = Math.max(withDocker.findIndex((page) => page.id === "internet"), withDocker.findIndex((page) => page.id === "seguranca")) + 1;
+  return [...withDocker.slice(0, anchor), ...unifiPages, ...withDocker.slice(anchor)];
 }
 
 // Severidades no padrao do Zabbix (sempre com rotulo).
@@ -794,6 +814,145 @@ function SecurityCard({ fw }: { fw: Firewall }) {
         Detecções por hora · antivírus {totals.antivirus.toLocaleString("pt-BR")}{sec.ipsDatabase ? ` · base IPS ${sec.ipsDatabase.replace(/\(.*\)/, "").trim()}` : ""}
       </small>
     </section>
+  );
+}
+
+/* ---------- Seguranca e trafego (FortiAnalyzer, 24 h) ---------- */
+const fmtBytes = (bytes: number) => {
+  if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(2).replace(".", ",")} TB`;
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1).replace(".", ",")} GB`;
+  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
+  return `${Math.round(bytes / 1e3)} kB`;
+};
+const fmtCount = (value: number) =>
+  value >= 1e6 ? `${(value / 1e6).toFixed(1).replace(".", ",")} mi` : value >= 1e4 ? `${Math.round(value / 1e3)} mil` : value.toLocaleString("pt-BR");
+const THREAT_NAMES: Record<string, string> = {
+  "failed-connection": "Conexões que falharam",
+  "blocked-connection": "Conexões bloqueadas pelo firewall",
+  "DNS.PTR.Records.Scan": "Varredura de DNS reverso (IPS)",
+};
+const COUNTRY_NAMES: Record<string, string> = {
+  "United States": "Estados Unidos", Brazil: "Brasil", Reserved: "Rede privada/reservada", Mexico: "México", Germany: "Alemanha",
+  Ireland: "Irlanda", Netherlands: "Holanda", "United Kingdom": "Reino Unido", France: "França", Japan: "Japão", China: "China",
+  Canada: "Canadá", Chile: "Chile", Argentina: "Argentina", Singapore: "Singapura", Spain: "Espanha", Russia: "Rússia",
+};
+const CATEGORY_NAMES: Record<string, string> = {
+  "Information Technology": "Tecnologia da informação", "Content Servers": "Servidores de conteúdo", "Streaming Media and Download": "Streaming e downloads",
+  "Search Engines and Portals": "Buscadores e portais", "Social Networking": "Redes sociais", Business: "Negócios", "News and Media": "Notícias",
+  Advertising: "Publicidade", Education: "Educação", "Web-based Email": "E-mail web", Games: "Jogos", Shopping: "Compras",
+  "Finance and Banking": "Bancos e finanças", "Government and Legal Organizations": "Governo", Entertainment: "Entretenimento", Unrated: "Sem categoria",
+};
+const LEVEL_NAMES: Record<string, string> = { critical: "Crítico", high: "Alto", medium: "Médio", low: "Baixo", info: "Info" };
+const threatTone = (level: string) => (/critical|high/i.test(level) ? "critical" : /medium/i.test(level) ? "warning" : "muted");
+
+// Lista com barra horizontal (uma serie so, valor ao lado; barra proporcional ao maior da lista).
+function BarList<T>({ items, value, label, detail, extra }: { items: T[]; value: (item: T) => number; label: (item: T) => string; detail?: (item: T) => string; extra?: (item: T) => React.ReactNode }) {
+  const top = Math.max(1, ...items.map(value));
+  return (
+    <ul className="noc-faz-list">
+      {items.map((item, index) => (
+        <li key={`${label(item)}-${index}`}>
+          <div className="noc-faz-row">
+            <span className="noc-faz-name" title={label(item)}>{label(item)}</span>
+            {extra ? extra(item) : null}
+            <b>{fmtBytes(value(item))}</b>
+          </div>
+          {detail ? <small>{detail(item)}</small> : null}
+          <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${Math.max(2, (value(item) / top) * 100)}%` }} /></div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function AnalyzerPage({ analyzer }: { analyzer: Analyzer }) {
+  if (!analyzer.checkedAt) {
+    return (
+      <p className="noc-empty">
+        {analyzer.error ? `FortiAnalyzer: ${analyzer.error}` : "Consultando o FortiAnalyzer (as visões de 24 h levam alguns segundos)..."}
+      </p>
+    );
+  }
+  const { totals } = analyzer;
+  const blockedPct = totals.sessions ? Math.round((totals.sessionsBlocked / totals.sessions) * 100) : 0;
+  const threatPct = totals.threatIncidents ? Math.round((totals.threatsBlocked / totals.threatIncidents) * 100) : 0;
+  const threats = analyzer.threats.filter((threat) => threat.incidents > 0).slice(0, 6);
+  const topThreat = Math.max(1, ...threats.map((threat) => threat.incidents));
+  return (
+    <div className="noc-page noc-faz">
+      <div className="noc-faz-kpis">
+        <div><span>Tráfego da internet</span><strong>{fmtBytes(totals.bandwidth)}</strong><small>últimas {analyzer.windowHours} h</small></div>
+        <div><span>Sessões</span><strong>{fmtCount(totals.sessions)}</strong><small>conexões abertas</small></div>
+        <div className="tone-good"><span>Sessões bloqueadas</span><strong>{fmtCount(totals.sessionsBlocked)}</strong><small>{blockedPct}% das sessões</small></div>
+        <div className="tone-good"><span>Ameaças bloqueadas</span><strong>{fmtCount(totals.threatsBlocked)}</strong><small>{threatPct}% dos incidentes</small></div>
+        <div className={totals.threatIncidents - totals.threatsBlocked > 0 ? "tone-warning" : ""}><span>Incidentes de ameaça</span><strong>{fmtCount(totals.threatIncidents)}</strong><small>detectados pelo FortiGate</small></div>
+      </div>
+      <div className="noc-faz-grid">
+        <section className="noc-card">
+          <h3><ShieldCheck size={20} /> Principais ameaças <small>incidentes · bloqueados</small></h3>
+          <ul className="noc-faz-list">
+            {threats.map((threat) => (
+              <li key={`${threat.name}-${threat.type}`}>
+                <div className="noc-faz-row">
+                  <span className="noc-faz-name" title={threat.name}>{THREAT_NAMES[threat.name] || threat.name}</span>
+                  <em className={`noc-faz-level tone-${threatTone(threat.level)}`}>{LEVEL_NAMES[threat.level.toLowerCase()] || threat.level || "—"}</em>
+                  <b>{fmtCount(threat.incidents)}</b>
+                </div>
+                <small>{threat.type === "ips" ? "IPS" : threat.type === "failed-connection" || threat.type === "blocked-connection" ? "tráfego" : threat.type} · {threat.incidents ? Math.round((threat.blocked / threat.incidents) * 100) : 0}% bloqueado</small>
+                <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${Math.max(2, (threat.incidents / topThreat) * 100)}%` }} /></div>
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section className="noc-card">
+          <h3><Network size={20} /> Quem mais usa a internet <small>origens internas</small></h3>
+          <BarList
+            items={analyzer.sources.slice(0, 6)}
+            value={(source) => source.bandwidth}
+            label={(source) => source.name || source.ip}
+            detail={(source) => [source.name ? source.ip : "", source.iface, source.device].filter(Boolean).join(" · ")}
+          />
+        </section>
+        <section className="noc-card">
+          <h3><Activity size={20} /> Aplicações <small>por volume</small></h3>
+          <BarList
+            items={analyzer.applications.slice(0, 6)}
+            value={(app) => app.bandwidth}
+            label={(app) => app.name}
+            detail={(app) => `${app.users} usuários${app.sessionsBlocked ? ` · ${fmtCount(app.sessionsBlocked)} sessões bloqueadas` : ""}`}
+            extra={(app) => (/elevated|high|critical/i.test(app.risk) ? <em className="noc-faz-level tone-warning">risco</em> : null)}
+          />
+        </section>
+        <section className="noc-card">
+          <h3><Globe size={20} /> Destinos <small>maior volume</small></h3>
+          <BarList
+            items={analyzer.destinations.slice(0, 6)}
+            value={(dest) => dest.bandwidth}
+            label={(dest) => dest.ip}
+            detail={(dest) => `${dest.app || "—"} · ↓ ${fmtBytes(dest.download)} · ↑ ${fmtBytes(dest.upload)}`}
+          />
+        </section>
+        <section className="noc-card">
+          <h3><Globe size={20} /> Países <small>volume · sessões bloqueadas</small></h3>
+          <BarList
+            items={analyzer.countries.slice(0, 6)}
+            value={(country) => country.bandwidth}
+            label={(country) => COUNTRY_NAMES[country.name] || country.name}
+            extra={(country) => (country.sessionsBlocked ? <em className="noc-faz-blocked">{fmtCount(country.sessionsBlocked)} bloq.</em> : null)}
+          />
+        </section>
+        <section className="noc-card">
+          <h3><MonitorPlay size={20} /> Categorias de sites</h3>
+          <BarList
+            items={analyzer.categories.slice(0, 6)}
+            value={(category) => category.bandwidth}
+            label={(category) => CATEGORY_NAMES[category.name] || category.name}
+            extra={(category) => (category.sessionsBlocked ? <em className="noc-faz-blocked">{fmtCount(category.sessionsBlocked)} bloq.</em> : null)}
+          />
+        </section>
+      </div>
+      <small className="noc-faz-foot">FortiAnalyzer · últimas {analyzer.windowHours} h · atualizado às {new Date(analyzer.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}{analyzer.error ? ` · última consulta falhou: ${analyzer.error}` : ""}</small>
+    </div>
   );
 }
 
@@ -1881,6 +2040,8 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           <OverviewPage data={data} />
         ) : current.id === "internet" ? (
           <InternetPage data={data} />
+        ) : current.id === "seguranca" && data.analyzer ? (
+          <AnalyzerPage analyzer={data.analyzer} />
         ) : current.controllerId ? (
           (() => {
             const controller = data.unifi?.controllers.find((entry) => entry.id === current.controllerId);
