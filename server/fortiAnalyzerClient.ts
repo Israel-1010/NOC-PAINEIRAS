@@ -87,6 +87,16 @@ async function rpc<T>(method: string, params: Record<string, unknown>, retry = t
   return result ?? {};
 }
 
+// Fuso do FortiGate. O FortiView devolve o horario local do firewall em texto ("2026-10-27 12:22:56")
+// e o mesmo valor como se fosse UTC no campo numerico (e_time_t): usar o numero adiantava 3 h.
+const fortigateOffset = (process.env.FORTIANALYZER_TZ_OFFSET || "-03:00").trim();
+const localTimeToIso = (value: unknown) => {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) return "";
+  const date = new Date(`${text.replace(" ", "T")}${fortigateOffset}`);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+};
+
 const pad = (n: number) => String(n).padStart(2, "0");
 const fazTime = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -134,8 +144,8 @@ export type AnalyzerOverview = {
   applications: { name: string; category: string; risk: string; users: number; bandwidth: number; sessionsBlocked: number }[];
   categories: { name: string; bandwidth: number; sessionsBlocked: number; threatsBlocked: number }[];
   countries: { name: string; bandwidth: number; sessions: number; sessionsBlocked: number; threatsBlocked: number }[];
-  // Sessoes de VPN de usuarios (SSL / IPsec dial-up) ENCERRADAS nas ultimas 24 h: o FortiGate so manda o log
-  // quando o tunel fecha. Quem esta conectado agora vem do Zabbix (item noc.fgt.sslvpn.tunnels).
+  // Sessoes de VPN de usuarios (SSL / IPsec dial-up) das ultimas 24 h, com a ultima atividade registrada.
+  // Quem esta conectado agora vem do Zabbix (item noc.fgt.sslvpn.tunnels); o painel cruza os dois.
   vpnUsers: { login: string; name: string; department: string; type: string; remoteIp: string; lastSeen: string; durationSec: number; bandwidth: number; connections: number }[];
   // Tuneis site-to-site (ex.: Oracle Cloud) nas ultimas 24 h.
   siteToSite: { name: string; remoteIp: string; bandwidth: number; durationSec: number }[];
@@ -193,14 +203,14 @@ async function load(): Promise<AnalyzerOverview> {
     vpnUsers: vpnRows
       .map((row) => {
         const login = String(row.f_user || "");
-        const lastMs = num(row.e_time_t) * 1000;
         return {
           login,
           name: names.get(login)?.name || login || "—",
           department: names.get(login)?.department || "",
           type: /ssl/i.test(String(row.vpn_type_group)) ? "SSL" : "IPsec",
           remoteIp: maskIp(String(row.remip || "")),
-          lastSeen: lastMs ? new Date(lastMs).toISOString() : "",
+          // Ultima atividade registrada (horario do FortiGate); a sessao pode continuar aberta.
+          lastSeen: localTimeToIso(row.end_time),
           durationSec: num(row.duration),
           bandwidth: num(row.bandwidth),
           connections: num(row.connections),

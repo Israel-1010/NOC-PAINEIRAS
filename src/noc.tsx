@@ -972,8 +972,22 @@ const fmtSince = (seconds: number) => {
   return `${hours} h ${String(minutes % 60).padStart(2, "0")}`;
 };
 
+// "hoje 12:22", "ontem 21:37" ou "24/10 20:05" (data real, sem confundir as ultimas 24 h com "hoje").
+const fmtWhen = (iso: string) => {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  const time = date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const day = (value: Date) => value.toDateString();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (day(date) === day(new Date())) return `hoje ${time}`;
+  if (day(date) === day(yesterday)) return `ontem ${time}`;
+  return `${date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} ${time}`;
+};
+
 function VpnPage({ data }: { data: NocData }) {
   const live = data.vpn?.users || [];
+  const liveLogins = new Set(live.map((user) => user.login.toLowerCase()));
   const fw = data.firewalls[0];
   const tunnels = fw?.tunnels || [];
   const tunnelsUp = tunnels.filter((tunnel) => tunnel.up > 0).length;
@@ -986,8 +1000,8 @@ function VpnPage({ data }: { data: NocData }) {
       <div className="noc-faz-kpis noc-vpn-kpis">
         <div className="tone-good"><span>Conectados na VPN agora</span><strong>{liveCount}</strong><small>SSL-VPN do FortiGate</small></div>
         <div className={tunnelsUp < tunnels.length ? "tone-warning" : "tone-good"}><span>Túneis com as nuvens</span><strong>{tunnelsUp}/{tunnels.length}</strong><small>{tunnels.length - tunnelsUp ? `${tunnels.length - tunnelsUp} fora do ar` : "todos no ar"}</small></div>
-        <div><span>Sessões encerradas hoje</span><strong>{today.length}</strong><small>últimas 24 h (FortiAnalyzer)</small></div>
-        <div><span>Volume das sessões</span><strong>{fmtBytes(todayVolume)}</strong><small>sessões encerradas</small></div>
+        <div><span>Sessões de VPN</span><strong>{today.length}</strong><small>últimas 24 h (FortiAnalyzer)</small></div>
+        <div><span>Volume das sessões</span><strong>{fmtBytes(todayVolume)}</strong><small>últimas 24 h</small></div>
       </div>
       <div className="noc-vpn-grid">
         <section className="noc-card noc-vpn-live">
@@ -1031,21 +1045,25 @@ function VpnPage({ data }: { data: NocData }) {
           </ul>
         </section>
         <section className="noc-card noc-vpn-today">
-          <h3><Activity size={20} /> Conectaram hoje <small>sessões encerradas · duração · volume</small></h3>
+          <h3><Activity size={20} /> Sessões de VPN <small>últimas 24 h · tempo conectado · volume</small></h3>
           {today.length ? (
             <ul className="noc-faz-list">
-              {today.slice(0, 8).map((session, index) => (
-                <li key={`${session.login}-${session.lastSeen}-${index}`}>
-                  <div className="noc-faz-row">
-                    <span className="noc-faz-name">{session.name}</span>
-                    <b>{fmtSince(session.durationSec)}</b>
-                  </div>
-                  <small>{[session.department, `saiu às ${new Date(session.lastSeen).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`, fmtBytes(session.bandwidth)].filter(Boolean).join(" · ")}</small>
-                </li>
-              ))}
+              {today.slice(0, 8).map((session, index) => {
+                const stillOn = liveLogins.has(session.login.toLowerCase());
+                return (
+                  <li key={`${session.login}-${session.lastSeen}-${index}`}>
+                    <div className="noc-faz-row">
+                      <span className="noc-faz-name">{session.name}</span>
+                      {stillOn ? <em className="noc-faz-blocked">conectado agora</em> : null}
+                      <b>{fmtSince(session.durationSec)}</b>
+                    </div>
+                    <small>{[session.department, stillOn ? `última atividade ${fmtWhen(session.lastSeen)}` : `saiu ${fmtWhen(session.lastSeen)}`, fmtBytes(session.bandwidth)].filter(Boolean).join(" · ")}</small>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
-            <p className="noc-empty">{data.analyzer ? "Nenhuma sessão encerrada nas últimas 24 h." : "FortiAnalyzer não configurado."}</p>
+            <p className="noc-empty">{data.analyzer ? "Nenhuma sessão de VPN nas últimas 24 h." : "FortiAnalyzer não configurado."}</p>
           )}
         </section>
       </div>
