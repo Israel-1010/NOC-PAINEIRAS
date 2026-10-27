@@ -12,7 +12,11 @@ import NavigationMenu from './components/ui/NavigationMenu';
 import TourController from './components/ui/TourController';
 import { useInfraLive } from './live';
 import type { InfraNode, RackInfo } from './types/infra';
+import { installDomGuard } from './domGuard';
 import './infra.css';
+
+// Antes do primeiro <Html> do drei montar (ver domGuard.ts).
+installDomGuard();
 
 // Digital Twin da infraestrutura (projeto InfraVision) dentro do portal, com dados reais do NOC.
 export default function InfraView() {
