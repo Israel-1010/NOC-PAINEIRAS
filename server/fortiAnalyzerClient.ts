@@ -1,5 +1,5 @@
 // Conector somente leitura do FortiAnalyzer (FortiView: ameacas, origens, destinos, aplicacoes,
-// categorias de site e paises das ultimas 24 h).
+// categorias de site e paises das ultimas 24 h; alertas dos event handlers e antivirus de 7 dias).
 // Variaveis: FORTIANALYZER_URL, FORTIANALYZER_ADOM (padrao root) e
 //   - FortiAnalyzer Cloud (*.forticloud.com): FORTIANALYZER_USER/PASSWORD = API ID e senha do usuario
 //     de API do IAM (perfil com "FortiAnalyzer Cloud" em Read/Write; Read Only nao libera o FortiView);
@@ -129,10 +129,64 @@ async function runView(view: string, sortBy: string, limit: number): Promise<Row
   throw new Error(`FortiAnalyzer: a visão ${view} demorou demais.`);
 }
 
+// Busca de logs (logview): cria a busca e espera terminar (ate ~40 s). Linhas mais novas primeiro.
+async function searchLogs(logtype: string, days: number, limit: number): Promise<{ total: number; rows: Row[] }> {
+  const end = new Date();
+  const start = new Date(end.getTime() - days * 24 * 3600 * 1000);
+  const task = await rpc<{ tid?: number }>("add", {
+    url: `/logview/adom/${adom}/logsearch`,
+    apiver: 3,
+    device: [{ devid: "All_FortiGate" }],
+    logtype,
+    filter: "",
+    "time-order": "desc",
+    "time-range": { start: fazTime(start), end: fazTime(end) },
+  });
+  const tid = task.data?.tid ?? (task as { tid?: number }).tid;
+  if (!tid) throw new Error(`FortiAnalyzer: a busca de logs ${logtype} não iniciou.`);
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const result = (await rpc<unknown>("get", { url: `/logview/adom/${adom}/logsearch/${tid}`, apiver: 3, offset: 0, limit })) as { percentage?: number; data?: Row[]; "total-count"?: number };
+    if (result.percentage === 100) return { total: Number(result["total-count"]) || 0, rows: result.data || [] };
+    await sleep(1000);
+  }
+  throw new Error(`FortiAnalyzer: a busca de logs ${logtype} demorou demais.`);
+}
+
+const decode = (value: unknown) => {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch {
+    return String(value || "");
+  }
+};
+
 const num = (value: unknown) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 };
+
+// action = pede atencao da equipe (vai para o WhatsApp e aparece primeiro no painel).
+export type AnalyzerAlert = { id: string; time: string; severity: string; handler: string; subject: string; source: string; user: string; device: string; count: number; action: boolean };
+
+// O que pede acao:
+//   - critico e alto, menos os "Risky App/Destination" (uso de app/site de risco, nao ataque);
+//   - medio so quando for ataque (forca bruta, malware, botnet...) ou falha do proprio FortiAnalyzer;
+//   - nunca o que ja foi bloqueado, falso positivo conhecido, nem "Outbreak Alert" vindo da internet
+//     (tentativas de exploit contra o firewall, dezenas por dia). Outbreak com origem interna conta.
+const ATTACK = /brute|malware|malicious|virus|botnet|ransom|compromis|ioc|exploit|disk full|log.*(fail|stop|lost)/i;
+// Ja bloqueado ou falso positivo conhecido (servidor DNS interno fazendo consultas reversas).
+const NOISE = /\bblocked\b|DNS\.PTR\.Records\.Scan/i;
+// Redes internas do clube (14.0.0.0/24 e a rede da VLAN 200, atras do MikroTik).
+export const INTERNAL_IP = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|14\.0\.0\.)/;
+
+function needsAction(alert: Omit<AnalyzerAlert, "action">) {
+  const text = `${alert.handler} ${alert.subject}`;
+  if (NOISE.test(text)) return false;
+  if (/outbreak alert/i.test(alert.handler) && !INTERNAL_IP.test(alert.source)) return false;
+  if (alert.severity === "critical") return true;
+  if (alert.severity === "high") return !/^Risky /i.test(alert.handler);
+  return alert.severity === "medium" && ATTACK.test(text);
+}
 
 export type AnalyzerOverview = {
   checkedAt: string;
@@ -147,10 +201,79 @@ export type AnalyzerOverview = {
   // Sessoes de VPN de usuarios (SSL / IPsec dial-up) das ultimas 24 h, com a ultima atividade registrada.
   // Quem esta conectado agora vem do Zabbix (item noc.fgt.sslvpn.tunnels); o painel cruza os dois.
   vpnUsers: { login: string; name: string; department: string; type: string; remoteIp: string; lastSeen: string; durationSec: number; bandwidth: number; connections: number }[];
+  // Alertas dos event handlers do FortiAnalyzer (24 h), mais novos primeiro.
+  alerts: AnalyzerAlert[];
+  // Antivirus (7 dias): bloqueios agrupados por motivo + maquina + site; realVirus = com nome de virus/malware.
+  antivirus: {
+    total: number;
+    realVirus: number;
+    items: { reason: string; virus: string; srcip: string; iface: string; site: string; file: string; action: string; count: number; lastSeen: string }[];
+  };
 };
 
+// Alertas dos event handlers (Event Monitor) das ultimas 24 h, mais novos primeiro.
+// Chamada leve (sem tarefa): tambem usada pelo envio ao WhatsApp a cada 2 min.
+export async function fetchAnalyzerAlerts(): Promise<AnalyzerAlert[]> {
+  const end = new Date();
+  const start = new Date(end.getTime() - 24 * 3600 * 1000);
+  // ~30 alertas por hora: 100 so cobria 3 h.
+  const result = (await rpc<unknown>("get", { url: `/eventmgmt/adom/${adom}/alerts`, apiver: 3, limit: 1000, "time-range": { start: fazTime(start), end: fazTime(end) } })) as { data?: Row[] };
+  const clean = (value: unknown) => (/^(N\/A|-)?$/i.test(String(value ?? "").trim()) ? "" : String(value).trim());
+  return (result.data || [])
+    .map((row) => ({
+      id: String(row.alertid || ""),
+      // alerttime e epoch de verdade (diferente do FortiView).
+      time: num(row.alerttime) ? new Date(num(row.alerttime) * 1000).toISOString() : "",
+      severity: String(row.severity || "").toLowerCase(),
+      handler: String(row.triggername || ""),
+      subject: decode(row.subject),
+      source: clean(row.epip),
+      user: clean(row.euname),
+      device: clean(row.devname),
+      count: num(row.logcount),
+    }))
+    .map((alert) => ({ ...alert, action: needsAction(alert) }))
+    // A API nem sempre respeita o time-range: corta aqui as 24 h.
+    .filter((alert) => alert.id && alert.time >= start.toISOString())
+    .sort((a, b) => b.time.localeCompare(a.time));
+}
 
-
+// Antivirus dos ultimos 7 dias, agrupado por motivo + maquina + site.
+async function loadAntivirus(): Promise<AnalyzerOverview["antivirus"]> {
+  const { total, rows } = await searchLogs("virus", 7, 300);
+  const groups = new Map<string, AnalyzerOverview["antivirus"]["items"][number]>();
+  let realVirus = 0;
+  for (const row of rows) {
+    const virus = String(row.virus || "").trim();
+    // "infected"/"botnet" = arquivo com virus de verdade; o resto (ex.: unknown content-encoding) e bloqueio por politica.
+    const isVirus = /infected|botnet|malware|ransom/i.test(String(row.eventtype || "")) || Boolean(virus && virus !== "-" && !/unknown|oversize/i.test(virus));
+    if (isVirus) realVirus++;
+    const url = decode(row.url);
+    const site = String(row.hostname || "") || (url.match(/^[a-z]+:\/\/([^/:]+)/i)?.[1] ?? "") || String(row.dstip || "");
+    const reason = isVirus && virus ? virus : decode(row.msg) || String(row.eventtype || "");
+    const key = [reason, row.srcip, site].join("|");
+    const lastSeen = localTimeToIso(`${row.date} ${row.time}`);
+    const group = groups.get(key);
+    if (group) {
+      group.count++;
+      if (lastSeen > group.lastSeen) group.lastSeen = lastSeen;
+    } else {
+      groups.set(key, {
+        reason,
+        virus: isVirus ? virus || "malware" : "",
+        srcip: String(row.srcip || ""),
+        iface: String(row.srcintf || ""),
+        site,
+        file: decode(row.filename),
+        action: String(row.action || ""),
+        count: 1,
+        lastSeen,
+      });
+    }
+  }
+  const items = [...groups.values()].sort((a, b) => Number(Boolean(b.virus)) - Number(Boolean(a.virus)) || b.lastSeen.localeCompare(a.lastSeen)).slice(0, 12);
+  return { total: total || rows.length, realVirus, items };
+}
 
 // "15895,SSL|0,HTTPS|0,Cloudflare-CDN" -> "SSL, HTTPS, Cloudflare-CDN"
 const appList = (value: unknown) =>
@@ -172,6 +295,9 @@ async function load(): Promise<AnalyzerOverview> {
   const vpnRows = await runView("ssl-dialup-ipsec", "bandwidth", 40);
   const logins = Array.from(new Set(vpnRows.map((row) => String(row.f_user || "")).filter(Boolean)));
   const names = await adNames(logins);
+  // Alertas e antivirus nao derrubam o resto se falharem.
+  const alerts = await fetchAnalyzerAlerts().catch(() => [] as AnalyzerAlert[]);
+  const antivirus = await loadAntivirus().catch(() => ({ total: 0, realVirus: 0, items: [] }));
   return {
     checkedAt: new Date().toISOString(),
     windowHours: 24,
@@ -214,6 +340,8 @@ async function load(): Promise<AnalyzerOverview> {
         };
       })
       .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen)),
+    alerts,
+    antivirus,
   };
 }
 

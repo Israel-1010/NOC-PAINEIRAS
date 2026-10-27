@@ -110,6 +110,7 @@ import { getTopology, saveTopology } from "./topologyStore";
 import { diagnoseAd, diagnoseIntune, diagnoseUnifi, diagnoseZabbix } from "./diagnostics";
 import { getLinkConfig, getLinksHistory, getLinksLive, listLinkCandidates, saveLinkConfig } from "./zabbixClient";
 import { getNocOverview } from "./nocData";
+import { startFazAlertWhatsapp } from "./fazAlertWhatsapp";
 import { allowTvKey, createTvKey, listTvKeys, revokeTvKey } from "./tvKeys";
 import { getUnifiSettings, saveUnifiSettings, testUnifi } from "./unifiClient";
 import { createDevice, deleteDevice, listDevices, updateDevice } from "./devices";
@@ -694,4 +695,5 @@ if (existsSync(distDir)) {
 
 app.listen(port, () => {
   console.log(`Rede Clube portal em http://0.0.0.0:${port}`);
+  startFazAlertWhatsapp();
 });

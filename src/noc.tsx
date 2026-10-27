@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  Bug,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -34,9 +35,6 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
-
-// Pagina 3D dos switches: o three.js so e baixado quando a pagina entra no carrossel.
-const SwitchesWall = React.lazy(() => import("./infra/SwitchesWall"));
 
 /* ---------- Tipos (espelham server/nocData.ts) ---------- */
 
@@ -201,6 +199,12 @@ type Analyzer = {
   categories: { name: string; bandwidth: number; sessionsBlocked: number; threatsBlocked: number }[];
   countries: { name: string; bandwidth: number; sessions: number; sessionsBlocked: number; threatsBlocked: number }[];
   vpnUsers?: { login: string; name: string; department: string; type: string; remoteIp: string; lastSeen: string; durationSec: number; bandwidth: number; connections: number }[];
+  alerts?: { id: string; time: string; severity: string; handler: string; subject: string; source: string; user: string; device: string; count: number; action: boolean }[];
+  antivirus?: {
+    total: number;
+    realVirus: number;
+    items: { reason: string; virus: string; srcip: string; iface: string; site: string; file: string; action: string; count: number; lastSeen: string }[];
+  };
 };
 // Quem esta na SSL-VPN agora (item SNMP do FortiGate no Zabbix), com nome do AD.
 type VpnLive = { checkedAt: string; users: { login: string; name: string; department: string; remoteIp: string; connectedSec: number; bytesIn: number; bytesOut: number }[] };
@@ -227,10 +231,10 @@ const FIXED_PAGES: NocPage[] = [
   { id: "overview", title: "Visão geral", icon: Activity },
   { id: "internet", title: "Internet e Firewall", icon: Globe },
   { id: "seguranca", title: "Segurança e tráfego (24 h)", icon: Shield },
+  { id: "alertas", title: "Alertas de segurança e antivírus", icon: Bug },
   { id: "vpn", title: "VPN e acesso remoto", icon: KeyRound },
   { id: "antenas", title: "Antenas (ping do Zabbix)", icon: Radio },
   { id: "servidores", title: "Servidores e Datacenter", icon: Server },
-  { id: "switches3d", title: "Switches ao vivo (3D)", icon: Network },
   { id: "acesso", title: "Catracas, totens e impressoras", icon: ScanFace },
   { id: "videowall", title: "Videowall", icon: MonitorPlay },
 ];
@@ -254,9 +258,9 @@ function buildPages(data: NocData | null): NocPage[] {
     if (page.id === "antenas") return !hasUnifiAps && hasHosts("antenas");
     if (page.id === "videowall") return !data || hasHosts("videowall");
     if (page.id === "acesso") return ACCESS_KEYS.some(hasHosts);
-    if (page.id === "switches3d") return hasHosts("switches");
     // So com o FortiAnalyzer configurado no servidor.
     if (page.id === "seguranca") return Boolean(data?.analyzer);
+    if (page.id === "alertas") return Boolean(data?.analyzer?.alerts);
     if (page.id === "vpn") return Boolean(data?.vpn || data?.analyzer?.vpnUsers?.length);
     return true;
   });
@@ -959,6 +963,143 @@ function AnalyzerPage({ analyzer }: { analyzer: Analyzer }) {
         </section>
       </div>
       <small className="noc-faz-foot">FortiAnalyzer · últimas {analyzer.windowHours} h · atualizado às {new Date(analyzer.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}{analyzer.error ? ` · última consulta falhou: ${analyzer.error}` : ""}</small>
+    </div>
+  );
+}
+
+/* ---------- Alertas de seguranca e antivirus (FortiAnalyzer) ---------- */
+const ALERT_NAMES: [RegExp, string][] = [
+  [/brute force/i, "Força bruta no login"],
+  [/disk full/i, "Disco do FortiAnalyzer cheio"],
+  [/outbreak alert/i, "Ataque conhecido (Outbreak)"],
+  [/malicious code/i, "Código malicioso"],
+  [/risky destination/i, "Acesso a destino de risco"],
+  [/risky app/i, "Aplicativo de risco"],
+  [/botnet/i, "Botnet detectada"],
+  [/compromised/i, "Máquina possivelmente comprometida"],
+];
+const alertName = (handler: string, subject: string) => ALERT_NAMES.find(([pattern]) => pattern.test(`${handler} ${subject}`))?.[1] || handler || "Alerta";
+const AV_REASONS: [RegExp, string][] = [
+  [/unknown content-encoding/i, "Codificação desconhecida (bloqueio preventivo)"],
+  [/oversize/i, "Arquivo grande demais para verificar"],
+  [/infected|virus/i, "Arquivo com vírus"],
+];
+const avReason = (reason: string) => AV_REASONS.find(([pattern]) => pattern.test(reason))?.[1] || reason;
+const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+// Alertas sem acao, resumidos por tipo (o FortiAnalyzer gera dezenas por hora).
+const NOISE_KINDS: [RegExp, string][] = [
+  [/outbreak|malicious code|botnet/i, "Ataques da internet barrados no firewall"],
+  [/risky destination/i, "Acessos a sites de risco (bloqueados ou avisados)"],
+  [/risky app/i, "Uso de aplicativos de risco"],
+];
+
+type AlertItem = NonNullable<Analyzer["alerts"]>[number];
+type AlertGroup = { key: string; first: AlertItem; severity: string; last: string; alerts: number; events: number; sources: Set<string>; users: Set<string> };
+
+// Um ataque que dispara varios handlers vira uma linha; forca bruta (de varios IPs) tambem.
+function groupAlerts(alerts: AlertItem[]) {
+  const groups = new Map<string, AlertGroup>();
+  for (const alert of alerts) {
+    const key = /brute/i.test(alert.handler) ? "brute" : `${alert.source}|${alert.subject}`;
+    const group = groups.get(key) || { key, first: alert, severity: alert.severity, last: alert.time, alerts: 0, events: 0, sources: new Set<string>(), users: new Set<string>() };
+    group.alerts++;
+    group.events += Math.max(1, alert.count);
+    if (alert.source) group.sources.add(alert.source);
+    if (alert.user) group.users.add(alert.user);
+    if ((SEVERITY_RANK[alert.severity] ?? 4) < (SEVERITY_RANK[group.severity] ?? 4)) group.severity = alert.severity;
+    if (alert.time > group.last) group.last = alert.time;
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => (SEVERITY_RANK[a.severity] ?? 4) - (SEVERITY_RANK[b.severity] ?? 4) || b.last.localeCompare(a.last));
+}
+
+const groupDetail = (group: AlertGroup) => {
+  if (group.key === "brute") {
+    const users = [...group.users];
+    return `${group.sources.size} IPs de fora tentando logins: ${users.slice(0, 4).join(", ")}${users.length > 4 ? ` e +${users.length - 4}` : ""}`;
+  }
+  return [group.first.subject, group.first.source && `origem ${group.first.source}`].filter(Boolean).join(" · ");
+};
+
+function SecurityAlertsPage({ analyzer }: { analyzer: Analyzer }) {
+  if (!analyzer.checkedAt) {
+    return <p className="noc-empty">{analyzer.error ? `FortiAnalyzer: ${analyzer.error}` : "Consultando o FortiAnalyzer..."}</p>;
+  }
+  const alerts = analyzer.alerts || [];
+  const av = analyzer.antivirus || { total: 0, realVirus: 0, items: [] };
+  const groups = groupAlerts(alerts.filter((alert) => alert.action));
+  const noise = NOISE_KINDS.map(([pattern, label]) => ({ label, count: alerts.filter((alert) => !alert.action && pattern.test(alert.handler)).length }));
+  const otherNoise = alerts.filter((alert) => !alert.action && !NOISE_KINDS.some(([pattern]) => pattern.test(alert.handler))).length;
+  const urgent = groups.filter((group) => group.severity === "critical" || group.severity === "high").length;
+  const topNoise = Math.max(1, ...noise.map((item) => item.count));
+  return (
+    <div className="noc-page noc-vpn noc-secalerts">
+      <div className="noc-faz-kpis noc-secalerts-kpis">
+        <div className={urgent ? "tone-critical" : groups.length ? "tone-warning" : "tone-good"}><span>Pedem atenção</span><strong>{groups.length}</strong><small>{urgent ? `${urgent} graves · ` : ""}últimas 24 h</small></div>
+        <div className="tone-good"><span>Ataques da internet barrados</span><strong>{fmtCount(noise[0].count)}</strong><small>alertas do FortiAnalyzer em 24 h</small></div>
+        <div className="tone-good"><span>Bloqueios do antivírus</span><strong>{fmtCount(av.total)}</strong><small>últimos 7 dias</small></div>
+        <div className={av.realVirus ? "tone-critical" : "tone-good"}><span>Vírus encontrados</span><strong>{av.realVirus}</strong><small>{av.realVirus ? "arquivos infectados barrados" : "nenhum arquivo infectado"}</small></div>
+      </div>
+      <div className="noc-vpn-grid">
+        <section className="noc-card">
+          <h3><AlertOctagon size={20} /> Pedem atenção <small>vão para o WhatsApp do NOC · últimas 24 h</small></h3>
+          {groups.length ? (
+            <ul className="noc-secalerts-list">
+              {groups.slice(0, 6).map((group) => (
+                <li key={group.key}>
+                  <em className={`noc-faz-level tone-${threatTone(group.severity)}`}>{LEVEL_NAMES[group.severity] || group.severity}</em>
+                  <div className="noc-vpn-who">
+                    <strong title={group.first.handler}>{alertName(group.first.handler, group.first.subject)}{group.alerts > 1 ? <span className="noc-secalerts-count"> · {group.alerts} alertas</span> : null}</strong>
+                    <small title={group.first.subject}>{groupDetail(group)}</small>
+                  </div>
+                  <b className="noc-secalerts-when">{fmtWhen(group.last)}</b>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nada pedindo ação nas últimas 24 h.</p>
+          )}
+          <h4 className="noc-secalerts-sub">Só no painel <small>sem ação necessária</small></h4>
+          <ul className="noc-faz-list">
+            {noise.map((item) => (
+              <li key={item.label}>
+                <div className="noc-faz-row">
+                  <span className="noc-faz-name">{item.label}</span>
+                  <b>{fmtCount(item.count)}</b>
+                </div>
+                <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${item.count ? Math.max(2, (item.count / topNoise) * 100) : 0}%` }} /></div>
+              </li>
+            ))}
+          </ul>
+          {otherNoise ? <small className="noc-faz-foot">+{otherNoise} outros alertas informativos</small> : null}
+        </section>
+        <section className="noc-card">
+          <h3><Bug size={20} /> Antivírus <small>últimos 7 dias · máquina · site</small></h3>
+          {!av.realVirus ? (
+            <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nenhum vírus ou malware encontrado. {av.total ? "Os bloqueios abaixo são preventivos." : ""}</p>
+          ) : null}
+          {av.items.length ? (
+            <ul className="noc-secalerts-list">
+              {av.items.slice(0, 6).map((item) => (
+                <li key={`${item.reason}-${item.srcip}-${item.site}`}>
+                  <em className={`noc-faz-level tone-${item.virus ? "critical" : "muted"}`}>{item.virus ? "vírus" : "bloqueio"}</em>
+                  <div className="noc-vpn-who">
+                    <strong title={item.reason}>{item.virus || avReason(item.reason)}</strong>
+                    <small>{[`máquina ${item.srcip}${item.iface ? ` (${item.iface})` : ""}`, item.site && `site ${item.site}`, item.file].filter(Boolean).join(" · ")}</small>
+                  </div>
+                  <div className="noc-vpn-meta">
+                    <b>{item.count}×</b>
+                    <small>{fmtWhen(item.lastSeen)}</small>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="noc-empty">Nenhum bloqueio do antivírus em 7 dias.</p>
+          )}
+        </section>
+      </div>
+      <small className="noc-faz-foot">FortiAnalyzer · atualizado às {new Date(analyzer.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</small>
     </div>
   );
 }
@@ -2152,10 +2293,8 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           <DockerPage beszel={data.beszel} />
         ) : current.id === "acesso" ? (
           <AccessPage data={data} />
-        ) : current.id === "switches3d" ? (
-          <React.Suspense fallback={<p className="noc-empty">Carregando a visão 3D dos switches...</p>}>
-            <SwitchesWall data={data} />
-          </React.Suspense>
+        ) : current.id === "alertas" && data.analyzer ? (
+          <SecurityAlertsPage analyzer={data.analyzer} />
         ) : (
           <GroupPage data={data} keys={["videowall"]} />
         )}

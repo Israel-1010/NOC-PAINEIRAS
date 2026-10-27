@@ -12950,6 +12950,10 @@ thead .ac-person-col {
   --tone: var(--noc-warning);
 }
 
+.noc-faz-kpis .tone-critical {
+  --tone: var(--noc-critical);
+}
+
 .noc-faz-kpis span {
   color: var(--noc-muted);
   font-size: 0.85em;
@@ -13063,6 +13067,77 @@ thead .ac-person-col {
   font-size: 0.8em;
   text-align: right;
 }
+/* NOC: Alertas de seguranca e antivirus */
+.noc-page.noc-secalerts {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.noc-secalerts-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.noc-secalerts-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.noc-secalerts-list li {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--noc-line);
+}
+
+.noc-secalerts-list .noc-faz-level {
+  justify-self: start;
+}
+
+.noc-secalerts-list .noc-vpn-who strong {
+  font-size: 1.1em;
+}
+
+.noc-secalerts-count {
+  color: var(--noc-muted);
+  font-size: 0.8em;
+  font-weight: 600;
+}
+
+.noc-secalerts-when {
+  color: var(--noc-muted);
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.noc-secalerts-sub {
+  margin: auto 0 6px;
+  padding-top: 14px;
+  font-size: 1em;
+}
+
+.noc-secalerts-sub small {
+  margin-left: 8px;
+  color: var(--noc-muted);
+  font-size: 0.8em;
+  font-weight: 600;
+}
+
+.noc-secalerts-ok {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 10px 14px;
+  color: #b7f0d2;
+  background: rgba(18, 183, 106, 0.14);
+  border-radius: 8px;
+}
+
 /* NOC: VPN e acesso remoto */
 .noc-vpn {
   display: grid;
