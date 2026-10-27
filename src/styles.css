@@ -12181,17 +12181,27 @@ thead .ac-person-col {
   gap: 14px;
 }
 
+/* 20+ conjuntos precisam caber na TV: cartoes estreitos (~6 colunas em 1920) e letra pela altura da tela. */
+.noc-access > .noc-access-block:first-child {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
 .noc-sets {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(clamp(240px, 17vw, 360px), 1fr));
   align-content: start;
-  gap: 12px;
+  gap: clamp(6px, 0.9vh, 10px);
+  font-size: clamp(10px, 1.3vh, 15px);
 }
 
 .noc-set {
   display: grid;
-  gap: 8px;
-  padding: 12px 14px;
+  min-width: 0;
+  overflow: hidden;
+  align-content: start;
+  gap: 5px;
+  padding: clamp(6px, 0.8vh, 10px) 10px;
   background: var(--noc-panel-2);
   border: 1px solid var(--noc-line);
   border-top: 4px solid var(--tone);
@@ -12209,16 +12219,27 @@ thead .ac-person-col {
   gap: 10px;
 }
 
+.noc-set header,
+.noc-set ul,
+.noc-set li {
+  min-width: 0;
+}
+
 .noc-set header strong {
-  font-size: 1.15em;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 1.05em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .noc-set header em {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   color: var(--tone);
-  font-size: 0.85em;
+  font-size: 0.72em;
   font-style: normal;
   font-weight: 800;
   text-transform: uppercase;
@@ -12226,7 +12247,7 @@ thead .ac-person-col {
 
 .noc-set ul {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -12234,13 +12255,34 @@ thead .ac-person-col {
 
 .noc-set li {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  grid-template-columns: 8px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 10px;
-  padding: 5px 8px;
+  gap: 7px;
+  padding: 2px 6px;
   background: rgba(255, 255, 255, 0.03);
-  border-radius: 7px;
-  font-size: 0.92em;
+  border-radius: 6px;
+  font-size: 0.86em;
+}
+
+.noc-set li .noc-dev-dot {
+  width: 8px;
+  height: 8px;
+}
+
+/* Totens e impressoras em uma faixa baixa, para sobrar altura para as catracas. */
+.noc-access-row {
+  flex: none;
+  font-size: clamp(11px, 1.3vh, 15px);
+}
+
+.noc-access-row .noc-devcard {
+  padding: clamp(5px, 0.7vh, 10px) 14px;
+  gap: 12px;
+}
+
+.noc-access-row .noc-devcard-dot {
+  width: 30px;
+  height: 30px;
 }
 
 .noc-set-role {
