@@ -147,8 +147,6 @@ export type AnalyzerOverview = {
   // Sessoes de VPN de usuarios (SSL / IPsec dial-up) das ultimas 24 h, com a ultima atividade registrada.
   // Quem esta conectado agora vem do Zabbix (item noc.fgt.sslvpn.tunnels); o painel cruza os dois.
   vpnUsers: { login: string; name: string; department: string; type: string; remoteIp: string; lastSeen: string; durationSec: number; bandwidth: number; connections: number }[];
-  // Tuneis site-to-site (ex.: Oracle Cloud) nas ultimas 24 h.
-  siteToSite: { name: string; remoteIp: string; bandwidth: number; durationSec: number }[];
 };
 
 
@@ -172,7 +170,6 @@ async function load(): Promise<AnalyzerOverview> {
   const categories = await runView("top-websites", "bandwidth", 6);
   const countries = await runView("top-countries", "bandwidth", 8);
   const vpnRows = await runView("ssl-dialup-ipsec", "bandwidth", 40);
-  const tunnelRows = await runView("site-to-site-ipsec", "bandwidth", 12);
   const logins = Array.from(new Set(vpnRows.map((row) => String(row.f_user || "")).filter(Boolean)));
   const names = await adNames(logins);
   return {
@@ -217,7 +214,6 @@ async function load(): Promise<AnalyzerOverview> {
         };
       })
       .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen)),
-    siteToSite: tunnelRows.map((row) => ({ name: String(row.vpnname || ""), remoteIp: String(row.remip || ""), bandwidth: num(row.bandwidth), durationSec: num(row.duration) })),
   };
 }
 

@@ -201,7 +201,6 @@ type Analyzer = {
   categories: { name: string; bandwidth: number; sessionsBlocked: number; threatsBlocked: number }[];
   countries: { name: string; bandwidth: number; sessions: number; sessionsBlocked: number; threatsBlocked: number }[];
   vpnUsers?: { login: string; name: string; department: string; type: string; remoteIp: string; lastSeen: string; durationSec: number; bandwidth: number; connections: number }[];
-  siteToSite?: { name: string; remoteIp: string; bandwidth: number; durationSec: number }[];
 };
 // Quem esta na SSL-VPN agora (item SNMP do FortiGate no Zabbix), com nome do AD.
 type VpnLive = { checkedAt: string; users: { login: string; name: string; department: string; remoteIp: string; connectedSec: number; bytesIn: number; bytesOut: number }[] };
@@ -258,7 +257,7 @@ function buildPages(data: NocData | null): NocPage[] {
     if (page.id === "switches3d") return hasHosts("switches");
     // So com o FortiAnalyzer configurado no servidor.
     if (page.id === "seguranca") return Boolean(data?.analyzer);
-    if (page.id === "vpn") return Boolean(data?.vpn || data?.analyzer?.vpnUsers?.length || data?.firewalls[0]?.tunnels.length);
+    if (page.id === "vpn") return Boolean(data?.vpn || data?.analyzer?.vpnUsers?.length);
     return true;
   });
   // Servidores Docker (Beszel) logo depois de "Servidores e Datacenter".
@@ -988,20 +987,19 @@ const fmtWhen = (iso: string) => {
 function VpnPage({ data }: { data: NocData }) {
   const live = data.vpn?.users || [];
   const liveLogins = new Set(live.map((user) => user.login.toLowerCase()));
+  // Os tuneis site-to-site ficam na pagina "Internet e Firewall" (sem repetir aqui).
   const fw = data.firewalls[0];
-  const tunnels = fw?.tunnels || [];
-  const tunnelsUp = tunnels.filter((tunnel) => tunnel.up > 0).length;
-  const volumeByTunnel = new Map((data.analyzer?.siteToSite || []).map((tunnel) => [tunnel.name, tunnel.bandwidth]));
   const today = data.analyzer?.vpnUsers || [];
+  // Primeira consulta ao FortiAnalyzer ainda rodando (leva ~20 s depois que o servidor sobe).
+  const analyzerLoading = Boolean(data.analyzer && !data.analyzer.checkedAt && !data.analyzer.error);
   const todayVolume = today.reduce((sum, session) => sum + session.bandwidth, 0);
   const liveCount = data.vpn ? live.length : fw?.sslVpnUsers ?? 0;
   return (
     <div className="noc-page noc-vpn">
       <div className="noc-faz-kpis noc-vpn-kpis">
         <div className="tone-good"><span>Conectados na VPN agora</span><strong>{liveCount}</strong><small>SSL-VPN do FortiGate</small></div>
-        <div className={tunnelsUp < tunnels.length ? "tone-warning" : "tone-good"}><span>Túneis com as nuvens</span><strong>{tunnelsUp}/{tunnels.length}</strong><small>{tunnels.length - tunnelsUp ? `${tunnels.length - tunnelsUp} fora do ar` : "todos no ar"}</small></div>
-        <div><span>Sessões de VPN</span><strong>{today.length}</strong><small>últimas 24 h (FortiAnalyzer)</small></div>
-        <div><span>Volume das sessões</span><strong>{fmtBytes(todayVolume)}</strong><small>últimas 24 h</small></div>
+        <div><span>Sessões de VPN</span><strong>{analyzerLoading ? "—" : today.length}</strong><small>últimas 24 h (FortiAnalyzer)</small></div>
+        <div><span>Volume das sessões</span><strong>{analyzerLoading ? "—" : fmtBytes(todayVolume)}</strong><small>últimas 24 h</small></div>
       </div>
       <div className="noc-vpn-grid">
         <section className="noc-card noc-vpn-live">
@@ -1026,24 +1024,6 @@ function VpnPage({ data }: { data: NocData }) {
             <p className="noc-empty">{data.vpn ? "Ninguém conectado na VPN agora." : `${liveCount} conectado(s) · lista de nomes indisponível`}</p>
           )}
         </section>
-        <section className="noc-card">
-          <h3><Network size={20} /> Túneis site-to-site <small>estado · volume 24 h</small></h3>
-          <ul className="noc-faz-list noc-vpn-tunnels">
-            {tunnels.map((tunnel) => {
-              const up = tunnel.up > 0;
-              return (
-                <li key={tunnel.name}>
-                  <div className="noc-faz-row">
-                    <span className={`noc-vpn-state ${up ? "up" : "down"}`}>{up ? <CheckCircle2 size={15} /> : <XCircle size={15} />}</span>
-                    <span className="noc-faz-name">{tunnel.name}</span>
-                    {tunnel.total > 1 ? <em className="noc-faz-level tone-muted">{tunnel.up}/{tunnel.total}</em> : null}
-                    <b className={up ? "" : "noc-vpn-down"}>{up ? (volumeByTunnel.has(tunnel.name) ? fmtBytes(volumeByTunnel.get(tunnel.name) || 0) : "no ar") : "FORA DO AR"}</b>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
         <section className="noc-card noc-vpn-today">
           <h3><Activity size={20} /> Sessões de VPN <small>últimas 24 h · tempo conectado · volume</small></h3>
           {today.length ? (
@@ -1063,7 +1043,7 @@ function VpnPage({ data }: { data: NocData }) {
               })}
             </ul>
           ) : (
-            <p className="noc-empty">{data.analyzer ? "Nenhuma sessão de VPN nas últimas 24 h." : "FortiAnalyzer não configurado."}</p>
+            <p className="noc-empty">{analyzerLoading ? "Consultando o FortiAnalyzer..." : data.analyzer?.error && !data.analyzer.checkedAt ? `FortiAnalyzer: ${data.analyzer.error}` : data.analyzer ? "Nenhuma sessão de VPN nas últimas 24 h." : "FortiAnalyzer não configurado."}</p>
           )}
         </section>
       </div>
