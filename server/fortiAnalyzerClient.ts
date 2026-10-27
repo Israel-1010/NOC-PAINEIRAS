@@ -6,6 +6,8 @@
 //   - FortiAnalyzer local: FORTIANALYZER_API_KEY (preferido) ou FORTIANALYZER_USER/PASSWORD.
 // O resultado fica em cache por 5 min: as consultas do FortiView sao tarefas que levam alguns segundos.
 
+import { adNames, maskIp } from "./adNames";
+
 const baseUrl = (process.env.FORTIANALYZER_URL || "").trim().replace(/\/+$/, "");
 const adom = (process.env.FORTIANALYZER_ADOM || "root").trim();
 const user = process.env.FORTIANALYZER_USER || "";
@@ -132,7 +134,15 @@ export type AnalyzerOverview = {
   applications: { name: string; category: string; risk: string; users: number; bandwidth: number; sessionsBlocked: number }[];
   categories: { name: string; bandwidth: number; sessionsBlocked: number; threatsBlocked: number }[];
   countries: { name: string; bandwidth: number; sessions: number; sessionsBlocked: number; threatsBlocked: number }[];
+  // Sessoes de VPN de usuarios (SSL / IPsec dial-up) ENCERRADAS nas ultimas 24 h: o FortiGate so manda o log
+  // quando o tunel fecha. Quem esta conectado agora vem do Zabbix (item noc.fgt.sslvpn.tunnels).
+  vpnUsers: { login: string; name: string; department: string; type: string; remoteIp: string; lastSeen: string; durationSec: number; bandwidth: number; connections: number }[];
+  // Tuneis site-to-site (ex.: Oracle Cloud) nas ultimas 24 h.
+  siteToSite: { name: string; remoteIp: string; bandwidth: number; durationSec: number }[];
 };
+
+
+
 
 // "15895,SSL|0,HTTPS|0,Cloudflare-CDN" -> "SSL, HTTPS, Cloudflare-CDN"
 const appList = (value: unknown) =>
@@ -151,6 +161,10 @@ async function load(): Promise<AnalyzerOverview> {
   const applications = await runView("top-applications", "bandwidth", 8);
   const categories = await runView("top-websites", "bandwidth", 6);
   const countries = await runView("top-countries", "bandwidth", 8);
+  const vpnRows = await runView("ssl-dialup-ipsec", "bandwidth", 40);
+  const tunnelRows = await runView("site-to-site-ipsec", "bandwidth", 12);
+  const logins = Array.from(new Set(vpnRows.map((row) => String(row.f_user || "")).filter(Boolean)));
+  const names = await adNames(logins);
   return {
     checkedAt: new Date().toISOString(),
     windowHours: 24,
@@ -176,6 +190,24 @@ async function load(): Promise<AnalyzerOverview> {
     applications: applications.map((row) => ({ name: String(row.app_group || ""), category: String(row.appcat || ""), risk: String(row.risk || ""), users: num(row.num_users), bandwidth: num(row.bandwidth), sessionsBlocked: num(row.session_block) })),
     categories: categories.map((row) => ({ name: String(row.catdesc || ""), bandwidth: num(row.bandwidth), sessionsBlocked: num(row.session_block), threatsBlocked: num(row.threat_block) })),
     countries: countries.map((row) => ({ name: String(row.dstcountry || ""), bandwidth: num(row.bandwidth), sessions: num(row.sessions), sessionsBlocked: num(row.session_block), threatsBlocked: num(row.threat_block) })),
+    vpnUsers: vpnRows
+      .map((row) => {
+        const login = String(row.f_user || "");
+        const lastMs = num(row.e_time_t) * 1000;
+        return {
+          login,
+          name: names.get(login)?.name || login || "—",
+          department: names.get(login)?.department || "",
+          type: /ssl/i.test(String(row.vpn_type_group)) ? "SSL" : "IPsec",
+          remoteIp: maskIp(String(row.remip || "")),
+          lastSeen: lastMs ? new Date(lastMs).toISOString() : "",
+          durationSec: num(row.duration),
+          bandwidth: num(row.bandwidth),
+          connections: num(row.connections),
+        };
+      })
+      .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen)),
+    siteToSite: tunnelRows.map((row) => ({ name: String(row.vpnname || ""), remoteIp: String(row.remip || ""), bandwidth: num(row.bandwidth), durationSec: num(row.duration) })),
   };
 }
 

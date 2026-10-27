@@ -13063,3 +13063,113 @@ thead .ac-person-col {
   font-size: 0.8em;
   text-align: right;
 }
+/* NOC: VPN e acesso remoto */
+.noc-vpn {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+}
+
+.noc-vpn-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.noc-vpn-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.noc-vpn-grid .noc-card {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.noc-vpn-live ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.noc-vpn-live li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: rgba(18, 183, 106, 0.08);
+  border: 1px solid rgba(18, 183, 106, 0.25);
+  border-radius: 12px;
+}
+
+.noc-vpn-dot {
+  width: 12px;
+  height: 12px;
+  background: var(--noc-good);
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgba(18, 183, 106, 0.2);
+  animation: noc-vpn-pulse 2s ease-in-out infinite;
+}
+
+@keyframes noc-vpn-pulse {
+  50% { box-shadow: 0 0 0 8px rgba(18, 183, 106, 0.05); }
+}
+
+.noc-vpn-who {
+  display: grid;
+  min-width: 0;
+}
+
+.noc-vpn-who strong {
+  overflow: hidden;
+  font-size: 1.3em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.noc-vpn-who small,
+.noc-vpn-meta small {
+  overflow: hidden;
+  color: var(--noc-muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.noc-vpn-meta {
+  display: grid;
+  justify-items: end;
+}
+
+.noc-vpn-meta b {
+  font-size: 1.15em;
+  font-variant-numeric: tabular-nums;
+}
+
+.noc-vpn-state {
+  display: inline-flex;
+  flex: none;
+}
+
+.noc-vpn-state.up {
+  color: var(--noc-good);
+}
+
+.noc-vpn-state.down {
+  color: var(--noc-critical);
+}
+
+.noc-vpn-down {
+  color: var(--noc-critical);
+}
+
+.noc-vpn-tunnels li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--noc-line);
+}

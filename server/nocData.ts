@@ -1,5 +1,48 @@
 import { getBeszelOverview, isBeszelConfigured, type BeszelOverview } from "./beszelClient";
 import { getAnalyzerOverview, isFortiAnalyzerConfigured } from "./fortiAnalyzerClient";
+import { adNames, maskIp } from "./adNames";
+
+/* ---------- VPN: quem esta conectado agora (SSL-VPN do FortiGate) ---------- */
+// Item unico no host do FortiGate (SNMP walk da fgVpnSslTunnelTable), criado pelo portal.
+const VPN_ITEM_KEY = "noc.fgt.sslvpn.tunnels";
+const VPN_TABLE = "1.3.6.1.4.1.12356.101.12.2.4.1";
+const VPN_COLUMNS: Record<string, "user" | "srcip" | "uptime" | "bytesIn" | "bytesOut"> = { 3: "user", 4: "srcip", 6: "uptime", 7: "bytesIn", 8: "bytesOut" };
+
+export type VpnLiveUser = { login: string; name: string; department: string; remoteIp: string; connectedSec: number; bytesIn: number; bytesOut: number };
+
+// ".1.3.6...4.1.3.2 = STRING: \"5319\"" -> linha 2, coluna user = 5319
+function parseVpnWalk(text: string) {
+  const rows = new Map<string, Record<string, string>>();
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^\.?([\d.]+)\s*=\s*[^:]+:\s*(.*)$/.exec(line.trim());
+    if (!match || !match[1].startsWith(VPN_TABLE)) continue;
+    const [column, ...index] = match[1].slice(VPN_TABLE.length + 1).split(".");
+    const field = VPN_COLUMNS[column];
+    if (!field) continue;
+    const key = index.join(".");
+    rows.set(key, { ...(rows.get(key) || {}), [field]: match[2].replace(/^"|"$/g, "").trim() });
+  }
+  return Array.from(rows.values());
+}
+
+async function loadVpnLive() {
+  const [item] = await zbx<{ lastvalue: string; lastclock: string }[]>("item.get", { filter: { key_: [VPN_ITEM_KEY] }, output: ["lastvalue", "lastclock"], monitored: true });
+  if (!item) return null; // item ainda nao criado: a pagina mostra so o historico
+  const rows = parseVpnWalk(item.lastvalue || "");
+  const names = await adNames(rows.map((row) => row.user || ""));
+  const users: VpnLiveUser[] = rows
+    .map((row) => ({
+      login: row.user || "",
+      name: names.get(row.user || "")?.name || row.user || "—",
+      department: names.get(row.user || "")?.department || "",
+      remoteIp: maskIp(row.srcip || ""),
+      connectedSec: Number(row.uptime) || 0,
+      bytesIn: Number(row.bytesIn) || 0,
+      bytesOut: Number(row.bytesOut) || 0,
+    }))
+    .sort((a, b) => b.connectedSec - a.connectedSec);
+  return { checkedAt: item.lastclock !== "0" ? new Date(Number(item.lastclock) * 1000).toISOString() : "", users };
+}
 import { getUnifiOverview, isUnifiConfigured, type UnifiOverview } from "./unifiClient";
 import { getLinkConfig, getLinksHistory, getLinksLive, zbx } from "./zabbixClient";
 
@@ -385,7 +428,7 @@ function buildNocOverview() {
         return { data: fallback, error: error instanceof Error ? error.message : "Falha" };
       }
     };
-    const [groups, problems, firewalls, routers, hardware, links, traffic, unifi, beszel] = await Promise.all([
+    const [groups, problems, firewalls, routers, hardware, links, traffic, unifi, beszel, vpn] = await Promise.all([
       settle(loadGroups(), { groups: [] as NocGroup[], hostNames: new Map<string, string>() }),
       settle(loadProblems(), [] as Awaited<ReturnType<typeof loadProblems>>),
       settle(loadFirewalls(), [] as Awaited<ReturnType<typeof loadFirewalls>>),
@@ -397,6 +440,8 @@ function buildNocOverview() {
       settle(getUnifiOverview(), null as UnifiOverview | null),
       // Servidores e containers (Beszel), quando configurado.
       isBeszelConfigured() ? settle(getBeszelOverview(), null as BeszelOverview | null) : Promise.resolve({ data: null as BeszelOverview | null, error: "" }),
+      // Usuarios na SSL-VPN agora (item SNMP do FortiGate), com nome do AD.
+      settle(loadVpnLive(), null as Awaited<ReturnType<typeof loadVpnLive>>),
     ]);
 
     // Liga cada link a porta do firewall (ex.: x2 = TELIUM) para cruzar com o SD-WAN.
@@ -437,7 +482,8 @@ function buildNocOverview() {
       unifiConfigured: isUnifiConfigured() || Boolean(unifi.data),
       beszel: beszel.data,
       analyzer: analyzer ? { ...analyzer.data, loading: analyzer.loading, error: analyzer.error } : null,
-      errors: [groups, problems, firewalls, routers, hardware, links, traffic, unifi, beszel].map((entry) => entry.error).filter(Boolean),
+      vpn: vpn.data,
+      errors: [groups, problems, firewalls, routers, hardware, links, traffic, unifi, beszel, vpn].map((entry) => entry.error).filter(Boolean),
     };
   })();
 }

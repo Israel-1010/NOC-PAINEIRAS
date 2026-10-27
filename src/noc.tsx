@@ -13,6 +13,7 @@ import {
   Flower2,
   Globe,
   HardDrive,
+  KeyRound,
   Maximize2,
   MemoryStick,
   Minimize2,
@@ -199,8 +200,13 @@ type Analyzer = {
   applications: { name: string; category: string; risk: string; users: number; bandwidth: number; sessionsBlocked: number }[];
   categories: { name: string; bandwidth: number; sessionsBlocked: number; threatsBlocked: number }[];
   countries: { name: string; bandwidth: number; sessions: number; sessionsBlocked: number; threatsBlocked: number }[];
+  vpnUsers?: { login: string; name: string; department: string; type: string; remoteIp: string; lastSeen: string; durationSec: number; bandwidth: number; connections: number }[];
+  siteToSite?: { name: string; remoteIp: string; bandwidth: number; durationSec: number }[];
 };
+// Quem esta na SSL-VPN agora (item SNMP do FortiGate no Zabbix), com nome do AD.
+type VpnLive = { checkedAt: string; users: { login: string; name: string; department: string; remoteIp: string; connectedSec: number; bytesIn: number; bytesOut: number }[] };
 type NocData = {
+  vpn?: VpnLive | null;
   analyzer?: Analyzer | null;
   beszel?: Beszel | null;
   unifi?: Unifi | null;
@@ -222,6 +228,7 @@ const FIXED_PAGES: NocPage[] = [
   { id: "overview", title: "Visão geral", icon: Activity },
   { id: "internet", title: "Internet e Firewall", icon: Globe },
   { id: "seguranca", title: "Segurança e tráfego (24 h)", icon: Shield },
+  { id: "vpn", title: "VPN e acesso remoto", icon: KeyRound },
   { id: "antenas", title: "Antenas (ping do Zabbix)", icon: Radio },
   { id: "servidores", title: "Servidores e Datacenter", icon: Server },
   { id: "switches3d", title: "Switches ao vivo (3D)", icon: Network },
@@ -251,14 +258,15 @@ function buildPages(data: NocData | null): NocPage[] {
     if (page.id === "switches3d") return hasHosts("switches");
     // So com o FortiAnalyzer configurado no servidor.
     if (page.id === "seguranca") return Boolean(data?.analyzer);
+    if (page.id === "vpn") return Boolean(data?.vpn || data?.analyzer?.vpnUsers?.length || data?.firewalls[0]?.tunnels.length);
     return true;
   });
   // Servidores Docker (Beszel) logo depois de "Servidores e Datacenter".
   const docker: NocPage[] = data?.beszel?.systems.length ? [{ id: "docker", title: "Servidores Docker e containers", icon: HardDrive }] : [];
   const serversIndex = fixed.findIndex((page) => page.id === "servidores");
   const withDocker = serversIndex >= 0 ? [...fixed.slice(0, serversIndex + 1), ...docker, ...fixed.slice(serversIndex + 1)] : [...fixed, ...docker];
-  // Controladoras UniFi depois de "Internet e Firewall" (e de "Seguranca e trafego", quando existe).
-  const anchor = Math.max(withDocker.findIndex((page) => page.id === "internet"), withDocker.findIndex((page) => page.id === "seguranca")) + 1;
+  // Controladoras UniFi depois de "Internet e Firewall" (e de "Seguranca" e "VPN", quando existem).
+  const anchor = Math.max(...["internet", "seguranca", "vpn"].map((id) => withDocker.findIndex((page) => page.id === id))) + 1;
   return [...withDocker.slice(0, anchor), ...unifiPages, ...withDocker.slice(anchor)];
 }
 
@@ -952,6 +960,95 @@ function AnalyzerPage({ analyzer }: { analyzer: Analyzer }) {
         </section>
       </div>
       <small className="noc-faz-foot">FortiAnalyzer · últimas {analyzer.windowHours} h · atualizado às {new Date(analyzer.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}{analyzer.error ? ` · última consulta falhou: ${analyzer.error}` : ""}</small>
+    </div>
+  );
+}
+
+/* ---------- VPN e acesso remoto ---------- */
+const fmtSince = (seconds: number) => {
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} h ${String(minutes % 60).padStart(2, "0")}`;
+};
+
+function VpnPage({ data }: { data: NocData }) {
+  const live = data.vpn?.users || [];
+  const fw = data.firewalls[0];
+  const tunnels = fw?.tunnels || [];
+  const tunnelsUp = tunnels.filter((tunnel) => tunnel.up > 0).length;
+  const volumeByTunnel = new Map((data.analyzer?.siteToSite || []).map((tunnel) => [tunnel.name, tunnel.bandwidth]));
+  const today = data.analyzer?.vpnUsers || [];
+  const todayVolume = today.reduce((sum, session) => sum + session.bandwidth, 0);
+  const liveCount = data.vpn ? live.length : fw?.sslVpnUsers ?? 0;
+  return (
+    <div className="noc-page noc-vpn">
+      <div className="noc-faz-kpis noc-vpn-kpis">
+        <div className="tone-good"><span>Conectados na VPN agora</span><strong>{liveCount}</strong><small>SSL-VPN do FortiGate</small></div>
+        <div className={tunnelsUp < tunnels.length ? "tone-warning" : "tone-good"}><span>Túneis com as nuvens</span><strong>{tunnelsUp}/{tunnels.length}</strong><small>{tunnels.length - tunnelsUp ? `${tunnels.length - tunnelsUp} fora do ar` : "todos no ar"}</small></div>
+        <div><span>Sessões encerradas hoje</span><strong>{today.length}</strong><small>últimas 24 h (FortiAnalyzer)</small></div>
+        <div><span>Volume das sessões</span><strong>{fmtBytes(todayVolume)}</strong><small>sessões encerradas</small></div>
+      </div>
+      <div className="noc-vpn-grid">
+        <section className="noc-card noc-vpn-live">
+          <h3><KeyRound size={20} /> Conectados agora <small>{data.vpn?.checkedAt ? `leitura às ${new Date(data.vpn.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}</small></h3>
+          {live.length ? (
+            <ul>
+              {live.map((user) => (
+                <li key={`${user.login}-${user.connectedSec}`}>
+                  <span className="noc-vpn-dot" aria-hidden="true" />
+                  <div className="noc-vpn-who">
+                    <strong>{user.name}</strong>
+                    <small>{[user.department, user.login !== user.name ? user.login : "", user.remoteIp].filter(Boolean).join(" · ")}</small>
+                  </div>
+                  <div className="noc-vpn-meta">
+                    <b>há {fmtSince(user.connectedSec)}</b>
+                    <small>{fmtBytes(user.bytesIn + user.bytesOut)} trafegados</small>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="noc-empty">{data.vpn ? "Ninguém conectado na VPN agora." : `${liveCount} conectado(s) · lista de nomes indisponível`}</p>
+          )}
+        </section>
+        <section className="noc-card">
+          <h3><Network size={20} /> Túneis site-to-site <small>estado · volume 24 h</small></h3>
+          <ul className="noc-faz-list noc-vpn-tunnels">
+            {tunnels.map((tunnel) => {
+              const up = tunnel.up > 0;
+              return (
+                <li key={tunnel.name}>
+                  <div className="noc-faz-row">
+                    <span className={`noc-vpn-state ${up ? "up" : "down"}`}>{up ? <CheckCircle2 size={15} /> : <XCircle size={15} />}</span>
+                    <span className="noc-faz-name">{tunnel.name}</span>
+                    {tunnel.total > 1 ? <em className="noc-faz-level tone-muted">{tunnel.up}/{tunnel.total}</em> : null}
+                    <b className={up ? "" : "noc-vpn-down"}>{up ? (volumeByTunnel.has(tunnel.name) ? fmtBytes(volumeByTunnel.get(tunnel.name) || 0) : "no ar") : "FORA DO AR"}</b>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+        <section className="noc-card noc-vpn-today">
+          <h3><Activity size={20} /> Conectaram hoje <small>sessões encerradas · duração · volume</small></h3>
+          {today.length ? (
+            <ul className="noc-faz-list">
+              {today.slice(0, 8).map((session, index) => (
+                <li key={`${session.login}-${session.lastSeen}-${index}`}>
+                  <div className="noc-faz-row">
+                    <span className="noc-faz-name">{session.name}</span>
+                    <b>{fmtSince(session.durationSec)}</b>
+                  </div>
+                  <small>{[session.department, `saiu às ${new Date(session.lastSeen).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`, fmtBytes(session.bandwidth)].filter(Boolean).join(" · ")}</small>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="noc-empty">{data.analyzer ? "Nenhuma sessão encerrada nas últimas 24 h." : "FortiAnalyzer não configurado."}</p>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -2042,6 +2139,8 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           <InternetPage data={data} />
         ) : current.id === "seguranca" && data.analyzer ? (
           <AnalyzerPage analyzer={data.analyzer} />
+        ) : current.id === "vpn" ? (
+          <VpnPage data={data} />
         ) : current.controllerId ? (
           (() => {
             const controller = data.unifi?.controllers.find((entry) => entry.id === current.controllerId);
