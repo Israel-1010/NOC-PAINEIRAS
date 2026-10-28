@@ -120,6 +120,7 @@ import {
   listQuarantine,
   machineAction,
   quarantineAction,
+  quarantineDetail,
   quarantineHeader,
   updateAlert,
   updateIncident,
@@ -641,6 +642,7 @@ app.get("/api/defender/machines", asyncRoute(() => listMachines()));
 app.post("/api/defender/machines/:id/action", asyncRoute((req) => machineAction(String(req.params.id), req.body || {}, req.res?.locals.user)));
 app.get("/api/defender/quarantine", asyncRoute((req) => listQuarantine(req.query as Record<string, unknown>)));
 app.get("/api/defender/quarantine/header", asyncRoute((req) => quarantineHeader(String(req.query.identity || ""))));
+app.get("/api/defender/quarantine/detail", asyncRoute((req) => quarantineDetail(String(req.query.identity || ""))));
 app.post("/api/defender/quarantine/action", asyncRoute((req) => quarantineAction(req.body || {}, req.res?.locals.user)));
 
 app.use("/api/contracts", requireAuth, requireViews(["contracts"]));

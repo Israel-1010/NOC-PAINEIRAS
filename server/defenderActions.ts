@@ -311,26 +311,98 @@ export async function listQuarantine(query: Record<string, unknown>) {
   const recipient = String(query.recipient || "").trim();
   if (recipient) parameters.RecipientAddress = [recipient];
   const rows = await exo<Record<string, unknown>[]>("Get-QuarantineMessage", parameters);
+  return { messages: rows.map(toQuarantineMessage) };
+}
+
+const asList = (value: unknown) => (Array.isArray(value) ? value.map(String) : value ? [String(value)] : []);
+
+function toQuarantineMessage(row: Record<string, unknown>) {
   return {
-    messages: rows.map((row) => ({
-      identity: String(row.Identity || ""),
-      received: String(row.ReceivedTime || ""),
-      sender: String(row.SenderAddress || ""),
-      recipients: (row.RecipientAddress as string[] | undefined) || [],
-      subject: String(row.Subject || ""),
-      type: String(row.QuarantineTypes || row.Type || ""),
-      policy: String(row.PolicyName || ""),
-      released: String(row.ReleaseStatus || ""),
-      size: Number(row.Size || 0),
-      expires: String(row.Expires || ""),
-      direction: String(row.Direction || ""),
-    })),
+    identity: String(row.Identity || ""),
+    received: String(row.ReceivedTime || ""),
+    sender: String(row.SenderAddress || ""),
+    recipients: asList(row.RecipientAddress),
+    subject: String(row.Subject || ""),
+    type: String(row.QuarantineTypes || row.Type || ""),
+    policy: String(row.PolicyName || ""),
+    policyType: String(row.PolicyType || ""),
+    released: String(row.ReleaseStatus || ""),
+    releasedTo: asList(row.ReleasedUser),
+    size: Number(row.Size || 0),
+    expires: String(row.Expires || ""),
+    direction: String(row.Direction || ""),
+    messageId: String(row.MessageId || ""),
   };
 }
 
+function checkIdentity(identity: string) {
+  if (!/^[\w-]+\\[\w-]+$/.test(identity)) throw new BadRequest("Mensagem inválida.");
+  return identity;
+}
+
 export async function quarantineHeader(identity: string) {
-  const result = await exo<{ Header?: string }[]>("Get-QuarantineMessageHeader", { Identity: identity });
+  const result = await exo<{ Header?: string }[]>("Get-QuarantineMessageHeader", { Identity: checkIdentity(identity) });
   return { header: String(result[0]?.Header || "") };
+}
+
+// Resumo do cabecalho para quem nao le cabecalho: autenticacao (SPF/DKIM/DMARC), remetente real,
+// para onde vao as respostas e o servidor/IP de origem.
+function headerSummary(header: string) {
+  // Junta as linhas dobradas do cabecalho (continuacao comeca com espaco).
+  const unfolded = header.replace(/\r?\n[ \t]+/g, " ");
+  const field = (name: string) => unfolded.match(new RegExp(`^${name}:\\s*(.+)$`, "im"))?.[1]?.trim() || "";
+  const auth = field("Authentication-Results");
+  const verdict = (name: string) => auth.match(new RegExp(`${name}=(\\w+)`, "i"))?.[1]?.toLowerCase() || "";
+  const received = [...unfolded.matchAll(/^Received:\s*from\s+(\S+)\s*\(([^)]*)\)/gim)].map((match) => ({ host: match[1], detail: match[2] }));
+  // O ultimo "Received" de fora da Microsoft e o servidor que entregou para o Exchange Online.
+  const external = received.reverse().find((hop) => !/outlook\.com|microsoft\.com|office365\.com|protection\.outlook/i.test(hop.host));
+  return {
+    from: field("From"),
+    replyTo: field("Reply-To"),
+    returnPath: field("Return-Path"),
+    to: field("To"),
+    date: field("Date"),
+    spf: verdict("spf"),
+    dkim: verdict("dkim"),
+    dmarc: verdict("dmarc"),
+    compauth: verdict("compauth"),
+    originHost: external?.host || "",
+    originIp: external?.detail.match(/\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f:]{6,}/i)?.[0] || field("X-Originating-IP").replace(/[[\]]/g, ""),
+    spamVerdict: field("X-Forefront-Antispam-Report").match(/SFV:(\w+)/)?.[1] || "",
+    spamScore: field("X-Forefront-Antispam-Report").match(/SCL:(-?\d+)/)?.[1] || "",
+  };
+}
+
+// Tudo de um e-mail para a tela: dados, resumo do cabecalho, cabecalho bruto e a previa do conteudo.
+// A previa vem do Exchange (Preview-QuarantineMessage); a tela mostra so texto, sem carregar nada externo.
+export async function quarantineDetail(identity: string) {
+  checkIdentity(identity);
+  const [message, header, preview] = await Promise.all([
+    exo<Record<string, unknown>[]>("Get-QuarantineMessage", { Identity: identity }).then((rows) => (rows[0] ? toQuarantineMessage(rows[0]) : null)),
+    exo<{ Header?: string }[]>("Get-QuarantineMessageHeader", { Identity: identity }).then((rows) => String(rows[0]?.Header || "")).catch(() => ""),
+    exo<Record<string, unknown>[]>("Preview-QuarantineMessage", { Identity: identity })
+      .then((rows) => rows[0] || null)
+      .catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }) as Record<string, unknown>),
+  ]);
+  if (!message) throw new BadRequest("E-mail não encontrado na quarentena (pode ter expirado ou sido excluído).");
+  const attachments = (preview?.Attachment || preview?.Attachments || []) as unknown;
+  return {
+    message,
+    summary: header ? headerSummary(header) : null,
+    header,
+    preview: preview
+      ? {
+          error: String(preview.error || ""),
+          body: String(preview.Body || ""),
+          isHtml: Boolean(preview.IsHtml ?? /<\w+[^>]*>/.test(String(preview.Body || ""))),
+          cc: asList(preview.Cc),
+          attachments: (Array.isArray(attachments) ? attachments : [attachments])
+            .filter(Boolean)
+            .map((item) => (typeof item === "object" && item ? String((item as { FileName?: string; Name?: string }).FileName || (item as { Name?: string }).Name || "") : String(item)))
+            .filter(Boolean),
+        }
+      : null,
+  };
 }
 
 export async function quarantineAction(body: Record<string, unknown>, user?: AuthUser) {

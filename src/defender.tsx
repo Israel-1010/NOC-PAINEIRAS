@@ -45,7 +45,22 @@ type Evidence = { type: string; verdict?: string; remediation?: string; device?:
 type IncidentAlert = { id: string; title: string; severity: string; status: string; serviceSource: string; description?: string; recommendedActions?: string; createdDateTime: string; alertWebUrl?: string; evidence: Evidence[] };
 type Machine = { id: string; name: string; os: string; health: string; risk: string; exposure: string; av: string; onboarding: string; lastSeen: string; ip: string; user: string };
 type MachineAction = { id: string; machineId: string; machine: string; type: string; status: string; requestor: string; comment: string; created: string };
-type QuarantineMessage = { identity: string; received: string; sender: string; recipients: string[]; subject: string; type: string; policy: string; released: string; size: number; expires: string; direction: string };
+type QuarantineMessage = {
+  identity: string;
+  received: string;
+  sender: string;
+  recipients: string[];
+  subject: string;
+  type: string;
+  policy: string;
+  policyType: string;
+  released: string;
+  releasedTo: string[];
+  size: number;
+  expires: string;
+  direction: string;
+  messageId: string;
+};
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
@@ -626,38 +641,97 @@ function MachineModal({ machine, caps, actions, onClose, onDone }: { machine: Ma
 }
 
 /* ---------- Quarentena de e-mail ---------- */
+// Lista a esquerda (remetente, assunto, destinatario, motivo) e o e-mail aberto a direita, com o
+// conteudo so em texto, o veredito de autenticacao e os botoes de liberar/excluir.
+
+type QuarantineDetail = {
+  message: QuarantineMessage;
+  summary: {
+    from: string;
+    replyTo: string;
+    returnPath: string;
+    to: string;
+    date: string;
+    spf: string;
+    dkim: string;
+    dmarc: string;
+    compauth: string;
+    originHost: string;
+    originIp: string;
+    spamVerdict: string;
+    spamScore: string;
+  } | null;
+  header: string;
+  preview: { error: string; body: string; isHtml: boolean; cc: string[]; attachments: string[] } | null;
+};
+
+// O que cada motivo significa, em linguagem de quem vai liberar.
+const QUARANTINE_HELP: Record<string, string> = {
+  Spam: "O filtro achou que é propaganda não solicitada. Costuma ser seguro liberar se você conhece o remetente.",
+  HighConfSpam: "O filtro tem muita certeza de que é spam.",
+  Bulk: "E-mail de envio em massa (newsletter, marketing).",
+  Phish: "O filtro achou que pode ser uma tentativa de roubar senha ou dados. Confira o remetente e os links antes de liberar.",
+  HighConfPhish: "O filtro tem muita certeza de que é golpe (phishing). Só libere se confirmar com o remetente por outro meio.",
+  Malware: "Tem anexo ou conteúdo com vírus. Não libere.",
+  SPOOF: "O remetente parece falsificado (diz ser de um domínio que não autorizou esse envio).",
+  TransportRule: "Barrado por uma regra criada pela TI no Exchange.",
+  FileTypeBlock: "Tem anexo de um tipo bloqueado (ex.: .exe, .js).",
+};
+
+const senderName = (from: string) => from.replace(/<[^>]+>/, "").replace(/"/g, "").trim();
+const domainOf = (address: string) => address.split("@")[1]?.toLowerCase() || "";
+const typeTone = (type: string) => (DANGEROUS_QUARANTINE.test(type) ? "critical" : /phish|spoof/i.test(type) ? "warning" : "muted");
+const releaseLabel = (status: string) =>
+  status === "RELEASED" ? "Liberado" : status === "REQUESTED" ? "Usuário pediu liberação" : status === "DENIED" ? "Liberação negada" : status === "PREPARINGTORELEASE" ? "Liberando..." : "Em quarentena";
+
+// HTML do e-mail vira texto sem executar nada nem baixar imagens (DOMParser cria um documento inerte).
+function emailText(body: string, isHtml: boolean) {
+  if (!isHtml) return body.trim();
+  const doc = new DOMParser().parseFromString(body, "text/html");
+  doc.querySelectorAll("script, style, head").forEach((node) => node.remove());
+  doc.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
+  doc.querySelectorAll("p, div, tr, li, h1, h2, h3, h4").forEach((node) => node.append("\n"));
+  // Links: mostra para onde vao (e o que quem clica veria), sem deixar clicavel.
+  doc.querySelectorAll("a[href]").forEach((node) => {
+    const href = node.getAttribute("href") || "";
+    if (/^https?:/i.test(href) && !node.textContent?.includes(href)) node.append(` [${href}]`);
+  });
+  return (doc.body.textContent || "").replace(/[ \t ]+/g, " ").replace(/\n\s*\n\s*\n+/g, "\n\n").trim();
+}
+
+function AuthBadge({ label, value }: { label: string; value: string }) {
+  const tone = !value ? "muted" : /^pass$/.test(value) ? "good" : /^(fail|hardfail|softfail|permerror)$/.test(value) ? "critical" : "warning";
+  const text = !value ? "—" : value === "pass" ? "ok" : value === "fail" ? "falhou" : value === "none" ? "ausente" : value;
+  return <span className={`ct-pill tone-${tone}`} title={`${label}: ${value || "sem informação"}`}>{label} {text}</span>;
+}
+
 function QuarantineTab({ enabled }: { enabled: boolean | null }) {
   const [days, setDays] = useState(7);
   const [type, setType] = useState("");
   const [pendingOnly, setPendingOnly] = useState(true);
-  const [recipient, setRecipient] = useState("");
   const [term, setTerm] = useState("");
   const [messages, setMessages] = useState<QuarantineMessage[] | null>(null);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState("");
-  const [notice, setNotice] = useState("");
-  const [header, setHeader] = useState<{ message: QuarantineMessage; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = useCallback(async () => {
     setError("");
     setMessages(null);
-    setSelected(new Set());
+    setChecked(new Set());
     try {
       const params = new URLSearchParams({ days: String(days), released: pendingOnly ? "false" : "" });
-      if (type) params.set("type", type);
-      if (recipient.trim()) params.set("recipient", recipient.trim());
       setMessages((await api<{ messages: QuarantineMessage[] }>(`/api/defender/quarantine?${params}`)).messages);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     }
-  }, [days, type, pendingOnly, recipient]);
+  }, [days, pendingOnly]);
 
   useEffect(() => {
     if (enabled) void load();
-    // recipient so recarrega no Enter/botao
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, days, type, pendingOnly]);
+  }, [enabled, load]);
 
   if (enabled === false) {
     return (
@@ -671,129 +745,225 @@ function QuarantineTab({ enabled }: { enabled: boolean | null }) {
     );
   }
 
-  const rows = (messages || []).filter((message) => !term.trim() || `${message.subject} ${message.sender} ${message.recipients.join(" ")}`.toLowerCase().includes(term.trim().toLowerCase()));
-  const chosen = rows.filter((message) => selected.has(message.identity));
-  const toggle = (identity: string) => setSelected((current) => {
+  const all = messages || [];
+  const counts = all.reduce<Record<string, number>>((acc, message) => ({ ...acc, [message.type]: (acc[message.type] || 0) + 1 }), {});
+  const needle = term.trim().toLowerCase();
+  const rows = all
+    .filter((message) => !type || message.type === type)
+    .filter((message) => !needle || `${message.subject} ${message.sender} ${message.recipients.join(" ")}`.toLowerCase().includes(needle))
+    .sort((a, b) => b.received.localeCompare(a.received));
+  const chosen = rows.filter((message) => checked.has(message.identity));
+  const opened = all.find((message) => message.identity === openId) || null;
+  const toggle = (identity: string) => setChecked((current) => {
     const next = new Set(current);
     if (next.has(identity)) next.delete(identity);
     else next.add(identity);
     return next;
   });
 
-  async function act(action: "release" | "delete", reportFalsePositive = false) {
-    if (!chosen.length) return;
-    const dangerous = chosen.filter((message) => DANGEROUS_QUARANTINE.test(message.type));
+  async function act(targets: QuarantineMessage[], action: "release" | "delete", reportFalsePositive = false) {
+    if (!targets.length) return;
+    const dangerous = targets.filter((message) => DANGEROUS_QUARANTINE.test(message.type));
+    const who = targets.length === 1 ? `para ${targets[0].recipients.join(", ")}` : `de ${targets.length} e-mails`;
     const question = action === "release"
-      ? `Liberar ${chosen.length} e-mail(s) para a caixa de entrada dos destinatários?${dangerous.length ? `\n\nATENÇÃO: ${dangerous.length} foram classificados como MALWARE ou PHISHING DE ALTA CONFIANÇA. Só libere se tiver certeza de que é legítimo.` : ""}`
-      : `Excluir definitivamente ${chosen.length} e-mail(s) da quarentena?`;
+      ? `Liberar ${targets.length === 1 ? `"${targets[0].subject || "(sem assunto)"}"` : `${targets.length} e-mails`} ${who}?\n\nO e-mail vai para a caixa de entrada do destinatário.${dangerous.length ? `\n\nATENÇÃO: ${dangerous.length === 1 && targets.length === 1 ? "este e-mail foi classificado" : `${dangerous.length} foram classificados`} como MALWARE ou GOLPE DE ALTA CONFIANÇA. Só libere se tiver certeza.` : ""}`
+      : `Excluir ${targets.length === 1 ? "este e-mail" : `${targets.length} e-mails`} da quarentena? Não dá para desfazer.`;
     if (!window.confirm(question)) return;
     setBusy(action);
-    setNotice("");
+    setNotice(null);
     try {
       const result = await api<{ ok: boolean; results: { identity: string; ok: boolean; error?: string }[] }>("/api/defender/quarantine/action", "POST", {
         action,
-        identities: chosen.map((message) => message.identity),
+        identities: targets.map((message) => message.identity),
         reportFalsePositive,
       });
       const failed = result.results.filter((entry) => !entry.ok);
-      setNotice(failed.length ? `${result.results.length - failed.length} ok, ${failed.length} falharam: ${failed[0].error}` : `${result.results.length} e-mail(s) ${action === "release" ? "liberado(s)" : "excluído(s)"}.`);
+      const done = result.results.length - failed.length;
+      const verb = action === "release" ? "liberado" : "excluído";
+      setNotice(failed.length
+        ? { ok: false, text: `${done} ${verb}(s), ${failed.length} com erro: ${failed[0].error}` }
+        : { ok: true, text: done === 1 ? `E-mail ${verb}${action === "release" ? ": já está a caminho da caixa de entrada" : ""}.` : `${done} e-mails ${verb}s.` });
+      if (action === "delete" && targets.some((message) => message.identity === openId)) setOpenId(null);
       await load();
     } catch (actError) {
-      setNotice(actError instanceof Error ? actError.message : String(actError));
+      setNotice({ ok: false, text: actError instanceof Error ? actError.message : String(actError) });
     } finally {
       setBusy("");
-    }
-  }
-
-  async function showHeader(message: QuarantineMessage) {
-    try {
-      const result = await api<{ header: string }>(`/api/defender/quarantine/header?identity=${encodeURIComponent(message.identity)}`);
-      setHeader({ message, text: result.header });
-    } catch (headerError) {
-      setNotice(headerError instanceof Error ? headerError.message : String(headerError));
     }
   }
 
   return (
     <>
       {error ? <div className="pm-error" role="alert"><AlertTriangle size={16} /><span>{error}</span></div> : null}
-      <section className="ct-table-card">
-        <div className="ct-toolbar df-qtoolbar">
+      <section className="ct-table-card qt-shell">
+        <div className="ct-toolbar qt-toolbar">
           <div className="ct-filters" role="tablist" aria-label="Período">
             {[1, 7, 30].map((value) => (
               <button key={value} type="button" role="tab" aria-selected={days === value} className={days === value ? "active" : ""} onClick={() => setDays(value)}>{value === 1 ? "24 h" : `${value} dias`}</button>
             ))}
           </div>
-          <select value={type} onChange={(event) => setType(event.target.value)} aria-label="Tipo">
-            <option value="">Todos os tipos</option>
-            {Object.entries(QUARANTINE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-          <label className="ct-check"><input type="checkbox" checked={pendingOnly} onChange={(event) => setPendingOnly(event.target.checked)} /> <span>Só não liberados</span></label>
-          <form className="pm-search" onSubmit={(event) => { event.preventDefault(); void load(); }}>
-            <Mail size={16} />
-            <input value={recipient} onChange={(event) => setRecipient(event.target.value)} placeholder="Destinatário (e-mail) + Enter" />
-          </form>
+          <label className="ct-check"><input type="checkbox" checked={pendingOnly} onChange={(event) => setPendingOnly(event.target.checked)} /> <span>Só os que ainda estão presos</span></label>
           <label className="pm-search">
             <Search size={16} />
-            <input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Filtrar assunto ou remetente" />
+            <input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Buscar por remetente, destinatário ou assunto" />
           </label>
           <button className="pm-icon-btn" type="button" title="Atualizar" aria-label="Atualizar" onClick={load}><RefreshCw size={16} /></button>
         </div>
-        <div className="df-qactions">
-          <span>{chosen.length ? `${chosen.length} selecionado(s)` : "Selecione e-mails para agir"}</span>
-          <button type="button" className="ct-primary" disabled={!chosen.length || Boolean(busy)} onClick={() => act("release")}><CheckCircle2 size={15} /> {busy === "release" ? "Liberando..." : "Liberar"}</button>
-          <button type="button" className="ct-secondary" disabled={!chosen.length || Boolean(busy)} onClick={() => act("release", true)} title="Libera e avisa a Microsoft que o filtro errou">Liberar e reportar falso positivo</button>
-          <button type="button" className="ct-danger" disabled={!chosen.length || Boolean(busy)} onClick={() => act("delete")}><Trash2 size={15} /> Excluir</button>
-          {notice ? <span className="df-notice">{notice}</span> : null}
+        <div className="qt-types" role="tablist" aria-label="Motivo">
+          <button type="button" className={!type ? "active" : ""} onClick={() => setType("")}>Todos <b>{all.length}</b></button>
+          {Object.entries(counts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([key, count]) => (
+              <button key={key} type="button" className={`tone-${typeTone(key)}${type === key ? " active" : ""}`} onClick={() => setType(type === key ? "" : key)}>
+                {QUARANTINE_TYPES[key] || key} <b>{count}</b>
+              </button>
+            ))}
         </div>
-        <div className="ct-table-wrap">
-          <table className="ct-table df-qtable">
-            <thead>
-              <tr>
-                <th aria-label="Selecionar">
-                  <input type="checkbox" checked={Boolean(rows.length) && rows.every((message) => selected.has(message.identity))} onChange={(event) => setSelected(event.target.checked ? new Set(rows.map((message) => message.identity)) : new Set())} />
-                </th>
-                <th>Recebido</th>
-                <th>Assunto</th>
-                <th>Remetente</th>
-                <th>Destinatário</th>
-                <th>Motivo</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
+        {notice ? <p className={`qt-notice${notice.ok ? " ok" : ""}`}>{notice.ok ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />} {notice.text}</p> : null}
+
+        <div className={`qt-split${opened ? " has-open" : ""}`}>
+          <div className="qt-list">
+            <div className="qt-bulk">
+              <label className="ct-check">
+                <input type="checkbox" checked={Boolean(rows.length) && rows.every((message) => checked.has(message.identity))} onChange={(event) => setChecked(event.target.checked ? new Set(rows.map((message) => message.identity)) : new Set())} />
+                <span>{chosen.length ? `${chosen.length} selecionado(s)` : `${rows.length} e-mail(s)`}</span>
+              </label>
+              {chosen.length ? (
+                <>
+                  <button type="button" className="ct-primary" disabled={Boolean(busy)} onClick={() => act(chosen, "release")}><CheckCircle2 size={14} /> Liberar</button>
+                  <button type="button" className="ct-danger" disabled={Boolean(busy)} onClick={() => act(chosen, "delete")}><Trash2 size={14} /> Excluir</button>
+                </>
+              ) : null}
+            </div>
+            <ul>
               {rows.map((message) => (
-                <tr key={message.identity} className={selected.has(message.identity) ? "selected" : ""} onClick={() => toggle(message.identity)}>
-                  <td onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selected.has(message.identity)} onChange={() => toggle(message.identity)} /></td>
-                  <td>{fmtDateTime(message.received)}</td>
-                  <td>
-                    <strong className="ct-title">{message.subject || "(sem assunto)"}</strong>
-                    <button type="button" className="ct-link" onClick={(event) => { event.stopPropagation(); void showHeader(message); }}>ver cabeçalho</button>
-                  </td>
-                  <td>{message.sender}</td>
-                  <td>{message.recipients.join(", ")}</td>
-                  <td><span className={`ct-pill tone-${DANGEROUS_QUARANTINE.test(message.type) ? "critical" : /phish|spoof/i.test(message.type) ? "warning" : "muted"}`}>{QUARANTINE_TYPES[message.type] || message.type}</span></td>
-                  <td>{message.released === "RELEASED" ? "Liberado" : message.released === "REQUESTED" ? "Pedido do usuário" : message.released === "DENIED" ? "Negado" : "Em quarentena"}</td>
-                </tr>
+                <li key={message.identity} className={`${openId === message.identity ? "open" : ""}${checked.has(message.identity) ? " checked" : ""}`}>
+                  <input type="checkbox" aria-label="Selecionar" checked={checked.has(message.identity)} onChange={() => toggle(message.identity)} />
+                  <button type="button" className="qt-item" onClick={() => setOpenId(message.identity)}>
+                    <span className="qt-row1">
+                      <strong title={message.sender}>{message.sender}</strong>
+                      <time>{fmtDateTime(message.received)}</time>
+                    </span>
+                    <span className="qt-subject">{message.subject || "(sem assunto)"}</span>
+                    <span className="qt-row3">
+                      <span className="qt-to" title={message.recipients.join(", ")}>para {message.recipients.join(", ")}</span>
+                      <span className={`ct-pill tone-${typeTone(message.type)}`}>{QUARANTINE_TYPES[message.type] || message.type}</span>
+                      {message.released && message.released !== "NOTRELEASED" ? <span className="ct-pill tone-good">{releaseLabel(message.released)}</span> : null}
+                    </span>
+                  </button>
+                </li>
               ))}
-              {messages && !rows.length ? <tr><td colSpan={7} className="ct-empty-row">Nenhum e-mail na quarentena com esses filtros.</td></tr> : null}
-              {!messages && !error ? <tr><td colSpan={7} className="ct-empty-row">Consultando a quarentena do Exchange Online...</td></tr> : null}
-            </tbody>
-          </table>
+              {messages && !rows.length ? <li className="qt-empty"><CheckCircle2 size={18} /> Nenhum e-mail preso com esses filtros.</li> : null}
+              {!messages && !error ? <li className="qt-empty">Consultando a quarentena do Exchange Online...</li> : null}
+            </ul>
+          </div>
+          {opened ? (
+            <QuarantineReader key={opened.identity} message={opened} busy={busy} onClose={() => setOpenId(null)} onAct={(action, report) => act([opened], action, report)} />
+          ) : (
+            <div className="qt-placeholder"><Mail size={34} /><p>Clique em um e-mail para ver quem mandou, o conteúdo e liberar.</p></div>
+          )}
         </div>
       </section>
-      {header ? (
-        <>
-          <div className="ct-backdrop" onClick={() => setHeader(null)} />
-          <div className="ct-modal df-modal" role="dialog" aria-modal="true" aria-label="Cabeçalho do e-mail">
-            <header>
-              <h3>{header.message.subject || "(sem assunto)"}</h3>
-              <button type="button" className="pm-icon-btn" aria-label="Fechar" onClick={() => setHeader(null)}><X size={18} /></button>
-            </header>
-            <pre className="df-header">{header.text || "Sem cabeçalho."}</pre>
-          </div>
-        </>
-      ) : null}
     </>
+  );
+}
+
+function QuarantineReader({ message, busy, onClose, onAct }: { message: QuarantineMessage; busy: string; onClose: () => void; onAct: (action: "release" | "delete", report?: boolean) => void }) {
+  const [detail, setDetail] = useState<QuarantineDetail | null>(null);
+  const [error, setError] = useState("");
+  const [showHeader, setShowHeader] = useState(false);
+
+  useEffect(() => {
+    api<QuarantineDetail>(`/api/defender/quarantine/detail?identity=${encodeURIComponent(message.identity)}`)
+      .then(setDetail)
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : String(loadError)));
+  }, [message.identity]);
+
+  const summary = detail?.summary;
+  const text = useMemo(() => (detail?.preview?.body ? emailText(detail.preview.body, detail.preview.isHtml) : ""), [detail]);
+  const dangerous = DANGEROUS_QUARANTINE.test(message.type);
+  const released = message.released === "RELEASED";
+  // Responder para outro dominio e um sinal classico de golpe.
+  const replyElsewhere = summary?.replyTo && domainOf(summary.replyTo.replace(/.*<|>.*/g, "")) !== domainOf(message.sender);
+
+  return (
+    <article className="qt-reader" aria-label="E-mail em quarentena">
+      <header>
+        <div>
+          <span className={`ct-pill tone-${typeTone(message.type)}`}>{QUARANTINE_TYPES[message.type] || message.type}</span>
+          <h3>{message.subject || "(sem assunto)"}</h3>
+        </div>
+        <button type="button" className="pm-icon-btn" aria-label="Fechar" onClick={onClose}><X size={18} /></button>
+      </header>
+
+      <dl className="qt-facts">
+        <dt>De</dt>
+        <dd><b>{summary?.from ? senderName(summary.from) || message.sender : message.sender}</b> <span className="ct-muted">&lt;{message.sender}&gt;</span></dd>
+        <dt>Para</dt>
+        <dd>{message.recipients.join(", ")}{detail?.preview?.cc.length ? <span className="ct-muted"> · cópia: {detail.preview.cc.join(", ")}</span> : null}</dd>
+        <dt>Recebido</dt>
+        <dd>{fmtDateTime(message.received)}{message.expires ? <span className="ct-muted"> · sai da quarentena em {fmtDateTime(message.expires)}</span> : null}</dd>
+        {summary?.replyTo ? (
+          <>
+            <dt>Responder para</dt>
+            <dd className={replyElsewhere ? "qt-warn" : ""}>{summary.replyTo}{replyElsewhere ? " (domínio diferente do remetente!)" : ""}</dd>
+          </>
+        ) : null}
+        <dt>Status</dt>
+        <dd>{releaseLabel(message.released)}{message.releasedTo.length ? ` para ${message.releasedTo.join(", ")}` : ""}</dd>
+      </dl>
+
+      <div className={`qt-why tone-${typeTone(message.type)}`}>
+        <AlertTriangle size={16} />
+        <div>
+          <b>Por que está preso:</b> {QUARANTINE_HELP[message.type] || "Barrado pelo filtro do Microsoft 365."}
+          {message.policy ? <small> Política: {message.policy}.</small> : null}
+        </div>
+      </div>
+
+      {summary ? (
+        <div className="qt-auth">
+          <span className="ct-muted">Autenticação do remetente:</span>
+          <AuthBadge label="SPF" value={summary.spf} />
+          <AuthBadge label="DKIM" value={summary.dkim} />
+          <AuthBadge label="DMARC" value={summary.dmarc} />
+          {summary.originHost || summary.originIp ? <span className="ct-muted">enviado por {summary.originHost}{summary.originIp ? ` (${summary.originIp})` : ""}</span> : null}
+        </div>
+      ) : null}
+
+      {error ? <p className="qt-notice">{error}</p> : null}
+      {!detail && !error ? <p className="ct-muted">Abrindo o e-mail...</p> : null}
+
+      {detail?.preview?.attachments.length ? (
+        <p className="qt-attach"><b>Anexos:</b> {detail.preview.attachments.join(", ")}</p>
+      ) : null}
+      {detail ? (
+        detail.preview?.error ? (
+          <p className="ct-muted">Prévia do conteúdo indisponível: {detail.preview.error}</p>
+        ) : (
+          <pre className="qt-body">{text || "(e-mail sem texto)"}</pre>
+        )
+      ) : null}
+      {detail ? <p className="ct-muted qt-safe">Mostrando só o texto: imagens e links não são carregados aqui.</p> : null}
+
+      <footer className="qt-actions">
+        {released ? (
+          <p className="ct-muted">Este e-mail já foi liberado.</p>
+        ) : (
+          <>
+            {dangerous ? <p className="qt-warn">Classificado como {QUARANTINE_TYPES[message.type]}: não recomendado liberar.</p> : null}
+            <button type="button" className={dangerous ? "ct-secondary" : "ct-primary"} disabled={Boolean(busy)} onClick={() => onAct("release")}>
+              <CheckCircle2 size={16} /> {busy === "release" ? "Liberando..." : `Liberar para ${message.recipients.length === 1 ? message.recipients[0] : `${message.recipients.length} destinatários`}`}
+            </button>
+            <button type="button" className="ct-secondary" disabled={Boolean(busy)} onClick={() => onAct("release", true)} title="Libera e avisa a Microsoft que o filtro errou, para melhorar a detecção">
+              Liberar e avisar que não é spam
+            </button>
+          </>
+        )}
+        <button type="button" className="ct-danger" disabled={Boolean(busy)} onClick={() => onAct("delete")}><Trash2 size={16} /> Excluir</button>
+        {detail?.header ? <button type="button" className="ct-link" onClick={() => setShowHeader(!showHeader)}>{showHeader ? "Esconder" : "Ver"} cabeçalho completo</button> : null}
+      </footer>
+      {showHeader && detail?.header ? <pre className="df-header qt-header">{detail.header}</pre> : null}
+    </article>
   );
 }
