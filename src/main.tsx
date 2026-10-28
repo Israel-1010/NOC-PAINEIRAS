@@ -36,6 +36,7 @@ import {
   Server,
   Settings,
   Shield,
+  ShieldAlert,
   ShieldCheck,
   Signal,
   Table as TableIcon,
@@ -69,6 +70,7 @@ import { DiagnosticsDashboard } from "./diagnostics";
 import { LinksDashboard } from "./links";
 import { NocWall } from "./noc";
 import { ContractsDashboard } from "./contracts";
+import { DefenderDashboard } from "./defender";
 
 // O 3D (three.js) so e baixado quando alguem abre a tela.
 const InfraView = React.lazy(() => import("./infra/InfraView"));
@@ -791,7 +793,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" || value === "noc" || value === "contracts" || value === "infra3d" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" || value === "noc" || value === "contracts" || value === "infra3d" || value === "defender" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1239,6 +1241,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
       { label: "Active Directory", icon: Users, view: "ad" },
       { label: "Intune", icon: ShieldCheck, view: "intune" },
       { label: "Office 365", icon: TableIcon, view: "office365" },
+      { label: "Microsoft Defender", icon: ShieldAlert, view: "defender" },
     ],
   },
   {
@@ -1264,7 +1267,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
   },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links" | "noc" | "contracts" | "infra3d";
+type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links" | "noc" | "contracts" | "infra3d" | "defender";
 
 function statusLabel(status: Status) {
   return {
@@ -1287,6 +1290,7 @@ function viewEyebrow(view: View) {
   if (view === "projects") return "Gestão de projetos da TI";
   if (view === "contracts") return "Gestão de fornecedores";
   if (view === "infra3d") return "Digital Twin · dados ao vivo";
+  if (view === "defender") return "Incidentes, máquinas e quarentena de e-mail";
   if (view === "links") return "Monitoramento via Zabbix";
   if (view === "noc") return "Central de monitoramento";
   if (view === "access") return "Administração do portal";
@@ -1308,6 +1312,7 @@ function viewTitle(view: View) {
   if (view === "projects") return "Projetos";
   if (view === "contracts") return "Contratos de fornecedores";
   if (view === "infra3d") return "Infraestrutura 3D";
+  if (view === "defender") return "Microsoft Defender";
   if (view === "links") return "Links de internet";
   if (view === "noc") return "Painel NOC";
   if (view === "access") return "Acessos";
@@ -2094,6 +2099,8 @@ function App() {
           <LinksDashboard isAdmin={Boolean(access?.isAdmin)} />
         ) : activeView === "contracts" ? (
           <ContractsDashboard />
+        ) : activeView === "defender" ? (
+          <DefenderDashboard />
         ) : activeView === "infra3d" ? (
           <React.Suspense fallback={<div className="view-loading">Carregando a infraestrutura 3D...</div>}>
             <InfraView />

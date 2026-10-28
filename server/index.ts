@@ -112,6 +112,18 @@ import { getLinkConfig, getLinksHistory, getLinksLive, listLinkCandidates, saveL
 import { getNocOverview } from "./nocData";
 import { startFazAlertWhatsapp } from "./fazAlertWhatsapp";
 import { startDefenderAlertWhatsapp } from "./defenderAlertWhatsapp";
+import {
+  defenderCapabilities,
+  getIncident,
+  listIncidents,
+  listMachines,
+  listQuarantine,
+  machineAction,
+  quarantineAction,
+  quarantineHeader,
+  updateAlert,
+  updateIncident,
+} from "./defenderActions";
 import { allowTvKey, createTvKey, listTvKeys, revokeTvKey } from "./tvKeys";
 import { getUnifiSettings, saveUnifiSettings, testUnifi } from "./unifiClient";
 import { createDevice, deleteDevice, listDevices, updateDevice } from "./devices";
@@ -618,6 +630,19 @@ app.put("/api/links/config", requireAdmin, asyncRoute((req) => saveLinkConfig(re
 app.get("/api/links/candidates", requireAdmin, asyncRoute(() => listLinkCandidates()));
 
 /* ---------- Contratos de fornecedores ---------- */
+// Microsoft Defender: ver e agir (incidentes, alertas, maquinas, quarentena). Area sensivel; alteracoes auditadas.
+app.use("/api/defender", requireAuth, requireViews(["defender"]));
+app.get("/api/defender/capabilities", asyncRoute(() => defenderCapabilities()));
+app.get("/api/defender/incidents", asyncRoute((req) => listIncidents(String(req.query.status || "open"))));
+app.get("/api/defender/incidents/:id", asyncRoute((req) => getIncident(String(req.params.id))));
+app.patch("/api/defender/incidents/:id", asyncRoute((req) => updateIncident(String(req.params.id), req.body || {}, req.res?.locals.user)));
+app.patch("/api/defender/alerts/:id", asyncRoute((req) => updateAlert(String(req.params.id), req.body || {}, req.res?.locals.user)));
+app.get("/api/defender/machines", asyncRoute(() => listMachines()));
+app.post("/api/defender/machines/:id/action", asyncRoute((req) => machineAction(String(req.params.id), req.body || {}, req.res?.locals.user)));
+app.get("/api/defender/quarantine", asyncRoute((req) => listQuarantine(req.query as Record<string, unknown>)));
+app.get("/api/defender/quarantine/header", asyncRoute((req) => quarantineHeader(String(req.query.identity || ""))));
+app.post("/api/defender/quarantine/action", asyncRoute((req) => quarantineAction(req.body || {}, req.res?.locals.user)));
+
 app.use("/api/contracts", requireAuth, requireViews(["contracts"]));
 app.get("/api/contracts", asyncRoute(async () => listContracts()));
 app.post("/api/contracts", asyncRoute((req) => createContract(req.body || {}, req.res?.locals.user)));

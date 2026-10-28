@@ -10,10 +10,12 @@ export function isDefenderConfigured() {
   return isIntuneConfigured() && process.env.DEFENDER_ENABLED !== "false";
 }
 
-let token: { value: string; expiresAt: number } | null = null;
+// Um token por recurso (Graph, API do Defender for Endpoint, Exchange Online).
+const tokens = new Map<string, { value: string; expiresAt: number }>();
 
-async function getToken() {
-  if (token && token.expiresAt > Date.now() + 60000) return token.value;
+export async function msToken(scope = "https://graph.microsoft.com/.default") {
+  const cached = tokens.get(scope);
+  if (cached && cached.expiresAt > Date.now() + 60000) return cached.value;
   const response = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(intuneConfig.tenantId!)}/oauth2/v2.0/token`, {
     method: "POST",
     signal: AbortSignal.timeout(20000),
@@ -21,18 +23,42 @@ async function getToken() {
     body: new URLSearchParams({
       client_id: intuneConfig.clientId!,
       client_secret: intuneConfig.clientSecret!,
-      scope: "https://graph.microsoft.com/.default",
+      scope,
       grant_type: "client_credentials",
     }),
   });
   const payload = (await response.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error_description?: string };
-  if (!payload.access_token) throw new Error(payload.error_description?.split("\n")[0] || `Microsoft Graph recusou o login (${response.status}).`);
-  token = { value: payload.access_token, expiresAt: Date.now() + Math.max(60, Number(payload.expires_in || 3600) - 120) * 1000 };
-  return token.value;
+  if (!payload.access_token) throw new Error(payload.error_description?.split("\n")[0] || `Microsoft recusou o login do app (${response.status}).`);
+  tokens.set(scope, { value: payload.access_token, expiresAt: Date.now() + Math.max(60, Number(payload.expires_in || 3600) - 120) * 1000 });
+  return payload.access_token;
+}
+
+// Permissoes (roles) que o token do recurso traz: usado para dizer o que falta configurar.
+export async function msRoles(scope?: string) {
+  try {
+    const value = await msToken(scope);
+    return (JSON.parse(Buffer.from(value.split(".")[1], "base64url").toString()) as { roles?: string[] }).roles || [];
+  } catch {
+    return [];
+  }
+}
+
+// Escrita no Graph (PATCH/POST). Devolve o corpo (ou {} quando vazio).
+export async function graphWrite<T = unknown>(method: "PATCH" | "POST", path: string, body: unknown): Promise<T> {
+  const response = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    method,
+    signal: AbortSignal.timeout(25000),
+    headers: { Authorization: `Bearer ${await msToken()}`, "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  const payload = (text ? JSON.parse(text) : {}) as T & { error?: { message?: string } };
+  if (!response.ok) throw new Error(`Microsoft Graph: ${payload.error?.message?.slice(0, 200) || `erro ${response.status}`}`);
+  return payload;
 }
 
 // Listas paginadas (@odata.nextLink), ate `pages` paginas.
-async function graphAll<T>(path: string, pages = 6): Promise<T[]> {
+export async function graphAll<T>(path: string, pages = 6): Promise<T[]> {
   const items: T[] = [];
   let next = path;
   for (let page = 0; next && page < pages; page++) {
@@ -43,10 +69,10 @@ async function graphAll<T>(path: string, pages = 6): Promise<T[]> {
   return items;
 }
 
-async function graph<T>(path: string): Promise<T> {
+export async function graph<T>(path: string, headers: Record<string, string> = {}): Promise<T> {
   const response = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
     signal: AbortSignal.timeout(25000),
-    headers: { Authorization: `Bearer ${await getToken()}`, Accept: "application/json" },
+    headers: { Authorization: `Bearer ${await msToken()}`, Accept: "application/json", ...headers },
   });
   const payload = (await response.json().catch(() => ({}))) as T & { error?: { message?: string } };
   if (!response.ok) {

@@ -18,6 +18,7 @@ export const portalViews = [
   { id: "ad", label: "Active Directory", sensitive: true },
   { id: "intune", label: "Intune", sensitive: true },
   { id: "office365", label: "Office 365", sensitive: true },
+  { id: "defender", label: "Microsoft Defender", sensitive: true },
   { id: "ips", label: "IPs e VLANs", sensitive: true },
   { id: "wifi", label: "WiFi", sensitive: true },
   { id: "milvusPortal", label: "Chamados Milvus", sensitive: false },

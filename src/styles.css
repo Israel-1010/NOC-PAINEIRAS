@@ -12307,6 +12307,237 @@ thead .ac-person-col {
   color: var(--noc-critical);
 }
 
+/* ---------- Microsoft Defender (menu) ---------- */
+.df-tabs {
+  align-self: start;
+}
+
+.df-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+.df-missing ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  line-height: 1.7;
+}
+
+.ct-modal.df-modal {
+  width: min(1000px, calc(100vw - 32px));
+  overflow-x: hidden;
+}
+
+.df-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 0 20px 20px;
+}
+
+.df-body > * {
+  min-width: 0;
+}
+
+.df-pad {
+  padding: 0 20px 20px;
+}
+
+.df-body h4 {
+  margin: 8px 0 0;
+  color: var(--heading);
+  font-size: 14px;
+}
+
+.df-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.df-original {
+  margin: 0;
+  font-size: 12px;
+}
+
+.df-alerts,
+.df-comments {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.df-alerts > li {
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.df-alert-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.df-alert-head strong {
+  color: var(--heading);
+}
+
+.df-desc {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.df-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.df-ev {
+  max-width: 100%;
+  padding: 3px 8px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.df-ev.bad {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+.df-ev.warn {
+  color: var(--warning-ink);
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+}
+
+.df-comments li {
+  padding: 8px 10px;
+  border-left: 3px solid var(--border);
+}
+
+.df-comments p {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+.df-actions {
+  padding: 12px 0 0 !important;
+  border-top: 1px solid var(--border);
+}
+
+.df-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.df-machine-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.df-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: var(--heading);
+  font-weight: 600;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.df-action.danger {
+  color: var(--danger-ink);
+}
+
+.df-action.active {
+  border-color: var(--accent, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.df-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.df-qtoolbar select {
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--heading);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.df-qactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.df-qactions > span:first-child {
+  margin-right: auto;
+}
+
+.df-notice {
+  flex-basis: 100%;
+  color: var(--heading);
+}
+
+.df-qtable tr.selected {
+  background: var(--info-soft);
+}
+
+.df-qtable td:nth-child(3) .ct-link {
+  padding: 0;
+  font-size: 11px;
+}
+
+.df-header {
+  max-height: 60vh;
+  margin: 0 20px 20px;
+  padding: 12px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--surface-2);
+  border-radius: 8px;
+}
+
 /* ---------- Contratos de fornecedores ---------- */
 .ct-page {
   display: grid;

@@ -1,0 +1,361 @@
+// Menu "Microsoft Defender" do portal: tomar acao sobre incidentes, alertas, maquinas e quarentena.
+// Mesmo app do Graph do Intune/SharePoint. O que cada parte precisa (permissao de APLICATIVO + consentimento):
+//   - incidentes/alertas (Graph): SecurityIncident.ReadWrite.All, SecurityAlert.ReadWrite.All;
+//   - maquinas (API do Defender for Endpoint, "WindowsDefenderATP"): Machine.Read.All, Machine.Isolate,
+//     Machine.Scan, Machine.RestrictExecution, Machine.CollectForensics;
+//   - quarentena de e-mail (Exchange Online, nao existe no Graph): Exchange.ManageAsApp e o app como membro
+//     da funcao "Administrador de Segurança" no Entra ID.
+// Toda alteracao passa pelo auditMutations do servidor (data/audit.log) e leva o nome de quem fez.
+
+import type { AuthUser } from "./auth";
+import { graph, graphAll, graphWrite, msRoles, msToken } from "./defenderClient";
+import { intuneConfig } from "./config";
+
+class BadRequest extends Error {
+  status = 400;
+}
+
+const MDE_SCOPE = "https://api.securitycenter.microsoft.com/.default";
+const MDE_API = "https://api.securitycenter.microsoft.com/api";
+const EXO_SCOPE = "https://outlook.office365.com/.default";
+
+/* ---------- O que esta liberado ---------- */
+export async function defenderCapabilities() {
+  const [graphRoles, mdeRoles, exoRoles] = await Promise.all([msRoles(), msRoles(MDE_SCOPE), msRoles(EXO_SCOPE)]);
+  return {
+    incidents: graphRoles.some((role) => /SecurityIncident\.ReadWrite/.test(role)),
+    alerts: graphRoles.some((role) => /SecurityAlert\.ReadWrite/.test(role)),
+    machines: mdeRoles.some((role) => /^Machine\.Read/.test(role)),
+    machineActions: {
+      isolate: mdeRoles.includes("Machine.Isolate"),
+      scan: mdeRoles.includes("Machine.Scan"),
+      restrict: mdeRoles.includes("Machine.RestrictExecution"),
+      collect: mdeRoles.includes("Machine.CollectForensics"),
+    },
+    quarantine: exoRoles.includes("Exchange.ManageAsApp"),
+  };
+}
+
+/* ---------- Quem esta agindo (UPN do Entra ID a partir do login do AD) ---------- */
+const upnCache = new Map<string, string>();
+async function actorUpn(user?: AuthUser) {
+  if (!user) return "";
+  const login = user.login.toLowerCase();
+  if (upnCache.has(login)) return upnCache.get(login)!;
+  let upn = "";
+  try {
+    const result = await graph<{ value: { userPrincipalName: string }[] }>(
+      `/users?$filter=onPremisesSamAccountName eq '${login.replace(/'/g, "''")}'&$select=userPrincipalName&$count=true`,
+      { ConsistencyLevel: "eventual" },
+    );
+    upn = result.value[0]?.userPrincipalName || "";
+  } catch {
+    upn = "";
+  }
+  upnCache.set(login, upn);
+  return upn;
+}
+
+const byWho = (user?: AuthUser) => (user ? `${user.name || user.login} (${user.login}) pelo portal NOC` : "portal NOC");
+
+/* ---------- Incidentes e alertas (Graph) ---------- */
+const INCIDENT_STATUS = ["active", "inProgress", "resolved", "redirected"];
+const CLASSIFICATION = ["unknown", "falsePositive", "truePositive", "informationalExpectedActivity"];
+const DETERMINATION = [
+  "unknown", "apt", "malware", "securityPersonnel", "securityTesting", "unwantedSoftware", "other", "multiStagedAttack",
+  "compromisedAccount", "phishing", "maliciousUserActivity", "notMalicious", "notEnoughDataToValidate", "confirmedActivity", "lineOfBusinessApplication",
+];
+
+type Incident = {
+  id: string;
+  displayName: string;
+  severity: string;
+  status: string;
+  classification?: string;
+  determination?: string;
+  assignedTo?: string | null;
+  createdDateTime: string;
+  lastUpdateDateTime: string;
+  incidentWebUrl?: string;
+  customTags?: string[];
+  comments?: { comment: string; createdByDisplayName?: string; createdDateTime?: string }[];
+  alerts?: Record<string, unknown>[];
+};
+
+export async function listIncidents(status = "open") {
+  const filter = status === "all" ? "" : status === "open" ? "&$filter=status ne 'resolved'" : `&$filter=status eq '${INCIDENT_STATUS.includes(status) ? status : "active"}'`;
+  const incidents = await graphAll<Incident>(`/security/incidents?$top=50${filter}`, 6);
+  return {
+    incidents: incidents
+      .map(({ alerts: _alerts, ...incident }) => incident)
+      .sort((a, b) => b.createdDateTime.localeCompare(a.createdDateTime)),
+  };
+}
+
+export async function getIncident(id: string) {
+  const incident = await graph<Incident>(`/security/incidents/${encodeURIComponent(id)}?$expand=alerts`);
+  return {
+    incident: {
+      ...incident,
+      alerts: (incident.alerts || []).map((alert) => ({
+        id: alert.id,
+        title: alert.title,
+        severity: alert.severity,
+        status: alert.status,
+        category: alert.category,
+        serviceSource: alert.serviceSource,
+        description: alert.description,
+        recommendedActions: alert.recommendedActions,
+        createdDateTime: alert.createdDateTime,
+        alertWebUrl: alert.alertWebUrl,
+        evidence: ((alert.evidence as Record<string, unknown>[]) || []).map((evidence) => ({
+          type: String(evidence["@odata.type"] || "").replace("#microsoft.graph.security.", "").replace(/Evidence$/, ""),
+          verdict: evidence.verdict,
+          remediation: evidence.remediationStatus,
+          device: (evidence as { deviceDnsName?: string }).deviceDnsName,
+          mdeDeviceId: (evidence as { mdeDeviceId?: string }).mdeDeviceId,
+          user: (evidence as { userAccount?: { userPrincipalName?: string; accountName?: string } }).userAccount?.userPrincipalName
+            || (evidence as { userAccount?: { accountName?: string } }).userAccount?.accountName,
+          file: (evidence as { fileDetails?: { fileName?: string; filePath?: string } }).fileDetails?.fileName,
+          ip: (evidence as { ipAddress?: string }).ipAddress,
+          url: (evidence as { url?: string }).url,
+          subject: (evidence as { subject?: string }).subject,
+          sender: (evidence as { senderEmailAddress?: string }).senderEmailAddress,
+          recipient: (evidence as { recipientEmailAddress?: string }).recipientEmailAddress,
+        })),
+      })),
+    },
+  };
+}
+
+function cleanUpdate(body: Record<string, unknown>) {
+  const update: Record<string, unknown> = {};
+  if (body.status !== undefined) {
+    if (!INCIDENT_STATUS.includes(String(body.status)) && !["new", "inProgress", "resolved"].includes(String(body.status))) throw new BadRequest("Status inválido.");
+    update.status = body.status;
+  }
+  if (body.classification !== undefined) {
+    if (!CLASSIFICATION.includes(String(body.classification))) throw new BadRequest("Classificação inválida.");
+    update.classification = body.classification;
+  }
+  if (body.determination !== undefined) {
+    if (!DETERMINATION.includes(String(body.determination))) throw new BadRequest("Determinação inválida.");
+    update.determination = body.determination;
+  }
+  return update;
+}
+
+// assignTo: "me" (quem esta logado), "" (ninguem) ou um e-mail/UPN.
+async function resolveAssignee(value: unknown, user?: AuthUser) {
+  if (value === undefined) return undefined;
+  if (value === "me") {
+    const upn = await actorUpn(user);
+    if (!upn) throw new BadRequest("Não achei seu usuário no Microsoft 365 para atribuir.");
+    return upn;
+  }
+  const text = String(value || "").trim();
+  if (text && !/^[^@\s]+@[^@\s]+$/.test(text)) throw new BadRequest("Responsável deve ser um e-mail.");
+  return text;
+}
+
+export async function updateIncident(id: string, body: Record<string, unknown>, user?: AuthUser) {
+  const update = cleanUpdate(body);
+  const assignee = await resolveAssignee(body.assignTo, user);
+  if (assignee !== undefined) update.assignedTo = assignee;
+  if (!Object.keys(update).length && !body.comment) throw new BadRequest("Nada para alterar.");
+  if (Object.keys(update).length) await graphWrite("PATCH", `/security/incidents/${encodeURIComponent(id)}`, update);
+  if (body.comment || Object.keys(update).length) {
+    const what = [update.status && `status ${update.status}`, update.classification && `classificação ${update.classification}`, update.determination && `determinação ${update.determination}`, assignee !== undefined && `responsável ${assignee || "ninguém"}`]
+      .filter(Boolean)
+      .join(", ");
+    const comment = [String(body.comment || "").trim(), what ? `[${what}]` : ""].filter(Boolean).join(" ");
+    await graphWrite("POST", `/security/incidents/${encodeURIComponent(id)}/comments`, { "@odata.type": "microsoft.graph.security.alertComment", comment: `${comment} — ${byWho(user)}` });
+  }
+  return getIncident(id);
+}
+
+export async function updateAlert(id: string, body: Record<string, unknown>, user?: AuthUser) {
+  const update = cleanUpdate(body);
+  const assignee = await resolveAssignee(body.assignTo, user);
+  if (assignee !== undefined) update.assignedTo = assignee;
+  if (Object.keys(update).length) await graphWrite("PATCH", `/security/alerts_v2/${encodeURIComponent(id)}`, update);
+  if (body.comment) {
+    await graphWrite("POST", `/security/alerts_v2/${encodeURIComponent(id)}/comments`, { "@odata.type": "microsoft.graph.security.alertComment", comment: `${String(body.comment).trim()} — ${byWho(user)}` });
+  }
+  return { ok: true };
+}
+
+/* ---------- Maquinas (Defender for Endpoint) ---------- */
+async function mde<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${MDE_API}${path}`, {
+    method,
+    signal: AbortSignal.timeout(25000),
+    headers: { Authorization: `Bearer ${await msToken(MDE_SCOPE)}`, "Content-Type": "application/json", Accept: "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  const payload = (text ? JSON.parse(text) : {}) as T & { error?: { message?: string } };
+  if (!response.ok) {
+    const message = payload.error?.message || `erro ${response.status}`;
+    throw new Error(/Missing application roles|required roles/i.test(message)
+      ? `Defender for Endpoint: falta a permissão ${message.match(/required roles: ([\w.]+)/)?.[1] || ""} no app (API WindowsDefenderATP).`
+      : `Defender for Endpoint: ${message.slice(0, 200)}`);
+  }
+  return payload;
+}
+
+export async function listMachines() {
+  const [machines, actions] = await Promise.all([
+    mde<{ value: Record<string, unknown>[] }>("GET", "/machines?$top=1000"),
+    mde<{ value: Record<string, unknown>[] }>("GET", "/machineactions?$top=100&$orderby=creationDateTimeUtc desc").catch(() => ({ value: [] })),
+  ]);
+  return {
+    machines: machines.value.map((machine) => ({
+      id: String(machine.id),
+      name: String(machine.computerDnsName || "").split(".")[0],
+      os: [machine.osPlatform, machine.version].filter(Boolean).join(" "),
+      health: String(machine.healthStatus || ""),
+      risk: String(machine.riskScore || ""),
+      exposure: String(machine.exposureLevel || ""),
+      av: String(machine.defenderAvStatus || ""),
+      onboarding: String(machine.onboardingStatus || ""),
+      lastSeen: String(machine.lastSeen || ""),
+      ip: String(machine.lastIpAddress || ""),
+      user: String((machine.loggedOnUsers as { accountName?: string }[] | undefined)?.[0]?.accountName || ""),
+    })),
+    actions: actions.value.map((action) => ({
+      id: String(action.id),
+      machineId: String(action.machineId),
+      machine: String(action.computerDnsName || "").split(".")[0],
+      type: String(action.type),
+      status: String(action.status),
+      requestor: String(action.requestor || ""),
+      comment: String(action.requestorComment || ""),
+      created: String(action.creationDateTimeUtc || ""),
+    })),
+  };
+}
+
+const MACHINE_ACTIONS: Record<string, { path: string; body: (comment: string, option: string) => Record<string, unknown> }> = {
+  isolate: { path: "isolate", body: (comment, option) => ({ Comment: comment, IsolationType: option === "Selective" ? "Selective" : "Full" }) },
+  unisolate: { path: "unisolate", body: (comment) => ({ Comment: comment }) },
+  scan: { path: "runAntiVirusScan", body: (comment, option) => ({ Comment: comment, ScanType: option === "Full" ? "Full" : "Quick" }) },
+  restrict: { path: "restrictCodeExecution", body: (comment) => ({ Comment: comment }) },
+  unrestrict: { path: "unrestrictCodeExecution", body: (comment) => ({ Comment: comment }) },
+  collect: { path: "collectInvestigationPackage", body: (comment) => ({ Comment: comment }) },
+};
+
+export async function machineAction(id: string, body: Record<string, unknown>, user?: AuthUser) {
+  const action = MACHINE_ACTIONS[String(body.action)];
+  if (!action) throw new BadRequest("Ação inválida.");
+  const reason = String(body.comment || "").trim();
+  if (reason.length < 5) throw new BadRequest("Escreva o motivo (aparece no Defender).");
+  const result = await mde<Record<string, unknown>>("POST", `/machines/${encodeURIComponent(id)}/${action.path}`, action.body(`${reason} — ${byWho(user)}`, String(body.option || "")));
+  return { ok: true, actionId: result.id, status: result.status };
+}
+
+/* ---------- Quarentena de e-mail (Exchange Online) ---------- */
+// O Exchange Online nao expoe a quarentena no Graph; os cmdlets rodam pelo mesmo endpoint REST que o
+// modulo ExchangeOnlineManagement usa (InvokeCommand), com token de aplicativo.
+let orgDomain = "";
+async function exoOrganization() {
+  if (orgDomain) return orgDomain;
+  const org = await graph<{ value: { verifiedDomains: { name: string; isInitial: boolean }[] }[] }>("/organization?$select=verifiedDomains");
+  orgDomain = org.value[0]?.verifiedDomains.find((domain) => domain.isInitial)?.name || "";
+  if (!orgDomain) throw new Error("Não achei o domínio inicial (onmicrosoft.com) do tenant.");
+  return orgDomain;
+}
+
+async function exo<T = Record<string, unknown>[]>(cmdlet: string, parameters: Record<string, unknown>): Promise<T> {
+  const organization = await exoOrganization();
+  const response = await fetch(`https://outlook.office365.com/adminapi/beta/${encodeURIComponent(intuneConfig.tenantId!)}/InvokeCommand`, {
+    method: "POST",
+    signal: AbortSignal.timeout(60000),
+    headers: {
+      Authorization: `Bearer ${await msToken(EXO_SCOPE)}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "X-ResponseFormat": "json",
+      "X-AnchorMailbox": `UPN:SystemMailbox{bb558c35-97f1-4cb9-8ff7-d53741dc928c}@${organization}`,
+    },
+    body: JSON.stringify({ CmdletInput: { CmdletName: cmdlet, Parameters: parameters } }),
+  });
+  const text = await response.text();
+  let payload: { value?: T; error?: { message?: string; details?: { message?: string }[] } } = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Exchange Online respondeu ${response.status}.`);
+  }
+  if (!response.ok) {
+    const message = payload.error?.details?.[0]?.message || payload.error?.message || `erro ${response.status}`;
+    throw new Error(response.status === 401 || response.status === 403 || /not have|role|denied|unauthorized/i.test(message)
+      ? `Exchange Online recusou (${message.slice(0, 160)}). Confira Exchange.ManageAsApp e o app na função Administrador de Segurança.`
+      : `Exchange Online: ${message.slice(0, 200)}`);
+  }
+  return (payload.value ?? ([] as unknown)) as T;
+}
+
+const QUARANTINE_TYPES = ["Spam", "HighConfSpam", "Phish", "HighConfPhish", "Malware", "Bulk", "SPOOF", "TransportRule", "FileTypeBlock"];
+
+export async function listQuarantine(query: Record<string, unknown>) {
+  const days = Math.min(30, Math.max(1, Number(query.days) || 7));
+  const parameters: Record<string, unknown> = {
+    StartReceivedDate: new Date(Date.now() - days * 864e5).toISOString(),
+    EndReceivedDate: new Date().toISOString(),
+    PageSize: 500,
+    Page: 1,
+  };
+  if (QUARANTINE_TYPES.includes(String(query.type))) parameters.QuarantineTypes = [String(query.type)];
+  if (query.released === "false") parameters.ReleaseStatus = ["NotReleased"];
+  const recipient = String(query.recipient || "").trim();
+  if (recipient) parameters.RecipientAddress = [recipient];
+  const rows = await exo<Record<string, unknown>[]>("Get-QuarantineMessage", parameters);
+  return {
+    messages: rows.map((row) => ({
+      identity: String(row.Identity || ""),
+      received: String(row.ReceivedTime || ""),
+      sender: String(row.SenderAddress || ""),
+      recipients: (row.RecipientAddress as string[] | undefined) || [],
+      subject: String(row.Subject || ""),
+      type: String(row.QuarantineTypes || row.Type || ""),
+      policy: String(row.PolicyName || ""),
+      released: String(row.ReleaseStatus || ""),
+      size: Number(row.Size || 0),
+      expires: String(row.Expires || ""),
+      direction: String(row.Direction || ""),
+    })),
+  };
+}
+
+export async function quarantineHeader(identity: string) {
+  const result = await exo<{ Header?: string }[]>("Get-QuarantineMessageHeader", { Identity: identity });
+  return { header: String(result[0]?.Header || "") };
+}
+
+export async function quarantineAction(body: Record<string, unknown>, user?: AuthUser) {
+  const identities = (Array.isArray(body.identities) ? body.identities : [])
+    .map(String)
+    .filter((identity) => /^[\w-]+\\[\w-]+$/.test(identity))
+    .slice(0, 50);
+  if (!identities.length) throw new BadRequest("Selecione ao menos uma mensagem.");
+  const action = String(body.action);
+  const results: { identity: string; ok: boolean; error?: string }[] = [];
+  for (const identity of identities) {
+    try {
+      if (action === "release") {
+        // Libera para todos os destinatarios; opcional: avisar a Microsoft que foi falso positivo.
+        await exo("Release-QuarantineMessage", { Identity: identity, ReleaseToAll: true, ReportFalsePositive: body.reportFalsePositive === true });
+      } else if (action === "delete") {
+        await exo("Delete-QuarantineMessage", { Identity: identity });
+      } else {
+        throw new BadRequest("Ação inválida.");
+      }
+      results.push({ identity, ok: true });
+    } catch (error) {
+      if (error instanceof BadRequest) throw error;
+      results.push({ identity, ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { ok: results.every((result) => result.ok), results, by: byWho(user) };
+}
