@@ -133,6 +133,14 @@ const MACHINE_ACTION_NAMES: Record<string, string> = {
   UnrestrictCodeExecution: "Liberar apps",
   CollectInvestigationPackage: "Coletar pacote",
 };
+const LEVELS: Record<string, string> = { High: "Alto", Medium: "Médio", Low: "Baixo", Informational: "Info", None: "Nenhum" };
+const HEALTH: Record<string, string> = {
+  Active: "Ativo",
+  Inactive: "Inativo",
+  ImpairedCommunication: "Comunicação com falha",
+  NoSensorData: "Sem dados do sensor",
+  NoSensorDataImpairedCommunication: "Sem dados / comunicação com falha",
+};
 const ACTION_STATUS: Record<string, string> = { Pending: "Pendente", InProgress: "Em execução", Succeeded: "Concluída", Failed: "Falhou", TimeOut: "Expirou", Cancelled: "Cancelada" };
 
 const fmtDateTime = (iso?: string) => (iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
@@ -442,6 +450,8 @@ function MachinesTab({ caps }: { caps: Capabilities | null }) {
   const [error, setError] = useState("");
   const [term, setTerm] = useState("");
   const [onlyRisk, setOnlyRisk] = useState(false);
+  // O Defender tambem lista aparelhos so "descobertos" na rede (sem o agente); por padrao, so os com Defender.
+  const [showDiscovered, setShowDiscovered] = useState(false);
   const [selected, setSelected] = useState<Machine | null>(null);
 
   const load = useCallback(async () => {
@@ -471,7 +481,8 @@ function MachinesTab({ caps }: { caps: Capabilities | null }) {
   }
 
   const riskRank: Record<string, number> = { High: 0, Medium: 1, Low: 2, Informational: 3, None: 4 };
-  const rows = (data?.machines || [])
+  const managed = (data?.machines || []).filter((machine) => machine.onboarding === "Onboarded");
+  const rows = (showDiscovered ? data?.machines || [] : managed)
     .filter((machine) => !onlyRisk || ["High", "Medium"].includes(machine.risk))
     .filter((machine) => !term.trim() || `${machine.name} ${machine.user} ${machine.ip}`.toLowerCase().includes(term.trim().toLowerCase()))
     .sort((a, b) => (riskRank[a.risk] ?? 5) - (riskRank[b.risk] ?? 5) || a.name.localeCompare(b.name));
@@ -482,15 +493,16 @@ function MachinesTab({ caps }: { caps: Capabilities | null }) {
       {error ? <div className="pm-error" role="alert"><AlertTriangle size={16} /><span>{error}</span></div> : null}
       {data ? (
         <section className="ct-kpis">
-          <div className="ct-kpi"><span>Máquinas no Defender</span><strong>{data.machines.length}</strong><small>{data.machines.filter((machine) => machine.health === "Active").length} ativas</small></div>
-          <div className={`ct-kpi${data.machines.some((machine) => machine.risk === "High") ? " tone-critical" : ""}`}><span>Risco alto</span><strong>{data.machines.filter((machine) => machine.risk === "High").length}</strong><small>{data.machines.filter((machine) => machine.risk === "Medium").length} com risco médio</small></div>
-          <div className={`ct-kpi${data.machines.some((machine) => machine.health !== "Active") ? " tone-warning" : ""}`}><span>Sem comunicar</span><strong>{data.machines.filter((machine) => machine.health !== "Active").length}</strong><small>inativas ou com sensor com problema</small></div>
+          <div className="ct-kpi"><span>Máquinas com Defender</span><strong>{managed.length}</strong><small>{managed.filter((machine) => machine.health === "Active").length} ativas · {data.machines.length - managed.length} só descobertas na rede</small></div>
+          <div className={`ct-kpi${managed.some((machine) => machine.risk === "High") ? " tone-critical" : ""}`}><span>Risco alto</span><strong>{managed.filter((machine) => machine.risk === "High").length}</strong><small>{managed.filter((machine) => machine.risk === "Medium").length} com risco médio</small></div>
+          <div className={`ct-kpi${managed.some((machine) => machine.health !== "Active") ? " tone-warning" : ""}`}><span>Sem comunicar</span><strong>{managed.filter((machine) => machine.health !== "Active").length}</strong><small>inativas ou com sensor com problema</small></div>
           <div className="ct-kpi"><span>Ações recentes</span><strong>{data.actions.filter((action) => ["Pending", "InProgress"].includes(action.status)).length}</strong><small>pendentes ou em execução</small></div>
         </section>
       ) : null}
       <section className="ct-table-card">
         <div className="ct-toolbar">
           <label className="ct-check"><input type="checkbox" checked={onlyRisk} onChange={(event) => setOnlyRisk(event.target.checked)} /> <span>Só risco alto/médio</span></label>
+          <label className="ct-check"><input type="checkbox" checked={showDiscovered} onChange={(event) => setShowDiscovered(event.target.checked)} /> <span>Mostrar aparelhos sem Defender</span></label>
           <label className="pm-search">
             <Search size={16} />
             <input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Buscar máquina, usuário ou IP" />
@@ -505,7 +517,6 @@ function MachinesTab({ caps }: { caps: Capabilities | null }) {
                 <th>Risco</th>
                 <th>Exposição</th>
                 <th>Sensor</th>
-                <th>Antivírus</th>
                 <th>Última ação</th>
                 <th className="num">Visto</th>
               </tr>
@@ -516,17 +527,16 @@ function MachinesTab({ caps }: { caps: Capabilities | null }) {
                 return (
                   <tr key={machine.id} onClick={() => setSelected(machine)}>
                     <td><strong className="ct-title">{machine.name}</strong><small className="ct-cat">{[machine.user, machine.os, machine.ip].filter(Boolean).join(" · ")}</small></td>
-                    <td><span className={`ct-pill tone-${machine.risk === "High" ? "critical" : machine.risk === "Medium" ? "warning" : "muted"}`}>{machine.risk || "—"}</span></td>
-                    <td>{machine.exposure || "—"}</td>
-                    <td>{machine.health === "Active" ? "Ativo" : machine.health || "—"}</td>
-                    <td>{machine.av || "—"}</td>
+                    <td><span className={`ct-pill tone-${machine.risk === "High" ? "critical" : machine.risk === "Medium" ? "warning" : "muted"}`}>{LEVELS[machine.risk] || machine.risk || "—"}</span></td>
+                    <td>{LEVELS[machine.exposure] || machine.exposure || "—"}</td>
+                    <td>{HEALTH[machine.health] || machine.health || "—"}</td>
                     <td>{action ? `${MACHINE_ACTION_NAMES[action.type] || action.type} · ${ACTION_STATUS[action.status] || action.status}` : <span className="ct-muted">—</span>}</td>
                     <td className="num">{fmtDateTime(machine.lastSeen)}</td>
                   </tr>
                 );
               })}
-              {data && !rows.length ? <tr><td colSpan={7} className="ct-empty-row">Nenhuma máquina neste filtro.</td></tr> : null}
-              {!data && !error ? <tr><td colSpan={7} className="ct-empty-row">Carregando máquinas do Defender...</td></tr> : null}
+              {data && !rows.length ? <tr><td colSpan={6} className="ct-empty-row">Nenhuma máquina neste filtro.</td></tr> : null}
+              {!data && !error ? <tr><td colSpan={6} className="ct-empty-row">Carregando máquinas do Defender...</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -581,7 +591,8 @@ function MachineModal({ machine, caps, actions, onClose, onDone }: { machine: Ma
         </header>
         <div className="df-body">
           <div className="df-meta">
-            <span className={`ct-pill tone-${machine.risk === "High" ? "critical" : machine.risk === "Medium" ? "warning" : "muted"}`}>Risco {machine.risk || "—"}</span>
+            <span className={`ct-pill tone-${machine.risk === "High" ? "critical" : machine.risk === "Medium" ? "warning" : "muted"}`}>Risco {LEVELS[machine.risk] || machine.risk || "—"}</span>
+            <span>Sensor {HEALTH[machine.health] || machine.health || "—"}</span>
             <span>{machine.os}</span>
             <span>{machine.user || "sem usuário"}</span>
             <span>IP {machine.ip || "—"}</span>

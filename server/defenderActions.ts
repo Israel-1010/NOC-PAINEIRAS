@@ -7,6 +7,7 @@
 //     da funcao "Administrador de Segurança" no Entra ID.
 // Toda alteracao passa pelo auditMutations do servidor (data/audit.log) e leva o nome de quem fez.
 
+import https from "node:https";
 import type { AuthUser } from "./auth";
 import { graph, graphAll, graphWrite, msRoles, msToken } from "./defenderClient";
 import { intuneConfig } from "./config";
@@ -266,32 +267,48 @@ async function exoOrganization() {
   return orgDomain;
 }
 
+// node:https em vez de fetch: quando o Exchange recusa (403 com corpo vazio), o fetch do Node ficava
+// esperando para sempre e a tela travava.
+function httpsPost(url: string, headers: Record<string, string>, body: string, timeoutMs: number) {
+  return new Promise<{ status: number; text: string }>((resolve, reject) => {
+    const request = https.request(url, { method: "POST", timeout: timeoutMs, headers: { ...headers, "Content-Length": Buffer.byteLength(body) } }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => resolve({ status: response.statusCode || 0, text: Buffer.concat(chunks).toString("utf8").replace(/\0/g, "").trim() }));
+      response.on("error", reject);
+    });
+    request.on("timeout", () => request.destroy(new Error("Exchange Online demorou demais para responder.")));
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
 async function exo<T = Record<string, unknown>[]>(cmdlet: string, parameters: Record<string, unknown>): Promise<T> {
   const organization = await exoOrganization();
-  const response = await fetch(`https://outlook.office365.com/adminapi/beta/${encodeURIComponent(intuneConfig.tenantId!)}/InvokeCommand`, {
-    method: "POST",
-    signal: AbortSignal.timeout(60000),
-    headers: {
+  const response = await httpsPost(
+    `https://outlook.office365.com/adminapi/beta/${encodeURIComponent(intuneConfig.tenantId!)}/InvokeCommand`,
+    {
       Authorization: `Bearer ${await msToken(EXO_SCOPE)}`,
       "Content-Type": "application/json",
       Accept: "application/json",
       "X-ResponseFormat": "json",
       "X-AnchorMailbox": `UPN:SystemMailbox{bb558c35-97f1-4cb9-8ff7-d53741dc928c}@${organization}`,
     },
-    body: JSON.stringify({ CmdletInput: { CmdletName: cmdlet, Parameters: parameters } }),
-  });
-  const text = await response.text();
+    JSON.stringify({ CmdletInput: { CmdletName: cmdlet, Parameters: parameters } }),
+    60000,
+  );
   let payload: { value?: T; error?: { message?: string; details?: { message?: string }[] } } = {};
   try {
-    payload = text ? JSON.parse(text) : {};
+    payload = response.text ? JSON.parse(response.text) : {};
   } catch {
-    throw new Error(`Exchange Online respondeu ${response.status}.`);
+    payload = {};
   }
-  if (!response.ok) {
-    const message = payload.error?.details?.[0]?.message || payload.error?.message || `erro ${response.status}`;
-    throw new Error(response.status === 401 || response.status === 403 || /not have|role|denied|unauthorized/i.test(message)
-      ? `Exchange Online recusou (${message.slice(0, 160)}). Confira Exchange.ManageAsApp e o app na função Administrador de Segurança.`
-      : `Exchange Online: ${message.slice(0, 200)}`);
+  if (response.status < 200 || response.status >= 300) {
+    const message = payload.error?.details?.[0]?.message || payload.error?.message || "";
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`Exchange Online recusou o acesso do app (${response.status}${message ? `: ${message.slice(0, 160)}` : ""}). Falta o app ter a função "Administrador de Segurança" no Entra ID (pode levar até 1 h para valer depois de atribuída).`);
+    }
+    throw new Error(`Exchange Online: ${message.slice(0, 200) || `erro ${response.status}`}`);
   }
   return (payload.value ?? ([] as unknown)) as T;
 }
