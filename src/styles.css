@@ -13985,3 +13985,485 @@ thead .ac-person-col {
   padding: 4px 0;
   border-bottom: 1px solid var(--noc-line);
 }
+/* ---------- NOC: moldura e paginas guiadas por "com problema" (revisao de telas, leva 2) ---------- */
+
+/* Estado global maior que o relogio: e a primeira coisa lida de longe */
+.noc-global {
+  padding: 10px 18px;
+}
+
+.noc-global strong {
+  font-size: 1.9em;
+  line-height: 1.05;
+}
+
+.noc-global small {
+  font-size: 0.9em;
+}
+
+.noc-clock strong {
+  font-size: 1.4em;
+}
+
+/* Na TV os controles somem; aparecem so com mouse/teclado */
+.noc-kiosk .noc-controls {
+  opacity: 0;
+}
+
+.noc-kiosk .noc-controls:hover,
+.noc-kiosk .noc-controls:focus-within {
+  opacity: 1;
+}
+
+/* Titulo da pagina com as pilulas de todas as paginas logo abaixo */
+.noc-page-title {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.noc-chips {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.noc-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 11px;
+  color: var(--noc-ink-2);
+  background: var(--noc-panel);
+  border: 1px solid var(--noc-line);
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.noc-chips button i {
+  width: 9px;
+  height: 9px;
+  background: var(--tone, var(--noc-unknown));
+  border-radius: 50%;
+}
+
+.noc-chips button.tone-critical,
+.noc-chips button.tone-warning {
+  color: var(--noc-ink);
+  border-color: color-mix(in srgb, var(--tone) 60%, transparent);
+}
+
+.noc-chips button.active {
+  color: #fff;
+  background: color-mix(in srgb, var(--accent) 24%, var(--noc-panel));
+  border-color: var(--accent);
+}
+
+/* Quadros da visao geral: fora do normal ganha fundo tingido (antes so uma borda de 4 px) */
+.noc-domain.tone-warning,
+.noc-domain.tone-critical {
+  background: color-mix(in srgb, var(--tone) 13%, var(--noc-panel));
+  border-color: color-mix(in srgb, var(--tone) 45%, var(--noc-line));
+}
+
+.noc-domain > strong.is-text {
+  overflow: hidden;
+  font-size: 1.75em;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Subtitulo dos quadros em ate 2 linhas (antes cortava com reticencias) */
+.noc-domain > small {
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.noc-overview-side {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.noc-net-now {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.noc-net-now-figures {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 8px;
+}
+
+.noc-net-now-figures div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.noc-net-now-figures strong {
+  font-size: 1.8em;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.noc-net-peak {
+  margin-top: 6px;
+  color: var(--noc-muted);
+  font-size: 0.9em;
+}
+
+/* Linha de KPIs que se divide entre os presentes (2 a 4) */
+.noc-kpirow {
+  grid-template-columns: none;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+}
+
+.noc-kpirow .tone-unknown {
+  --tone: var(--noc-unknown);
+}
+
+.noc-kpirow > div[class*="tone-"] strong {
+  color: var(--tone);
+}
+
+/* Paginas novas: KPIs em cima, conteudo no meio, rodape opcional */
+.noc-sec2,
+.noc-srv2,
+.noc-acc2,
+.noc-traffic {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+}
+
+.noc-sec2 {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.noc-srv2 {
+  grid-template-rows: auto minmax(0, 1.25fr) minmax(0, 1fr);
+}
+
+.noc-acc2 {
+  grid-template-rows: auto minmax(0, 1.4fr) minmax(0, 1fr);
+}
+
+.noc-traffic {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.noc-cols3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  min-height: 0;
+}
+
+.noc-cols3 > .noc-card,
+.noc-srv2 > .noc-card,
+.noc-acc2 > .noc-card,
+.noc-unifi2-body > .noc-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.noc-foot-lines {
+  display: grid;
+  gap: 4px;
+  padding: 10px 16px;
+  color: var(--noc-ink-2);
+  background: var(--noc-panel);
+  border: 1px solid var(--noc-line);
+  border-radius: 12px;
+}
+
+.noc-foot-lines b {
+  color: var(--noc-ink);
+}
+
+.noc-foot-lines small {
+  color: var(--noc-muted);
+}
+
+/* Lista "Com problema": uma linha grande por excecao */
+.noc-issues {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.noc-issues li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  background: color-mix(in srgb, var(--tone) 12%, var(--noc-panel-2));
+  border-left: 4px solid var(--tone);
+  border-radius: 10px;
+}
+
+.noc-issues li > svg {
+  color: var(--tone);
+}
+
+.noc-issues li.noc-more {
+  background: none;
+  border-left: 0;
+}
+
+/* Todos os aparelhos so com nome e cor */
+.noc-names-card .noc-names {
+  flex: 1;
+}
+
+.noc-names {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10em, 1fr));
+  align-content: start;
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.noc-names.size-sm {
+  grid-template-columns: repeat(auto-fill, minmax(8.5em, 1fr));
+  font-size: 0.92em;
+}
+
+.noc-names.size-xs {
+  grid-template-columns: repeat(auto-fill, minmax(7.5em, 1fr));
+  gap: 4px;
+  font-size: 0.85em;
+}
+
+.noc-names span {
+  display: block;
+  padding: 5px 8px;
+  overflow: hidden;
+  color: var(--noc-ink-2);
+  background: var(--noc-panel-2);
+  border-radius: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noc-names span::before {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: var(--tone, var(--noc-unknown));
+  border-radius: 50%;
+  content: "";
+}
+
+.noc-names span.tone-critical,
+.noc-names span.tone-warning {
+  color: var(--noc-ink);
+  background: color-mix(in srgb, var(--tone) 20%, var(--noc-panel-2));
+  font-weight: 700;
+}
+
+.noc-names .noc-names-more {
+  color: var(--noc-muted);
+  background: none;
+}
+
+.noc-names .noc-names-more::before {
+  display: none;
+}
+
+/* Recursos (Docker, Dell, VPN): uma linha por item */
+.noc-res {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.noc-res li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--noc-panel-2);
+  border-left: 3px solid var(--tone, var(--noc-line));
+  border-radius: 8px;
+}
+
+.noc-res strong {
+  overflow: hidden;
+  font-size: 1.05em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noc-res span {
+  color: var(--noc-ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.noc-res em {
+  color: var(--tone, inherit);
+  font-style: normal;
+  font-weight: 800;
+}
+
+.noc-res li.noc-more {
+  background: none;
+  border-left: 0;
+}
+
+/* Internet: FortiGate, tuneis caidos e VPN agora */
+.noc-fw.noc-fw3 {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.noc-fw-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  overflow: hidden;
+  color: var(--noc-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noc-fw-line svg {
+  flex: 0 0 auto;
+  color: var(--tone, var(--noc-muted));
+}
+
+/* Acesso: conjunto de catraca ok vira uma pilula */
+.noc-setchips {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: start;
+  gap: 8px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.noc-setchips span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  color: var(--noc-ink-2);
+  background: var(--noc-panel-2);
+  border-left: 3px solid var(--noc-good);
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.noc-setchips svg {
+  color: var(--noc-good);
+}
+
+.noc-setchips small {
+  color: var(--noc-muted);
+  font-weight: 600;
+}
+
+/* UniFi: com problema + todos os aparelhos, log numa linha */
+.noc-unifi2-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.noc-logline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 0;
+  overflow: hidden;
+  color: var(--noc-ink-2);
+  max-height: 2.8em;
+}
+
+.noc-logline .drop {
+  color: #ffb4ad;
+}
+
+/* Rodape: um alerta por vez (parado) e o estado das fontes */
+.noc-foot {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+.noc-ticker-item {
+  display: block;
+  overflow: hidden;
+  color: var(--noc-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noc-ticker-item b {
+  margin-right: 6px;
+  padding: 1px 6px;
+  color: #0b1020;
+  background: var(--sev);
+  border-radius: 4px;
+  font-size: 0.8em;
+  text-transform: uppercase;
+}
+
+.noc-ticker-item small {
+  margin-left: 6px;
+  color: var(--noc-muted);
+}
+
+.noc-sources {
+  display: inline-flex;
+  gap: 12px;
+  color: var(--noc-muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.noc-sources span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.noc-sources i {
+  width: 8px;
+  height: 8px;
+  background: var(--tone);
+  border-radius: 50%;
+}
+
+.noc-sources .tone-critical {
+  color: var(--noc-critical);
+  font-weight: 700;
+}
+
+/* Trafego: poucas linhas por cartao, letra maior para leitura de longe */
+.noc-traffic .noc-faz-list {
+  gap: 14px;
+  font-size: 1.3em;
+}

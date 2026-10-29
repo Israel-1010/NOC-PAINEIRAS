@@ -1,19 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Area, AreaChart, Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   Activity,
   AlertOctagon,
   AlertTriangle,
   ArrowDown,
   ArrowUp,
-  Bug,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Cpu,
   Flower2,
   Globe,
-  HardDrive,
   KeyRound,
   Maximize2,
   MemoryStick,
@@ -250,56 +248,47 @@ type NocData = {
 const sourceDown = (data: NocData | null, id: string) => data?.sources?.find((source) => source.id === id && !source.ok) || null;
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
-// Paginas fixas; cada controladora UniFi ganha a sua pagina ("unifi:<id>") depois de "internet".
-type NocPage = { id: string; title: string; icon: typeof Activity; controllerId?: string };
-const FIXED_PAGES: NocPage[] = [
-  { id: "overview", title: "Visão geral", icon: Activity },
-  { id: "internet", title: "Internet e Firewall", icon: Globe },
-  { id: "seguranca", title: "Segurança e tráfego (24 h)", icon: Shield },
-  { id: "alertas", title: "Alertas de segurança e antivírus", icon: Bug },
-  { id: "defender", title: "Microsoft Defender", icon: ShieldAlert },
-  { id: "vpn", title: "VPN e acesso remoto", icon: KeyRound },
-  { id: "antenas", title: "Antenas (ping do Zabbix)", icon: Radio },
-  { id: "servidores", title: "Servidores e Datacenter", icon: Server },
-  { id: "acesso", title: "Catracas, totens e impressoras", icon: ScanFace },
-  { id: "videowall", title: "Videowall", icon: MonitorPlay },
-];
+// Pagina do carrossel: short = nome no chip do topo; seconds = tempo base na tela (ajustado pelo estado).
+type NocPage = { id: string; title: string; short: string; icon: typeof Activity; seconds: number; controllerId?: string };
+const PAGE = {
+  overview: { id: "overview", title: "Visão geral", short: "Geral", icon: Activity, seconds: 25 },
+  internet: { id: "internet", title: "Internet, firewall e VPN", short: "Internet", icon: Globe, seconds: 20 },
+  antenas: { id: "antenas", title: "Antenas (ping do Zabbix)", short: "Antenas", icon: Radio, seconds: 15 },
+  seguranca: { id: "seguranca", title: "Segurança", short: "Segurança", icon: ShieldAlert, seconds: 20 },
+  servidores: { id: "servidores", title: "Servidores e Datacenter", short: "Servidores", icon: Server, seconds: 20 },
+  acesso: { id: "acesso", title: "Acesso e atendimento", short: "Acesso", icon: ScanFace, seconds: 15 },
+  trafego: { id: "trafego", title: "Tráfego da internet · 24 h", short: "Tráfego", icon: Network, seconds: 15 },
+} satisfies Record<string, NocPage>;
 
-// Grupos da pagina "Catracas, totens e impressoras".
-const ACCESS_KEYS = ["catracas", "totens", "impressoras"];
+// Grupos da pagina "Acesso e atendimento" (o videowall entrou aqui; antes tinha pagina propria).
+const ACCESS_KEYS = ["catracas", "totens", "impressoras", "videowall"];
 
+// Ordem: Visao geral, Internet, UniFi, Visao geral de novo, Seguranca, Servidores, Acesso e Trafego
+// (a Visao geral volta no meio da volta para o "esta tudo bem?" nao esperar o carrossel inteiro).
 function buildPages(data: NocData | null): NocPage[] {
   const controllers = data?.unifi?.controllers || [];
   const unifiPages: NocPage[] = controllers.map((controller) => ({
     id: `unifi:${controller.id}`,
     title: `UniFi · ${controller.name}`,
+    short: controller.name,
     icon: controller.aps.length >= controller.switches.length ? Radio : Network,
+    seconds: 15,
     controllerId: controller.id,
   }));
   // Todas as controladoras fora: a pagina continua no carrossel dizendo isso (em vez de sumir).
-  if (!controllers.length && sourceDown(data, "unifi")) unifiPages.push({ id: "unifi-down", title: "UniFi", icon: Radio });
+  if (!controllers.length && sourceDown(data, "unifi")) unifiPages.push({ id: "unifi-down", title: "UniFi", short: "UniFi", icon: Radio, seconds: 10 });
   // Com antenas vindas da UniFi, a grade de ping do Zabbix vira redundante.
   const hasUnifiAps = controllers.some((controller) => controller.ok && controller.aps.length);
   // Paginas de grupo so aparecem se o grupo existir e tiver hosts (ex.: grupo de ping das antenas foi esvaziado).
   const hasHosts = (key: string) => Boolean(data?.groups.find((group) => group.key === key)?.total);
-  const fixed = FIXED_PAGES.filter((page) => {
-    if (page.id === "antenas") return !hasUnifiAps && hasHosts("antenas");
-    if (page.id === "videowall") return !data || hasHosts("videowall");
-    if (page.id === "acesso") return ACCESS_KEYS.some(hasHosts);
-    // So com o FortiAnalyzer configurado no servidor.
-    if (page.id === "seguranca") return Boolean(data?.analyzer);
-    if (page.id === "alertas") return Boolean(data?.analyzer?.alerts);
-    if (page.id === "defender") return Boolean(data?.defender?.checkedAt);
-    if (page.id === "vpn") return Boolean(data?.vpn || data?.analyzer?.vpnUsers?.length);
-    return true;
-  });
-  // Servidores Docker (Beszel) logo depois de "Servidores e Datacenter".
-  const docker: NocPage[] = data?.beszel?.systems.length ? [{ id: "docker", title: "Servidores Docker e containers", icon: HardDrive }] : [];
-  const serversIndex = fixed.findIndex((page) => page.id === "servidores");
-  const withDocker = serversIndex >= 0 ? [...fixed.slice(0, serversIndex + 1), ...docker, ...fixed.slice(serversIndex + 1)] : [...fixed, ...docker];
-  // Controladoras UniFi depois de "Internet e Firewall" (e de "Seguranca" e "VPN", quando existem).
-  const anchor = Math.max(...["internet", "seguranca", "vpn"].map((id) => withDocker.findIndex((page) => page.id === id))) + 1;
-  return [...withDocker.slice(0, anchor), ...unifiPages, ...withDocker.slice(anchor)];
+  const pages: NocPage[] = [PAGE.overview, PAGE.internet, ...unifiPages];
+  if (!hasUnifiAps && hasHosts("antenas")) pages.push(PAGE.antenas);
+  pages.push({ ...PAGE.overview, id: "overview-2", seconds: 15 });
+  if (data?.analyzer || data?.defender) pages.push(PAGE.seguranca);
+  if (!data || hasHosts("servidores") || data.hardware.length || data.beszel?.systems.length) pages.push(PAGE.servidores);
+  if (ACCESS_KEYS.some(hasHosts)) pages.push(PAGE.acesso);
+  if (data?.analyzer) pages.push(PAGE.trafego);
+  return pages;
 }
 
 // Severidades no padrao do Zabbix (sempre com rotulo).
@@ -390,14 +379,15 @@ function AvailabilityBar({ group }: { group: NocGroup }) {
   );
 }
 
-function DomainTile({ title, icon, tone, main, sub, children }: { title: string; icon: React.ReactNode; tone: string; main: string; sub: string; children?: React.ReactNode }) {
+// textMain: o numero grande e um estado escrito ("1 túnel caído"), em letra um pouco menor.
+function DomainTile({ title, icon, tone, main, sub, textMain = false, children }: { title: string; icon: React.ReactNode; tone: string; main: string; sub: string; textMain?: boolean; children?: React.ReactNode }) {
   return (
     <section className={`noc-domain tone-${tone}`}>
       <header>
         <span>{icon} {title}</span>
         <em>{toneIcon(tone, 16)} {toneLabel(tone)}</em>
       </header>
-      <strong>{main}</strong>
+      <strong className={textMain ? "is-text" : undefined}>{main}</strong>
       <small>{sub}</small>
       {children}
     </section>
@@ -545,52 +535,6 @@ function SetCard({ name, hosts, problems }: { name: string; hosts: NocHost[]; pr
   );
 }
 
-function AccessPage({ data }: { data: NocData }) {
-  const group = (key: string) => data.groups.find((entry) => entry.key === key);
-  const turnstiles = group("catracas");
-  const kiosks = group("totens");
-  const printers = group("impressoras");
-  // Catracas agrupadas por conjunto; sem conjunto, cada host vira o proprio "conjunto".
-  const sets = new Map<string, NocHost[]>();
-  for (const host of turnstiles?.hosts || []) {
-    const key = host.set || host.name;
-    sets.set(key, [...(sets.get(key) || []), host]);
-  }
-  const setList = Array.from(sets.entries()).sort((a, b) => {
-    const bad = (hosts: NocHost[]) => hosts.some((host) => host.up === false);
-    return Number(bad(b[1])) - Number(bad(a[1])) || a[0].localeCompare(b[0], "pt-BR", { numeric: true });
-  });
-  const summary = (entry?: NocGroup) => (entry ? `${entry.up}/${entry.total} online` : "");
-  return (
-    <div className="noc-page noc-access">
-      {turnstiles?.total ? (
-        <section className="noc-card noc-access-block">
-          <h3><ScanFace size={20} /> Catracas <small>{setList.length} {setList.length === 1 ? "conjunto" : "conjuntos"} · {summary(turnstiles)}</small></h3>
-          <div className="noc-sets">
-            {setList.map(([name, hosts]) => <SetCard key={name} name={name} hosts={hosts} problems={data.problems} />)}
-          </div>
-        </section>
-      ) : null}
-      {kiosks?.total || printers?.total ? (
-        <div className="noc-access-row">
-          {kiosks?.total ? (
-            <section className="noc-card noc-access-block">
-              <h3><MonitorPlay size={20} /> Totens de pagamento <small>{summary(kiosks)}</small></h3>
-              <DeviceCards group={kiosks} problems={data.problems} />
-            </section>
-          ) : null}
-          {printers?.total ? (
-            <section className="noc-card noc-access-block">
-              <h3><Printer size={20} /> Impressoras <small>{summary(printers)}</small></h3>
-              <DeviceCards group={printers} problems={data.problems} />
-            </section>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function HostGrid({ group, compact }: { group: NocGroup; compact?: boolean }) {
   const allDown = group.total > 3 && group.down === group.total;
   const size = group.total > 60 ? "xs" : group.total > 36 ? "sm" : "md";
@@ -672,210 +616,6 @@ function TrafficMini({ series, height = 110 }: { series: { t: number; in: number
   );
 }
 
-/* ---------- Paginas ---------- */
-
-function OverviewPage({ data }: { data: NocData }) {
-  const group = (key: string) => data.groups.find((entry) => entry.key === key);
-  const zabbixDown = Boolean(sourceDown(data, "zabbix"));
-  const fw = data.firewalls[0];
-  // Link sem coleta nao conta como online nem como offline: deixa o quadro em atencao.
-  const linkStale = (link: NocLink) => Boolean(link.stale && link.configured !== false);
-  const linksOnline = data.links.filter((link) => link.online && !linkStale(link)).length;
-  const linksOffline = data.links.filter((link) => !link.online && !linkStale(link)).length;
-  const linksStale = data.links.filter(linkStale).length;
-  const linkTone = !data.links.length ? "unknown" : linksOffline === data.links.length ? "critical" : linksOffline || linksStale ? "warning" : "good";
-  const fwTone = !fw ? "unknown" : (fw.cpu ?? 0) >= 90 || fw.nodes.some((node) => node.synced === false) ? "critical" : (fw.cpu ?? 0) >= 70 || fw.tunnels.some((tunnel) => !tunnel.up) ? "warning" : "good";
-  const totalIn = data.links.reduce((sum, link) => sum + link.inBps, 0);
-  const totalOut = data.links.reduce((sum, link) => sum + link.outBps, 0);
-  const hwBad = data.hardware.filter((hw) => hw.health !== "ok").length;
-  const bySeverity = [5, 4, 3, 2].map((severity) => ({ severity, count: data.problems.filter((problem) => problem.severity === severity).length }));
-  const combined = useMemo(() => {
-    // Soma dos links; se nenhum link tem dado naquele momento, fica null (buraco), e nao zero.
-    const series = new Map<number, { t: number; in: number | null; out: number | null }>();
-    for (const link of data.traffic?.links || []) {
-      for (const point of link.series) {
-        const entry = series.get(point.t) || { t: point.t, in: null, out: null };
-        if (point.in !== null) entry.in = (entry.in ?? 0) + point.in;
-        if (point.out !== null) entry.out = (entry.out ?? 0) + point.out;
-        series.set(point.t, entry);
-      }
-    }
-    return Array.from(series.values()).sort((a, b) => a.t - b.t);
-  }, [data.traffic]);
-
-  const groupTile = (key: string, title: string, icon: React.ReactNode, extra?: string) => {
-    const entry = group(key);
-    return (
-      <DomainTile title={title} icon={icon} tone={groupTone(entry)} main={entry ? `${entry.up}/${entry.total}` : "—"} sub={entry ? `${entry.down} sem resposta${extra ? ` · ${extra}` : ""}` : zabbixDown ? "Sem coleta do Zabbix" : "Grupo não encontrado no Zabbix"}>
-        {entry ? <AvailabilityBar group={entry} /> : null}
-      </DomainTile>
-    );
-  };
-
-  // Catracas + totens + impressoras num quadro so (aparece quando ha algum cadastrado).
-  const accessTile = () => {
-    const parts = ACCESS_KEYS.map((key) => group(key)).filter(Boolean) as NocGroup[];
-    const total = parts.reduce((sum, entry) => sum + entry.total, 0);
-    if (!total) return null;
-    const up = parts.reduce((sum, entry) => sum + entry.up, 0);
-    const unknown = parts.reduce((sum, entry) => sum + entry.unknown, 0);
-    const combined: NocGroup = { key: "acesso", title: "Acesso e atendimento", total, up, down: total - up - unknown, unknown, hosts: [] };
-    const detail = parts.map((entry) => `${entry.title.toLowerCase()} ${entry.up}/${entry.total}`).join(" · ");
-    return (
-      <DomainTile title="Acesso e atendimento" icon={<ScanFace size={18} />} tone={groupTone(combined)} main={`${up}/${total}`} sub={detail}>
-        <AvailabilityBar group={combined} />
-      </DomainTile>
-    );
-  };
-
-  // Antenas e switches: o numero real vem das controladoras UniFi (estado de cada aparelho na controladora).
-  // Vale o ping do Zabbix quando a UniFi nao cobre a maior parte dos aparelhos (ex.: controladora de
-  // switches ainda sem acesso e a outra so com 6 switches de CFTV).
-  const okControllers = (data.unifi?.controllers || []).filter((controller) => controller.ok);
-  const unifiTile = (kind: "aps" | "switches", zabbixKey: string, title: string, icon: React.ReactNode) => {
-    const devices: { online: boolean }[] = okControllers.flatMap((controller): { online: boolean }[] => controller[kind]);
-    const zabbixTotal = group(zabbixKey)?.total || 0;
-    // Sem UniFi e sem hosts no Zabbix (ex.: so ping ligado e grupo vazio): nao mostra o quadro.
-    if (!devices.length && !zabbixTotal) return null;
-    if (!devices.length || devices.length < zabbixTotal * 0.6) return groupTile(zabbixKey, title, icon);
-    const up = devices.filter((device) => device.online).length;
-    const unifiGroup: NocGroup = { key: zabbixKey, title, total: devices.length, up, down: devices.length - up, unknown: 0, hosts: [] };
-    const failed = (data.unifi?.controllers || []).filter((controller) => !controller.ok).length;
-    const label = kind === "aps" ? "desconectada(s)" : "desconectado(s)";
-    return (
-      <DomainTile
-        title={title}
-        icon={icon}
-        tone={groupTone(unifiGroup)}
-        main={`${up}/${devices.length}`}
-        sub={`${devices.length - up} ${label} · UniFi${failed ? ` (${failed} controladora sem resposta)` : ""}`}
-      >
-        <AvailabilityBar group={unifiGroup} />
-      </DomainTile>
-    );
-  };
-
-  return (
-    <div className="noc-page noc-overview">
-      <div className="noc-domains">
-        <DomainTile
-          title="Internet"
-          icon={<Globe size={18} />}
-          tone={linkTone}
-          main={data.links.length ? `${linksOnline}/${data.links.length}` : "—"}
-          sub={data.links.length ? `↓ ${rate(totalIn)} · ↑ ${rate(totalOut)}${linksStale ? ` · ${linksStale} sem coleta` : ""}` : zabbixDown ? "Sem coleta do Zabbix" : "Nenhum link configurado"}
-        />
-        <DomainTile
-          title="Firewall"
-          icon={<Shield size={18} />}
-          tone={fwTone}
-          main={fw ? pct(fw.cpu) : "—"}
-          sub={
-            fw
-              ? fw.security
-                ? `CPU · ${fw.security.totals.blocked.toLocaleString("pt-BR")} bloqueios em 24 h`
-                : `CPU · mem ${pct(fw.memory)} · ${(fw.sessions ?? 0).toLocaleString("pt-BR")} sessões`
-              : zabbixDown
-                ? "Sem coleta do Zabbix"
-                : "Sem FortiGate no Zabbix"
-          }
-        />
-        {unifiTile("switches", "switches", "Switches", <Network size={18} />)}
-        {unifiTile("aps", "antenas", "Antenas UniFi", <Radio size={18} />)}
-        {groupTile("servidores", "Servidores", <Server size={18} />, data.hardware.length ? `hardware Dell ${data.hardware.length - hwBad}/${data.hardware.length} ok` : "")}
-        {groupTile("videowall", "Videowall", <MonitorPlay size={18} />)}
-        {accessTile()}
-      </div>
-
-      <div className="noc-overview-bottom">
-        <section className="noc-card noc-problems-card">
-          <h3>
-            <AlertOctagon size={20} /> Problemas ativos
-            <small>{data.problems.filter(isMainProblem).length} na lista · {data.problems.filter((problem) => !isMainProblem(problem)).length} leves antigos</small>
-          </h3>
-          <ProblemList problems={data.problems} limit={10} zabbixDown={zabbixDown} />
-        </section>
-        <div className="noc-overview-side">
-          <section className="noc-card">
-            <h3>Por severidade</h3>
-            <div className="noc-sev-tiles">
-              {bySeverity.map((entry) => (
-                <div key={entry.severity} className={`${SEVERITY[entry.severity].tone} ${entry.count ? "" : "zero"}`}>
-                  <span>{SEVERITY[entry.severity].label}</span>
-                  <strong>{entry.count}</strong>
-                </div>
-              ))}
-            </div>
-          </section>
-          <section className="noc-card">
-            <h3>Consumo de internet · 6 h <span className="noc-legend"><i className="in" /> Download <i className="out" /> Upload</span></h3>
-            <div className="noc-fill"><TrafficMini series={combined} height="100%" /></div>
-          </section>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// IPS/antivirus do FortiGate somados nas ultimas 24 h (o Zabbix guarda como taxa por segundo).
-const SEC_LEVELS = [
-  { key: "critical", label: "Crítica", tone: "s5" },
-  { key: "high", label: "Alta", tone: "s4" },
-  { key: "medium", label: "Média", tone: "s3" },
-  { key: "low", label: "Baixa", tone: "s2" },
-] as const;
-
-function SecurityCard({ fw }: { fw: Firewall }) {
-  const sec = fw.security;
-  if (!sec) {
-    return (
-      <section className="noc-card">
-        <h3><ShieldCheck size={20} /> Segurança</h3>
-        <p className="noc-empty">Sem contadores de IPS no Zabbix.</p>
-      </section>
-    );
-  }
-  const { totals } = sec;
-  const top = Math.max(1, ...SEC_LEVELS.map((level) => totals[level.key]));
-  const serious = totals.critical + totals.high;
-  return (
-    <section className="noc-card noc-sec">
-      <h3><ShieldCheck size={20} /> Segurança <small>últimas {sec.windowHours} h</small></h3>
-      <div className="noc-sec-big">
-        <div className="tone-good"><span>Ataques bloqueados</span><strong>{totals.blocked.toLocaleString("pt-BR")}</strong></div>
-        <div className={serious ? "tone-warning" : ""}><span>Intrusões detectadas</span><strong>{totals.detected.toLocaleString("pt-BR")}</strong></div>
-      </div>
-      <ul className="noc-sec-levels">
-        {SEC_LEVELS.map((level) => (
-          <li key={level.key} className={level.tone}>
-            <span>{level.label}</span>
-            <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${totals[level.key] ? Math.max(2, (totals[level.key] / top) * 100) : 0}%` }} /></div>
-            <b>{totals[level.key].toLocaleString("pt-BR")}</b>
-          </li>
-        ))}
-      </ul>
-      <div className="noc-fill noc-sec-chart" aria-label="Intrusões detectadas por hora">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={sec.hourly} margin={{ top: 4, right: 0, bottom: 0, left: 0 }} barCategoryGap={2}>
-            <XAxis dataKey="t" hide />
-            <YAxis hide />
-            <Tooltip
-              cursor={{ fill: "rgba(255,255,255,0.06)" }}
-              contentStyle={{ background: "#0b1430", border: "1px solid #2c3a5a", borderRadius: 8, color: "#eef2fb" }}
-              labelFormatter={(t) => `${new Date(Number(t)).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`}
-              formatter={(value, key) => [Number(value).toLocaleString("pt-BR"), key === "detected" ? "Detectadas" : "Bloqueadas"]}
-            />
-            <Bar dataKey="detected" fill="#3987e5" radius={[3, 3, 0, 0]} isAnimationActive={false} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <small className="noc-sec-foot">
-        Detecções por hora · antivírus {totals.antivirus.toLocaleString("pt-BR")}{sec.ipsDatabase ? ` · base IPS ${sec.ipsDatabase.replace(/\(.*\)/, "").trim()}` : ""}
-      </small>
-    </section>
-  );
-}
-
 /* ---------- Seguranca e trafego (FortiAnalyzer, 24 h) ---------- */
 const fmtBytes = (bytes: number) => {
   if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(2).replace(".", ",")} TB`;
@@ -921,97 +661,6 @@ function BarList<T>({ items, value, label, detail, extra }: { items: T[]; value:
         </li>
       ))}
     </ul>
-  );
-}
-
-function AnalyzerPage({ analyzer }: { analyzer: Analyzer }) {
-  if (!analyzer.checkedAt) {
-    return (
-      <p className="noc-empty">
-        {analyzer.error ? `FortiAnalyzer: ${analyzer.error}` : "Consultando o FortiAnalyzer (as visões de 24 h levam alguns segundos)..."}
-      </p>
-    );
-  }
-  const { totals } = analyzer;
-  const blockedPct = totals.sessions ? Math.round((totals.sessionsBlocked / totals.sessions) * 100) : 0;
-  const threatPct = totals.threatIncidents ? Math.round((totals.threatsBlocked / totals.threatIncidents) * 100) : 0;
-  const threats = analyzer.threats.filter((threat) => threat.incidents > 0).slice(0, 6);
-  const topThreat = Math.max(1, ...threats.map((threat) => threat.incidents));
-  return (
-    <div className="noc-page noc-faz">
-      <div className="noc-faz-kpis">
-        <div><span>Tráfego da internet</span><strong>{fmtBytes(totals.bandwidth)}</strong><small>últimas {analyzer.windowHours} h</small></div>
-        <div><span>Sessões</span><strong>{fmtCount(totals.sessions)}</strong><small>conexões abertas</small></div>
-        <div className="tone-good"><span>Sessões bloqueadas</span><strong>{fmtCount(totals.sessionsBlocked)}</strong><small>{blockedPct}% das sessões</small></div>
-        <div className="tone-good"><span>Ameaças bloqueadas</span><strong>{fmtCount(totals.threatsBlocked)}</strong><small>{threatPct}% dos incidentes</small></div>
-        <div className={totals.threatIncidents - totals.threatsBlocked > 0 ? "tone-warning" : ""}><span>Incidentes de ameaça</span><strong>{fmtCount(totals.threatIncidents)}</strong><small>detectados pelo FortiGate</small></div>
-      </div>
-      <div className="noc-faz-grid">
-        <section className="noc-card">
-          <h3><ShieldCheck size={20} /> Principais ameaças <small>incidentes · bloqueados</small></h3>
-          <ul className="noc-faz-list">
-            {threats.map((threat) => (
-              <li key={`${threat.name}-${threat.type}`}>
-                <div className="noc-faz-row">
-                  <span className="noc-faz-name" title={threat.name}>{THREAT_NAMES[threat.name] || threat.name}</span>
-                  <em className={`noc-faz-level tone-${threatTone(threat.level)}`}>{LEVEL_NAMES[threat.level.toLowerCase()] || threat.level || "—"}</em>
-                  <b>{fmtCount(threat.incidents)}</b>
-                </div>
-                <small>{threat.type === "ips" ? "IPS" : threat.type === "failed-connection" || threat.type === "blocked-connection" ? "tráfego" : threat.type} · {threat.incidents ? Math.round((threat.blocked / threat.incidents) * 100) : 0}% bloqueado</small>
-                <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${Math.max(2, (threat.incidents / topThreat) * 100)}%` }} /></div>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section className="noc-card">
-          <h3><Network size={20} /> Quem mais usa a internet <small>origens internas</small></h3>
-          <BarList
-            items={analyzer.sources.slice(0, 6)}
-            value={(source) => source.bandwidth}
-            label={(source) => source.name || source.ip}
-            detail={(source) => [source.name ? source.ip : "", source.iface, source.device].filter(Boolean).join(" · ")}
-          />
-        </section>
-        <section className="noc-card">
-          <h3><Activity size={20} /> Aplicações <small>por volume</small></h3>
-          <BarList
-            items={analyzer.applications.slice(0, 6)}
-            value={(app) => app.bandwidth}
-            label={(app) => app.name}
-            detail={(app) => `${app.users} usuários${app.sessionsBlocked ? ` · ${fmtCount(app.sessionsBlocked)} sessões bloqueadas` : ""}`}
-            extra={(app) => (/elevated|high|critical/i.test(app.risk) ? <em className="noc-faz-level tone-warning">risco</em> : null)}
-          />
-        </section>
-        <section className="noc-card">
-          <h3><Globe size={20} /> Destinos <small>maior volume</small></h3>
-          <BarList
-            items={analyzer.destinations.slice(0, 6)}
-            value={(dest) => dest.bandwidth}
-            label={(dest) => dest.ip}
-            detail={(dest) => `${dest.app || "—"} · ↓ ${fmtBytes(dest.download)} · ↑ ${fmtBytes(dest.upload)}`}
-          />
-        </section>
-        <section className="noc-card">
-          <h3><Globe size={20} /> Países <small>volume · sessões bloqueadas</small></h3>
-          <BarList
-            items={analyzer.countries.slice(0, 6)}
-            value={(country) => country.bandwidth}
-            label={(country) => COUNTRY_NAMES[country.name] || country.name}
-            extra={(country) => (country.sessionsBlocked ? <em className="noc-faz-blocked">{fmtCount(country.sessionsBlocked)} bloq.</em> : null)}
-          />
-        </section>
-        <section className="noc-card">
-          <h3><MonitorPlay size={20} /> Categorias de sites</h3>
-          <BarList
-            items={analyzer.categories.slice(0, 6)}
-            value={(category) => category.bandwidth}
-            label={(category) => CATEGORY_NAMES[category.name] || category.name}
-            extra={(category) => (category.sessionsBlocked ? <em className="noc-faz-blocked">{fmtCount(category.sessionsBlocked)} bloq.</em> : null)}
-          />
-        </section>
-      </div>
-      <small className="noc-faz-foot">FortiAnalyzer · últimas {analyzer.windowHours} h · atualizado às {new Date(analyzer.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}{analyzer.error ? ` · última consulta falhou: ${analyzer.error}` : ""}</small>
-    </div>
   );
 }
 
@@ -1069,106 +718,6 @@ const groupDetail = (group: AlertGroup) => {
   return [group.first.subject, group.first.source && `origem ${group.first.source}`].filter(Boolean).join(" · ");
 };
 
-function SecurityAlertsPage({ analyzer }: { analyzer: Analyzer }) {
-  if (!analyzer.checkedAt) {
-    return <p className="noc-empty">{analyzer.error ? `FortiAnalyzer: ${analyzer.error}` : "Consultando o FortiAnalyzer..."}</p>;
-  }
-  const alerts = analyzer.alerts || [];
-  const av = analyzer.antivirus || { total: 0, realVirus: 0, items: [] };
-  const groups = groupAlerts(alerts.filter((alert) => alert.action));
-  const noise = NOISE_KINDS.map(([pattern, label]) => ({ label, count: alerts.filter((alert) => !alert.action && pattern.test(alert.handler)).length }));
-  const otherNoise = alerts.filter((alert) => !alert.action && !NOISE_KINDS.some(([pattern]) => pattern.test(alert.handler))).length;
-  const urgent = groups.filter((group) => group.severity === "critical" || group.severity === "high").length;
-  const topNoise = Math.max(1, ...noise.map((item) => item.count));
-  // Consulta que falhou nunca vira "0" verde: mostra "—" e avisa.
-  const alertsFailed = Boolean(analyzer.alertsError);
-  const avFailed = Boolean(analyzer.antivirusError);
-  return (
-    <div className="noc-page noc-vpn noc-secalerts">
-      <div className="noc-faz-kpis noc-secalerts-kpis">
-        {alertsFailed ? (
-          <div className="tone-unknown"><span>Pedem atenção</span><strong>—</strong><small>consulta de alertas falhou</small></div>
-        ) : (
-          <div className={urgent ? "tone-critical" : groups.length ? "tone-warning" : "tone-good"}><span>Pedem atenção</span><strong>{groups.length}</strong><small>{urgent ? `${urgent} graves · ` : ""}últimas 24 h</small></div>
-        )}
-        <div className={alertsFailed ? "tone-unknown" : "tone-good"}><span>Ataques da internet barrados</span><strong>{alertsFailed ? "—" : fmtCount(noise[0].count)}</strong><small>alertas do FortiAnalyzer em 24 h</small></div>
-        <div className={avFailed ? "tone-unknown" : "tone-good"}><span>Bloqueios do antivírus</span><strong>{avFailed ? "—" : fmtCount(av.total)}</strong><small>últimos 7 dias</small></div>
-        <div className={avFailed ? "tone-unknown" : av.realVirus ? "tone-critical" : "tone-good"}>
-          <span>Vírus encontrados</span>
-          <strong>{avFailed ? "—" : av.realVirus}</strong>
-          <small>{avFailed ? "consulta do antivírus falhou" : av.realVirus ? "arquivos infectados barrados" : "nenhum arquivo infectado"}</small>
-        </div>
-      </div>
-      <div className="noc-vpn-grid">
-        <section className="noc-card">
-          <h3><AlertOctagon size={20} /> Pedem atenção <small>vão para o WhatsApp do NOC · últimas 24 h</small></h3>
-          {alertsFailed ? (
-            <p className="noc-empty"><AlertTriangle size={18} /> Não foi possível consultar os alertas do FortiAnalyzer agora.</p>
-          ) : groups.length ? (
-            <ul className="noc-secalerts-list">
-              {groups.slice(0, 6).map((group) => (
-                <li key={group.key}>
-                  <em className={`noc-faz-level tone-${threatTone(group.severity)}`}>{LEVEL_NAMES[group.severity] || group.severity}</em>
-                  <div className="noc-vpn-who">
-                    <strong title={group.first.handler}>{alertName(group.first.handler, group.first.subject)}{group.alerts > 1 ? <span className="noc-secalerts-count"> · {group.alerts} alertas</span> : null}</strong>
-                    <small title={group.first.subject}>{groupDetail(group)}</small>
-                  </div>
-                  <b className="noc-secalerts-when">{fmtWhen(group.last)}</b>
-                </li>
-              ))}
-              {groups.length > 6 ? <li className="noc-more">+ {groups.length - 6} pedindo atenção</li> : null}
-            </ul>
-          ) : (
-            <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nada pedindo ação nas últimas 24 h.</p>
-          )}
-          <h4 className="noc-secalerts-sub">Só no painel <small>sem ação necessária</small></h4>
-          <ul className="noc-faz-list">
-            {noise.map((item) => (
-              <li key={item.label}>
-                <div className="noc-faz-row">
-                  <span className="noc-faz-name">{item.label}</span>
-                  <b>{fmtCount(item.count)}</b>
-                </div>
-                <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${item.count ? Math.max(2, (item.count / topNoise) * 100) : 0}%` }} /></div>
-              </li>
-            ))}
-          </ul>
-          {otherNoise ? <small className="noc-faz-foot">+{otherNoise} outros alertas informativos</small> : null}
-        </section>
-        <section className="noc-card">
-          <h3><Bug size={20} /> Antivírus <small>últimos 7 dias · máquina · site</small></h3>
-          {avFailed ? (
-            <p className="noc-empty"><AlertTriangle size={18} /> Não foi possível consultar o antivírus no FortiAnalyzer agora.</p>
-          ) : !av.realVirus ? (
-            <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nenhum vírus ou malware encontrado. {av.total ? "Os bloqueios abaixo são preventivos." : ""}</p>
-          ) : null}
-          {avFailed ? null : av.items.length ? (
-            <ul className="noc-secalerts-list">
-              {av.items.slice(0, 6).map((item) => (
-                <li key={`${item.reason}-${item.srcip}-${item.site}`}>
-                  <em className={`noc-faz-level tone-${item.virus ? "critical" : "muted"}`}>{item.virus ? "vírus" : "bloqueio"}</em>
-                  <div className="noc-vpn-who">
-                    <strong title={item.reason}>{item.virus || avReason(item.reason)}</strong>
-                    <small>{[`máquina ${item.srcip}${item.iface ? ` (${item.iface})` : ""}`, item.site && `site ${item.site}`, item.file].filter(Boolean).join(" · ")}</small>
-                  </div>
-                  <div className="noc-vpn-meta">
-                    <b>{item.count}×</b>
-                    <small>{fmtWhen(item.lastSeen)}</small>
-                  </div>
-                </li>
-              ))}
-              {av.items.length > 6 ? <li className="noc-more">+ {av.items.length - 6} bloqueios</li> : null}
-            </ul>
-          ) : (
-            <p className="noc-empty">Nenhum bloqueio do antivírus em 7 dias.</p>
-          )}
-        </section>
-      </div>
-      <small className="noc-faz-foot">FortiAnalyzer · atualizado às {new Date(analyzer.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</small>
-    </div>
-  );
-}
-
 /* ---------- Microsoft Defender (XDR + Intune) ---------- */
 const DEFENDER_LEVEL: Record<string, string> = { high: "Alto", medium: "Médio", low: "Baixo", informational: "Info" };
 const DEFENDER_RANK: Record<string, number> = { high: 0, medium: 1, low: 2, informational: 3 };
@@ -1177,121 +726,6 @@ const daysAgo = (iso: string) => {
   const days = Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
   return days <= 0 ? "hoje" : days === 1 ? "há 1 dia" : `há ${days} dias`;
 };
-
-function DefenderPage({ defender }: { defender: Defender }) {
-  if (!defender.checkedAt) {
-    return <p className="noc-empty">{defender.error ? `Microsoft Defender: ${defender.error}` : "Consultando o Microsoft Defender..."}</p>;
-  }
-  const { devices } = defender;
-  const score = defender.secureScore ? Math.round((defender.secureScore.current / defender.secureScore.max) * 100) : null;
-  const serious = defender.incidents.filter((incident) => incident.severity === "high" || incident.severity === "medium");
-  const unassigned = defender.incidents.filter((incident) => !incident.assigned).length;
-  const pending = defender.alerts.filter((alert) => alert.status !== "resolved").length;
-  // Incidentes iguais (ex.: varios "e-mails removidos") viram uma linha com a quantidade.
-  const groups = new Map<string, { title: string; original: string; severity: string; count: number; oldest: string; newest: string }>();
-  for (const incident of defender.incidents) {
-    const title = defenderName(incident.title);
-    const key = `${incident.severity}|${title}`;
-    const group = groups.get(key) || { title, original: incident.title, severity: incident.severity, count: 0, oldest: incident.created, newest: incident.created };
-    group.count++;
-    if (incident.created < group.oldest) group.oldest = incident.created;
-    if (incident.created > group.newest) group.newest = incident.created;
-    groups.set(key, group);
-  }
-  const incidentRows = [...groups.values()].sort((a, b) => (DEFENDER_RANK[a.severity] ?? 4) - (DEFENDER_RANK[b.severity] ?? 4) || b.newest.localeCompare(a.newest));
-  const deviceRows = [
-    { label: "Protegidas", value: devices.secured, tone: "good" },
-    { label: "Defender desativado / sem relatório", value: devices.deactivated, tone: "warning" },
-    { label: "Sem informação", value: devices.unknown, tone: "muted" },
-    { label: "Com ameaça ativa", value: devices.threat.length, tone: "critical" },
-  ];
-  return (
-    <div className="noc-page noc-vpn noc-secalerts">
-      <div className="noc-faz-kpis noc-secalerts-kpis">
-        <div className={score === null ? "" : score >= 70 ? "tone-good" : "tone-warning"}>
-          <span>Secure Score</span>
-          <strong>{score === null ? "—" : `${score}%`}</strong>
-          <small>{defender.secureScore ? `${Math.round(defender.secureScore.current)} de ${Math.round(defender.secureScore.max)} pontos` : "sem dados"}</small>
-        </div>
-        <div className={serious.length ? "tone-warning" : "tone-good"}>
-          <span>Incidentes abertos</span>
-          <strong>{defender.incidents.length}</strong>
-          <small>{serious.length} médios/altos · {unassigned} sem responsável</small>
-        </div>
-        <div className={pending ? "tone-warning" : "tone-good"}>
-          <span>Alertas (7 dias)</span>
-          <strong>{defender.alerts.length}</strong>
-          <small>{pending} aguardando análise</small>
-        </div>
-        <div className={devices.threat.length ? "tone-critical" : devices.deactivated ? "tone-warning" : "tone-good"}>
-          <span>Máquinas protegidas</span>
-          <strong>{devices.secured}<small className="noc-def-of">/{devices.total}</small></strong>
-          <small>{devices.threat.length ? `${devices.threat.length} com ameaça ativa` : `${devices.deactivated} sem Defender ativo`}</small>
-        </div>
-      </div>
-      <div className="noc-vpn-grid">
-        <section className="noc-card">
-          <h3><ShieldAlert size={20} /> Incidentes abertos <small>mais graves primeiro · agrupados</small></h3>
-          {incidentRows.length ? (
-            <ul className="noc-secalerts-list">
-              {incidentRows.slice(0, 9).map((row) => (
-                <li key={`${row.severity}-${row.title}`}>
-                  <em className={`noc-faz-level tone-${defenderTone(row.severity)}`}>{DEFENDER_LEVEL[row.severity] || row.severity}</em>
-                  <div className="noc-vpn-who">
-                    <strong title={row.original}>{row.title}{row.count > 1 ? <span className="noc-secalerts-count"> · {row.count} incidentes</span> : null}</strong>
-                    <small>{row.count > 1 ? `o mais antigo aberto ${daysAgo(row.oldest)}` : `aberto ${daysAgo(row.oldest)}`}</small>
-                  </div>
-                  <b className="noc-secalerts-when">{fmtWhen(row.newest)}</b>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nenhum incidente aberto.</p>
-          )}
-          {incidentRows.length > 9 ? <small className="noc-faz-foot">+{incidentRows.length - 9} outros tipos de incidente</small> : null}
-        </section>
-        <section className="noc-card">
-          <h3><Cpu size={20} /> Máquinas <small>estado do Defender no Intune</small></h3>
-          <ul className="noc-faz-list">
-            {deviceRows.map((row) => (
-              <li key={row.label} className={`noc-def-bar tone-${row.tone}`}>
-                <div className="noc-faz-row">
-                  <span className="noc-faz-name">{row.label}</span>
-                  <b>{row.value}</b>
-                </div>
-                <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${row.value ? Math.max(2, (row.value / Math.max(1, devices.total)) * 100) : 0}%` }} /></div>
-              </li>
-            ))}
-          </ul>
-          {devices.threat.length ? (
-            <p className="noc-def-threat">
-              <AlertTriangle size={16} /> Com ameaça: {devices.threat.slice(0, 4).map((device) => `${device.name}${device.user ? ` (${device.user.split(" ")[0]})` : ""}`).join(", ")}
-              {devices.threat.length > 4 ? ` e +${devices.threat.length - 4}` : ""}
-            </p>
-          ) : null}
-          <h4 className="noc-secalerts-sub">Malware detectado <small>últimos 90 dias</small></h4>
-          {defender.malware.length ? (
-            <ul className="noc-secalerts-list">
-              {defender.malware.slice(0, 4).map((item) => (
-                <li key={item.name}>
-                  <em className={`noc-faz-level tone-${item.severity === "severe" ? "critical" : "warning"}`}>{item.category === "potentialUnwantedSoftware" ? "PUA" : item.category}</em>
-                  <div className="noc-vpn-who">
-                    <strong title={item.name}>{item.name}</strong>
-                    <small>{item.devices.length ? item.devices.join(", ") : "máquina não informada"}</small>
-                  </div>
-                  <b className="noc-secalerts-when">{fmtWhen(item.lastSeen)}</b>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nenhum malware nos últimos 90 dias.</p>
-          )}
-        </section>
-      </div>
-      <small className="noc-faz-foot">Microsoft Defender · atualizado às {new Date(defender.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}{defender.error ? ` · última consulta falhou: ${defender.error}` : ""}</small>
-    </div>
-  );
-}
 
 /* ---------- VPN e acesso remoto ---------- */
 const fmtSince = (seconds: number) => {
@@ -1313,185 +747,6 @@ const fmtWhen = (iso: string) => {
   if (day(date) === day(yesterday)) return `ontem ${time}`;
   return `${date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} ${time}`;
 };
-
-function VpnPage({ data }: { data: NocData }) {
-  const live = data.vpn?.users || [];
-  const liveLogins = new Set(live.map((user) => user.login.toLowerCase()));
-  // Os tuneis site-to-site ficam na pagina "Internet e Firewall" (sem repetir aqui).
-  const fw = data.firewalls[0];
-  const today = data.analyzer?.vpnUsers || [];
-  // Primeira consulta ao FortiAnalyzer ainda rodando (leva ~20 s depois que o servidor sobe).
-  const analyzerLoading = Boolean(data.analyzer && !data.analyzer.checkedAt && !data.analyzer.error);
-  const todayVolume = today.reduce((sum, session) => sum + session.bandwidth, 0);
-  // Sem leitura (nem lista, nem contador do FortiGate) fica "—", nunca "0".
-  const liveCount = data.vpn ? live.length : fw?.sslVpnUsers ?? null;
-  const LIVE_LIMIT = 8;
-  const TODAY_LIMIT = 8;
-  return (
-    <div className="noc-page noc-vpn">
-      <div className="noc-faz-kpis noc-vpn-kpis">
-        <div><span>Conectados na VPN agora</span><strong>{liveCount ?? "—"}</strong><small>{liveCount === null ? "sem leitura do FortiGate" : "SSL-VPN do FortiGate"}</small></div>
-        <div><span>Sessões de VPN</span><strong>{analyzerLoading ? "—" : today.length}</strong><small>últimas 24 h (FortiAnalyzer)</small></div>
-        <div><span>Volume das sessões</span><strong>{analyzerLoading ? "—" : fmtBytes(todayVolume)}</strong><small>últimas 24 h</small></div>
-      </div>
-      <div className="noc-vpn-grid">
-        <section className="noc-card noc-vpn-live">
-          <h3><KeyRound size={20} /> Conectados agora <small>{data.vpn?.checkedAt ? `leitura às ${new Date(data.vpn.checkedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}</small></h3>
-          {live.length ? (
-            <ul>
-              {live.slice(0, LIVE_LIMIT).map((user) => (
-                <li key={`${user.login}-${user.connectedSec}`}>
-                  <span className="noc-vpn-dot" aria-hidden="true" />
-                  <div className="noc-vpn-who">
-                    <strong>{user.name}</strong>
-                    <small>{[user.department, user.login !== user.name ? user.login : "", user.remoteIp].filter(Boolean).join(" · ")}</small>
-                  </div>
-                  <div className="noc-vpn-meta">
-                    <b>há {fmtSince(user.connectedSec)}</b>
-                    <small>{fmtBytes(user.bytesIn + user.bytesOut)} trafegados</small>
-                  </div>
-                </li>
-              ))}
-              {live.length > LIVE_LIMIT ? <li className="noc-more">+ {live.length - LIVE_LIMIT} conectados</li> : null}
-            </ul>
-          ) : (
-            <p className="noc-empty">{data.vpn ? "Ninguém conectado na VPN agora." : liveCount === null ? "Sem leitura da VPN no FortiGate." : `${liveCount} conectado(s) · lista de nomes indisponível`}</p>
-          )}
-        </section>
-        <section className="noc-card noc-vpn-today">
-          <h3><Activity size={20} /> Sessões de VPN <small>últimas 24 h · tempo conectado · volume</small></h3>
-          {today.length ? (
-            <ul className="noc-faz-list">
-              {today.slice(0, TODAY_LIMIT).map((session, index) => {
-                const stillOn = liveLogins.has(session.login.toLowerCase());
-                return (
-                  <li key={`${session.login}-${session.lastSeen}-${index}`}>
-                    <div className="noc-faz-row">
-                      <span className="noc-faz-name">{session.name}</span>
-                      {stillOn ? <em className="noc-faz-blocked">conectado agora</em> : null}
-                      <b>{fmtSince(session.durationSec)}</b>
-                    </div>
-                    <small>{[session.department, stillOn ? `última atividade ${fmtWhen(session.lastSeen)}` : `saiu ${fmtWhen(session.lastSeen)}`, fmtBytes(session.bandwidth)].filter(Boolean).join(" · ")}</small>
-                  </li>
-                );
-              })}
-              {today.length > TODAY_LIMIT ? <li className="noc-more">+ {today.length - TODAY_LIMIT} sessões</li> : null}
-            </ul>
-          ) : (
-            <p className="noc-empty">{analyzerLoading ? "Consultando o FortiAnalyzer..." : data.analyzer?.error && !data.analyzer.checkedAt ? `FortiAnalyzer: ${data.analyzer.error}` : data.analyzer ? "Nenhuma sessão de VPN nas últimas 24 h." : "FortiAnalyzer não configurado."}</p>
-          )}
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function InternetPage({ data }: { data: NocData }) {
-  const fw = data.firewalls[0];
-  const trafficById = new Map((data.traffic?.links || []).map((link) => [link.id, link]));
-  const temps = (fw?.sensors || []).filter((sensor) => sensor.kind === "temp" && sensor.value !== null);
-  const maxTemp = temps.length ? Math.max(...temps.map((sensor) => sensor.value || 0)) : null;
-  const psu = (fw?.sensors || []).filter((sensor) => sensor.kind === "psu");
-  const fans = (fw?.sensors || []).filter((sensor) => sensor.kind === "fan");
-  const alarms = (fw?.sensors || []).filter((sensor) => sensor.alarm);
-  // Tuneis caidos primeiro (o servidor ja ordena); os ativos que nao cabem viram "+N".
-  const TUNNEL_LIMIT = 8;
-  // "0/0 OK" quando o firewall nao informa o sensor engana: vira "sem sensor".
-  const sensorCount = (list: Firewall["sensors"]) => (list.length ? `${list.filter((sensor) => !sensor.alarm).length}/${list.length} OK` : "sem sensor");
-  const sensorTone = (list: Firewall["sensors"]) => (!list.length ? "tone-unknown" : list.some((sensor) => sensor.alarm) ? "tone-critical" : "tone-good");
-
-  if (!data.links.length && !fw) {
-    return (
-      <div className="noc-page noc-internet">
-        <p className="noc-empty">
-          <AlertTriangle size={20} /> {sourceDown(data, "zabbix") ? "Zabbix sem resposta: estado dos links e do firewall desconhecido." : "Nenhum link de internet nem FortiGate no Zabbix."}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="noc-page noc-internet">
-      <div className="noc-links">
-        {data.links.map((link) => {
-          const sd = fw?.sdwan.find((entry) => entry.member === link.member);
-          // Sem leitura ha mais de 10 min: cinza "sem coleta", nunca "Online" com 0 Mbps.
-          const noData = Boolean(link.stale && link.configured !== false);
-          const state = noData ? "unknown" : link.online ? "good" : "critical";
-          const usageTone = noData ? "unknown" : !link.online ? "critical" : (link.usagePercent ?? 0) >= 90 ? "critical" : (link.usagePercent ?? 0) >= 70 ? "warning" : "good";
-          return (
-            <section key={link.id} className={`noc-card noc-link tone-${state}`}>
-              <header>
-                <h3>{link.name}</h3>
-                <em className={`tone-${state}`}>
-                  {noData ? <AlertTriangle size={16} /> : link.online ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {noData ? "Sem coleta" : link.online ? "Online" : "Offline"}
-                </em>
-              </header>
-              <div className="noc-link-now">
-                <div><span><ArrowDown size={15} className="noc-in" /> Download</span><strong>{rate(link.inBps)}</strong></div>
-                <div><span><ArrowUp size={15} className="noc-out" /> Upload</span><strong>{rate(link.outBps)}</strong></div>
-                <div className={`noc-link-usage tone-${usageTone}`}><span>Uso</span><strong>{pct(link.usagePercent)}</strong><small>de {link.contractedMbps >= 1000 ? `${link.contractedMbps / 1000} Gbps` : `${link.contractedMbps} Mbps`}</small></div>
-              </div>
-              <div className="noc-fill"><TrafficMini series={trafficById.get(link.id)?.series || []} height="100%" /></div>
-              <dl className="noc-sdwan">
-                <div><dt>Latência</dt><dd>{sd?.latencyMs ?? link.latencyMs ?? "—"} ms</dd></div>
-                <div><dt>Jitter</dt><dd>{sd?.jitterMs ?? "—"} ms</dd></div>
-                <div><dt>Perda</dt><dd className={(sd?.loss ?? link.lossPercent ?? 0) > 0 ? "bad" : ""}>{sd?.loss ?? link.lossPercent ?? "—"}%</dd></div>
-                <div><dt>SD-WAN</dt><dd>{sd ? (sd.alive ? "Ativo" : "Falhou") : "—"}</dd></div>
-              </dl>
-            </section>
-          );
-        })}
-      </div>
-
-      {fw ? (
-        <div className="noc-fw">
-          <section className="noc-card">
-            <h3><Shield size={20} /> {fw.name} <small>{fw.haMode} · {fw.haGroup} · no ar há {uptime(fw.uptimeSec)}</small></h3>
-            <div className="noc-fw-main">
-              <Meter label="CPU" value={fw.cpu} icon={<Cpu size={15} />} />
-              <Meter label="Memória" value={fw.memory} icon={<MemoryStick size={15} />} />
-              <div className="noc-big-stat"><span>Sessões ativas</span><strong>{(fw.sessions ?? 0).toLocaleString("pt-BR")}</strong></div>
-              <div className="noc-big-stat"><span>Usuários SSL-VPN</span><strong>{fw.sslVpnUsers ?? "—"}</strong></div>
-            </div>
-            <div className="noc-ha-nodes">
-              {fw.nodes.map((node, index) => (
-                <div key={node.hostname} className={`noc-ha-node ${node.synced === false ? "tone-critical" : "tone-good"}`}>
-                  <strong>{node.hostname} <em>{index === 0 ? "Principal" : "Secundário"}</em></strong>
-                  <span>CPU {pct(node.cpu)} · Mem {pct(node.memory)} · {(node.sessions ?? 0).toLocaleString("pt-BR")} sessões</span>
-                  <small>{node.synced === false ? <><XCircle size={13} /> Fora de sincronia</> : <><CheckCircle2 size={13} /> Sincronizado</>}</small>
-                </div>
-              ))}
-            </div>
-          </section>
-          <section className="noc-card">
-            <h3><Zap size={20} /> Túneis VPN <small>{fw.tunnels.filter((tunnel) => tunnel.up).length}/{fw.tunnels.length} ativos</small></h3>
-            <ul className="noc-tunnels">
-              {fw.tunnels.slice(0, TUNNEL_LIMIT).map((tunnel) => (
-                <li key={tunnel.name} className={tunnel.up ? "tone-good" : "tone-critical"}>
-                  {tunnel.up ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
-                  <strong>{tunnel.name}</strong>
-                  <span>{tunnel.up ? (tunnel.total > 1 ? `${tunnel.up}/${tunnel.total} fases` : "Ativo") : "Caído"}</span>
-                </li>
-              ))}
-              {fw.tunnels.length > TUNNEL_LIMIT ? <li className="noc-more">+ {fw.tunnels.length - TUNNEL_LIMIT} túneis ativos</li> : null}
-            </ul>
-          </section>
-          <SecurityCard fw={fw} />
-          <section className="noc-card">
-            <h3><Thermometer size={20} /> Hardware do firewall</h3>
-            <div className="noc-hw-grid single">
-              <div className={alarms.length ? "tone-critical" : "tone-good"}><span>Alarmes</span><strong>{alarms.length ? alarms.length : "Nenhum"}</strong></div>
-              <div><span>Maior temperatura</span><strong>{maxTemp === null ? "—" : `${Math.round(maxTemp)} °C`}</strong></div>
-              <div className={sensorTone(psu)}><span>Fontes</span><strong>{sensorCount(psu)}</strong></div>
-              <div className={sensorTone(fans)}><span>Ventoinhas</span><strong>{sensorCount(fans)}</strong></div>
-            </div>
-          </section>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 function GroupPage({ data, keys }: { data: NocData; keys: string[] }) {
   const groups = keys.map((key) => data.groups.find((group) => group.key === key)).filter(Boolean) as NocGroup[];
@@ -1519,242 +774,8 @@ const RAID_STATE: Record<string, { tone: string; label: string }> = {
   unknown: { tone: "tone-unknown", label: "sem dado" },
 };
 
-function ServersPage({ data }: { data: NocData }) {
-  const servers = data.groups.find((group) => group.key === "servidores");
-  return (
-    <div className="noc-page noc-servers">
-      <div className="noc-servers-left">
-        {servers ? <GroupHeader group={servers} /> : null}
-        {servers ? <HostGrid group={servers} /> : <p className="noc-empty">{sourceDown(data, "zabbix") ? "Zabbix sem resposta: estado dos servidores desconhecido." : "Grupo de servidores não encontrado no Zabbix."}</p>}
-      </div>
-      <div className="noc-servers-right">
-        {data.hardware.map((hw) => (
-          <section key={hw.id} className={`noc-card noc-hw tone-${hw.health === "ok" ? "good" : hw.health}`}>
-            <h3><HardDrive size={18} /> {hw.name} <em>{toneIcon(hw.health === "ok" ? "good" : hw.health, 15)} {hw.health === "ok" ? "Saudável" : hw.health === "critical" ? "Crítico" : hw.health === "warning" ? "Atenção" : "Sem dados"}</em></h3>
-            <small>{hw.model}</small>
-            <div className="noc-hw-grid">
-              <div className={partTone(hw.psu)}><span>Fontes</span><strong>{partCount(hw.psu)}</strong></div>
-              <div className={partTone(hw.fans)}><span>Ventoinhas</span><strong>{partCount(hw.fans)}</strong></div>
-              <div className={partTone(hw.disks, hw.disks.smartAlerts > 0)}><span>Discos</span><strong>{partCount(hw.disks)}</strong></div>
-              <div className={(RAID_STATE[hw.raid] || RAID_STATE.unknown).tone}><span>RAID</span><strong>{(RAID_STATE[hw.raid] || RAID_STATE.unknown).label}</strong></div>
-              {hw.temps.slice(0, 2).map((temp) => (
-                <div key={temp.name}><span>{temp.name.replace(/ Temp( Value)?$/i, "").replace("System Board ", "")}</span><strong>{temp.value ?? "—"} °C</strong></div>
-              ))}
-            </div>
-          </section>
-        ))}
-        {data.routers.map((router) => (
-          <section key={router.id} className="noc-card noc-hw">
-            <h3><Network size={18} /> {router.name}</h3>
-            <small>{router.model} · no ar há {uptime(router.uptimeSec)}</small>
-            <div className="noc-fw-main">
-              <Meter label="CPU" value={router.cpu} icon={<Cpu size={15} />} />
-              <Meter label="Memória" value={router.memory} icon={<MemoryStick size={15} />} />
-              <div className="noc-big-stat"><span>Temperatura</span><strong>{router.temperature ?? "—"} °C</strong></div>
-            </div>
-          </section>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Servidores Docker e containers (Beszel) ---------- */
-
-// "Up 5 weeks (healthy)" -> "no ar há 5 semanas"
-const DOCKER_UNITS: Record<string, [string, string]> = {
-  second: ["segundo", "segundos"],
-  minute: ["minuto", "minutos"],
-  hour: ["hora", "horas"],
-  day: ["dia", "dias"],
-  week: ["semana", "semanas"],
-  month: ["mês", "meses"],
-  year: ["ano", "anos"],
-};
-function dockerStatus(status: string) {
-  const match = /^Up (?:About )?(an?|less than a|\d+) (second|minute|hour|day|week|month|year)s?/i.exec(status);
-  if (!match) return status.replace(/\s*\((un)?healthy\)|\s*\(health: starting\)/i, "");
-  const count = /^\d+$/.test(match[1]) ? Number(match[1]) : 1;
-  const unit = DOCKER_UNITS[match[2].toLowerCase()];
-  return `no ar há ${count} ${count === 1 ? unit[0] : unit[1]}`;
-}
-
-const HEALTH = [
-  { label: "", tone: "good" },
-  { label: "iniciando", tone: "warning" },
-  { label: "saudável", tone: "good" },
-  { label: "com falha", tone: "critical" },
-];
-
-// Ambiente pelo prefixo do nome (prd-/hml-), o resto e infraestrutura. Cor neutra: verde/amarelo
-// ficam so para estado (homologacao em amarelo parecia alerta).
-const DOCKER_ENVS = [
-  { key: "prd", title: "Produção", match: /^prd[-_]/i, tone: "neutral" },
-  { key: "hml", title: "Homologação", match: /^hml[-_]/i, tone: "neutral" },
-  { key: "infra", title: "Infraestrutura", match: /.*/, tone: "neutral" },
-] as const;
-const appName = (name: string) => name.replace(/^(prd|hml)[-_]/i, "");
-
-function ContainerTile({ container, heaviest }: { container: BeszelContainer; heaviest: number }) {
-  const health = HEALTH[container.health] || HEALTH[0];
-  return (
-    <div className={`noc-sw tone-${health.tone}`} title={`${container.name} · ${container.image} · ${container.system} · ${container.status}`}>
-      <strong>{toneIcon(health.tone, 13)} {appName(container.name)}</strong>
-      <div className="noc-sw-ports" aria-label={`${container.memoryMb} MB de memória`}><i style={{ width: `${((container.memoryMb || 0) / heaviest) * 100}%` }} /></div>
-      <small>
-        <b>{container.memoryMb ?? "—"} MB</b> · CPU {pct(container.cpu)} · {dockerStatus(container.status).replace("no ar há ", "")}{health.label ? ` · ${health.label}` : ""}
-      </small>
-    </div>
-  );
-}
-
-function DockerPage({ beszel }: { beszel: Beszel }) {
-  const containers = beszel.containers;
-  const heaviest = Math.max(1, ...containers.map((container) => container.memoryMb || 0));
-  const failing = containers.filter((container) => container.health === 3).length;
-  const healthy = containers.filter((container) => container.health === 2).length;
-  const envs = DOCKER_ENVS.map((env) => ({
-    ...env,
-    items: containers
-      .filter((container) => DOCKER_ENVS.find((entry) => entry.match.test(container.name))?.key === env.key)
-      .sort((a, b) => Number(b.health === 3) - Number(a.health === 3) || appName(a.name).localeCompare(appName(b.name), "pt-BR")),
-  })).filter((env) => env.items.length);
-  return (
-    <div className="noc-page noc-docker">
-      <div className={`noc-docker-systems count-${Math.min(beszel.systems.length, 3)}`}>
-        {beszel.systems.map((system) => {
-          const online = system.status === "up";
-          return (
-            <section key={system.id} className={`noc-card noc-docker-system tone-${online ? "good" : "critical"}`}>
-              <header>
-                <h3><HardDrive size={20} /> {system.name} <small>{system.host}</small></h3>
-                <em>{online ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {online ? "Online" : system.status === "paused" ? "Pausado" : "Fora do ar"}</em>
-              </header>
-              <div className="noc-docker-body">
-                <div className="noc-docker-meters">
-                  <Meter label="CPU" value={system.cpu} icon={<Cpu size={15} />} />
-                  <Meter label={`Memória ${system.memUsedGb ?? "—"}/${system.memTotalGb ?? "—"} GB`} value={system.memPct} icon={<MemoryStick size={15} />} warn={80} crit={92} />
-                  <Meter label={`Disco ${system.diskUsedGb ?? "—"}/${system.diskTotalGb ?? "—"} GB`} value={system.diskPct} icon={<HardDrive size={15} />} warn={80} crit={90} />
-                  <div className="noc-big-stat">
-                    <span>Rede agora</span>
-                    <strong className="noc-docker-net"><ArrowDown size={15} className="noc-in" /> {rate(system.netDownBps)} <ArrowUp size={15} className="noc-out" /> {rate(system.netUpBps)}</strong>
-                  </div>
-                </div>
-                <div className="noc-docker-chart">
-                  <span className="noc-legend"><i className="in" /> CPU % <i className="mem" /> Memória %</span>
-                  <div className="noc-fill">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={system.history} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                        <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} scale="time" hide />
-                        <YAxis hide domain={[0, 100]} />
-                        <Tooltip
-                          contentStyle={{ background: "#0b1430", border: "1px solid #2c3a5a", borderRadius: 8, color: "#eef2fb" }}
-                          labelFormatter={(t) => new Date(Number(t)).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-                          formatter={(value, key) => [`${value}%`, key === "cpu" ? "CPU" : "Memória"]}
-                        />
-                        <Area type="monotone" dataKey="mem" stroke="#199e70" strokeWidth={2} fill="#199e70" fillOpacity={0.12} isAnimationActive={false} />
-                        <Area type="monotone" dataKey="cpu" stroke="#3987e5" strokeWidth={2} fill="#3987e5" fillOpacity={0.18} isAnimationActive={false} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <small>última hora · carga {system.load.join(" / ") || "—"} · {system.threads ?? "—"} núcleos · no ar há {uptime(system.uptimeSec)}</small>
-                </div>
-              </div>
-            </section>
-          );
-        })}
-      </div>
-
-      <section className="noc-card noc-docker-containers">
-        <h3>
-          <Server size={20} /> Containers{" "}
-          <small>{beszel.containersError ? "lista indisponível" : `${containers.length} rodando · ${healthy} saudáveis${failing ? ` · ${failing} com falha` : ""}`}</small>
-        </h3>
-        {beszel.containersError ? <p className="noc-empty"><AlertTriangle size={18} /> Não foi possível ler os containers no Beszel agora.</p> : null}
-        <div className="noc-docker-envs">
-          {envs.map((env) => {
-            const memory = env.items.reduce((sum, container) => sum + (container.memoryMb || 0), 0);
-            return (
-              <div key={env.key} className={`noc-docker-env tone-${env.tone}`}>
-                <h4>
-                  {env.title}
-                  <small>{env.items.length} containers · {memory >= 1024 ? `${(memory / 1024).toFixed(1)} GB` : `${Math.round(memory)} MB`}</small>
-                </h4>
-                <div className="noc-docker-env-grid">
-                  {env.items.map((container) => <ContainerTile key={container.id} container={container} heaviest={heaviest} />)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-/* ---------- Pagina de uma controladora UniFi ---------- */
-
-const total = (device: { txBps: number | null; rxBps: number | null }) => (device.txBps || 0) + (device.rxBps || 0);
 const satisfactionTone = (value: number | null) => (value === null ? "unknown" : value >= 80 ? "good" : value >= 60 ? "warning" : "critical");
 const onlineTone = (online: number, count: number) => (!count ? "unknown" : online === count ? "good" : online / count < 0.5 ? "critical" : "warning");
-
-function HBarList({ rows, empty }: { rows: { label: string; count: number }[]; empty: string }) {
-  if (!rows.length) return <p className="noc-empty">{empty}</p>;
-  const top = Math.max(1, ...rows.map((row) => row.count));
-  return (
-    <ul className="noc-ssid-list">
-      {rows.map((row) => (
-        <li key={row.label}>
-          <span>{row.label}</span>
-          <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${(row.count / top) * 100}%` }} /></div>
-          <b>{row.count.toLocaleString("pt-BR")}</b>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function ApTile({ ap, busiest, compact }: { ap: UnifiAp; busiest: number; compact: boolean }) {
-  const busy = Math.max(0, ...ap.radios.map((radio) => radio.utilization ?? 0));
-  const tone = !ap.online ? "critical" : busy >= 80 || (ap.satisfaction !== null && ap.satisfaction < 60) ? "warning" : "good";
-  return (
-    <div className={`noc-sw tone-${tone}`} title={`${ap.name} · ${ap.model} · ${ap.site}${total(ap) ? ` · tráfego ${rate(total(ap))}` : ""}${ap.version ? ` · firmware ${ap.version}` : ""}${ap.uptimeSec ? ` · ligada há ${uptime(ap.uptimeSec)}` : ""}`}>
-      <strong>{tone === "critical" ? <WifiOff size={13} /> : toneIcon(tone, 13)} {ap.name}</strong>
-      {ap.online ? (
-        <>
-          <div className="noc-sw-ports" aria-label={`${ap.clients} clientes`}><i style={{ width: `${(ap.clients / busiest) * 100}%` }} /></div>
-          <small>
-            <b>{ap.clients}</b> cli · {ap.radios.map((radio) => pct(radio.utilization)).join(" / ") || "—"}
-            {!compact && total(ap) ? ` · ${rate(total(ap))}` : ""}
-          </small>
-        </>
-      ) : (
-        <small className="noc-sw-off">DESCONECTADA</small>
-      )}
-    </div>
-  );
-}
-
-function SwitchTile({ sw }: { sw: UnifiSwitch }) {
-  const tone = !sw.online ? "critical" : (sw.cpu ?? 0) >= 90 || (sw.temperature ?? 0) >= 75 ? "warning" : "good";
-  const usage = sw.portsTotal ? (sw.portsUp / sw.portsTotal) * 100 : 0;
-  return (
-    <div className={`noc-sw tone-${tone}`} title={`${sw.name} · ${sw.model} · ${sw.site}${sw.uplink ? ` · uplink ${sw.uplink}` : ""}${sw.version ? ` · firmware ${sw.version}` : ""}`}>
-      <strong>{tone === "critical" ? <WifiOff size={13} /> : toneIcon(tone, 13)} {sw.name}</strong>
-      {sw.online ? (
-        <>
-          <div className="noc-sw-ports" aria-label={`${sw.portsUp} de ${sw.portsTotal} portas ativas`}><i style={{ width: `${usage}%` }} /></div>
-          <small>
-            <b>{sw.portsUp}/{sw.portsTotal}</b> portas · <Zap size={11} /> {Math.round(sw.poeWatts)} W · CPU {pct(sw.cpu)}
-            {sw.temperature !== null ? ` · ${Math.round(sw.temperature)} °C` : ""}
-          </small>
-        </>
-      ) : (
-        <small className="noc-sw-off">DESCONECTADO</small>
-      )}
-    </div>
-  );
-}
 
 // Log da controladora em portugues: "AP[UniFi_Lutas] was disconnected" -> "Antena UniFi_Lutas desconectou".
 function translateUnifiEvent(message: string, names?: Map<string, string>) {
@@ -1781,7 +802,845 @@ const eventTime = (iso: string) => {
   return date.toLocaleString("pt-BR", sameDay ? { hour: "2-digit", minute: "2-digit" } : { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 };
 
-const gridSize = (count: number) => (count > 60 ? "size-xxs" : count > 40 ? "size-xs" : count > 20 ? "size-sm" : "size-md");
+/* ---------- Estado de cada pagina (chips do topo, estado global e tempo no carrossel) ---------- */
+
+type Tone = "good" | "warning" | "critical" | "unknown";
+// Pior estado da lista; "unknown" so quando nada tem leitura.
+function worst(...tones: string[]): Tone {
+  if (tones.includes("critical")) return "critical";
+  if (tones.includes("warning")) return "warning";
+  if (tones.length && tones.every((tone) => tone === "unknown")) return "unknown";
+  return "good";
+}
+
+// Peso do estado no tempo da pagina: verde passa rapido, critico fica mais na tela.
+const TONE_FACTOR: Record<Tone, number> = { good: 0.6, warning: 1, critical: 1.5, unknown: 1 };
+
+// Algo fora do normal, para as listas "Com problema" (criticos primeiro).
+type Issue = { key: string; tone: "critical" | "warning"; title: string; detail: string; when?: string };
+
+const RECENT_ALERT_MS = 2 * 3600 * 1000;
+const DAY_MS = 24 * 3600 * 1000;
+const downSince = (data: NocData, hostId: string) => {
+  const down = data.problems.find((problem) => problem.hostId === hostId && /icmp|ping/i.test(problem.name));
+  return down ? `há ${duration(down.since)}` : "";
+};
+
+function zabbixTone(data: NocData): Tone {
+  if (sourceDown(data, "zabbix")) return "unknown";
+  return data.problems.some((problem) => problem.severity >= 4) ? "critical" : data.problems.some((problem) => problem.severity >= 2) ? "warning" : "good";
+}
+
+function internetSummary(data: NocData) {
+  const fw = data.firewalls[0];
+  const noLeitura = (link: NocLink) => Boolean(link.stale && link.configured !== false);
+  const offline = data.links.filter((link) => !link.online && !noLeitura(link));
+  const noData = data.links.filter(noLeitura);
+  const saturated = data.links.filter((link) => link.online && !noLeitura(link) && (link.usagePercent ?? 0) >= 90);
+  const online = data.links.filter((link) => link.online && !noLeitura(link)).length;
+  const linkTone: Tone = !data.links.length ? "unknown" : offline.length === data.links.length ? "critical" : offline.length || noData.length || saturated.length ? "warning" : "good";
+  const tunnelsDown = fw ? fw.tunnels.filter((tunnel) => !tunnel.up) : [];
+  const hwAlarms = fw ? fw.sensors.filter((sensor) => sensor.alarm) : [];
+  const haBroken = fw ? fw.nodes.some((node) => node.synced === false) : false;
+  const cpu = fw?.cpu ?? 0;
+  const fwTone: Tone = !fw ? "unknown" : haBroken || cpu >= 90 ? "critical" : tunnelsDown.length || cpu >= 70 || hwAlarms.length ? "warning" : "good";
+  // O motivo vai em destaque no quadro (antes o numero grande era a CPU e escondia a causa da cor).
+  const fwState = !fw
+    ? "—"
+    : haBroken
+      ? "HA fora de sincronia"
+      : cpu >= 90
+        ? `CPU ${pct(cpu)}`
+        : tunnelsDown.length
+          ? `${tunnelsDown.length} ${tunnelsDown.length === 1 ? "túnel caído" : "túneis caídos"}`
+          : hwAlarms.length
+            ? "Alarme de hardware"
+            : cpu >= 70
+              ? `CPU ${pct(cpu)}`
+              : "OK";
+  return { fw, online, offline, noData, saturated, linkTone, tunnelsDown, hwAlarms, fwTone, fwState, tone: worst(linkTone, fwTone) };
+}
+
+function securitySummary(data: NocData) {
+  const analyzer = data.analyzer?.checkedAt ? data.analyzer : null;
+  const defender = data.defender?.checkedAt ? data.defender : null;
+  const groups = analyzer && !analyzer.alertsError ? groupAlerts((analyzer.alerts || []).filter((alert) => alert.action)) : [];
+  const serious = (severity: string) => severity === "critical" || severity === "high";
+  // Grave e recente (2 h) deixa vermelho; grave mais antigo so pede atencao (sem vermelho o dia inteiro).
+  const urgentRecent = groups.filter((group) => serious(group.severity) && Date.now() - new Date(group.last).getTime() < RECENT_ALERT_MS).length;
+  const threats = defender ? defender.devices.threat : [];
+  const highIncidents = defender ? defender.incidents.filter((incident) => incident.severity === "high") : [];
+  const newHigh = highIncidents.filter((incident) => Date.now() - new Date(incident.created).getTime() < DAY_MS).length;
+  const virus = analyzer && !analyzer.antivirusError ? analyzer.antivirus?.realVirus || 0 : 0;
+  const critical = urgentRecent + threats.length + newHigh + virus;
+  const tone: Tone = !analyzer && !defender ? "unknown" : critical ? "critical" : groups.length || highIncidents.length ? "warning" : "good";
+  return { analyzer, defender, groups, urgentRecent, threats, highIncidents, newHigh, virus, critical, tone };
+}
+
+function hardwareIssue(hw: Hardware): Issue | null {
+  if (hw.health !== "critical" && hw.health !== "warning") return null;
+  const parts = [
+    hw.psu.ok < hw.psu.total ? `fontes ${hw.psu.ok}/${hw.psu.total}` : "",
+    hw.fans.ok < hw.fans.total ? `ventoinhas ${hw.fans.ok}/${hw.fans.total}` : "",
+    hw.disks.ok < hw.disks.total || hw.disks.smartAlerts ? `discos ${hw.disks.ok}/${hw.disks.total}${hw.disks.smartAlerts ? ` · ${hw.disks.smartAlerts} com alerta SMART` : ""}` : "",
+    hw.raid === "warning" || hw.raid === "critical" ? `RAID ${RAID_STATE[hw.raid].label.toLowerCase()}` : "",
+  ].filter(Boolean);
+  return { key: `hw-${hw.id}`, tone: hw.health, title: hw.name, detail: parts.join(" · ") || "alerta no iDRAC" };
+}
+
+function serversSummary(data: NocData) {
+  const group = data.groups.find((entry) => entry.key === "servidores");
+  const issues: Issue[] = [];
+  for (const host of group?.hosts || []) {
+    if (host.up === false) issues.push({ key: `srv-${host.id}`, tone: "critical", title: host.name, detail: "sem resposta ao ping", when: downSince(data, host.id) });
+  }
+  for (const hw of data.hardware) {
+    const issue = hardwareIssue(hw);
+    if (issue) issues.push(issue);
+  }
+  const systems = data.beszel?.systems || [];
+  const containers = data.beszel?.containers || [];
+  for (const system of systems) {
+    if (system.status !== "up") {
+      issues.push({ key: `dk-${system.id}`, tone: system.status === "paused" ? "warning" : "critical", title: system.name, detail: system.status === "paused" ? "monitoramento pausado" : "servidor Docker fora do ar" });
+      continue;
+    }
+    const high = [
+      (system.diskPct ?? 0) >= 90 ? `disco ${pct(system.diskPct)}` : "",
+      (system.memPct ?? 0) >= 92 ? `memória ${pct(system.memPct)}` : "",
+      (system.cpu ?? 0) >= 90 ? `CPU ${pct(system.cpu)}` : "",
+    ].filter(Boolean);
+    if (high.length) issues.push({ key: `dk-${system.id}`, tone: "warning", title: system.name, detail: high.join(" · ") });
+  }
+  for (const container of containers) {
+    if (container.health === 3) issues.push({ key: `ct-${container.id}`, tone: "critical", title: container.name, detail: `container com falha · ${container.system}` });
+    else if (container.health === 1) issues.push({ key: `ct-${container.id}`, tone: "warning", title: container.name, detail: `container iniciando · ${container.system}` });
+  }
+  const tone = worst(
+    groupTone(group),
+    ...data.hardware.map((hw) => (hw.health === "ok" ? "good" : hw.health)),
+    issues.some((issue) => issue.tone === "critical") ? "critical" : issues.length ? "warning" : "good",
+  );
+  return { group, issues, systems, containers, tone };
+}
+
+function accessTone(data: NocData): Tone {
+  const groups = ACCESS_KEYS.map((key) => data.groups.find((group) => group.key === key)).filter((group): group is NocGroup => Boolean(group?.total));
+  return groups.length ? worst(...groups.map((group) => groupTone(group))) : "unknown";
+}
+
+function controllerTone(controller: UnifiController): Tone {
+  if (!controller.ok) return "critical";
+  return worst(
+    onlineTone(controller.aps.filter((ap) => ap.online).length, controller.aps.length),
+    onlineTone(controller.switches.filter((sw) => sw.online).length, controller.switches.length),
+  );
+}
+
+function pageTone(page: NocPage, data: NocData): Tone {
+  if (page.controllerId) {
+    const controller = data.unifi?.controllers.find((entry) => entry.id === page.controllerId);
+    return controller ? controllerTone(controller) : "unknown";
+  }
+  switch (page.id) {
+    case "overview":
+    case "overview-2":
+      return zabbixTone(data);
+    case "internet":
+      return internetSummary(data).tone;
+    case "seguranca":
+      return securitySummary(data).tone;
+    case "servidores":
+      return serversSummary(data).tone;
+    case "acesso":
+      return accessTone(data);
+    case "antenas":
+      return groupTone(data.groups.find((group) => group.key === "antenas"));
+    case "unifi-down":
+      return "critical";
+    default:
+      return "unknown";
+  }
+}
+
+/* ---------- Pecas das paginas guiadas por "com problema" ---------- */
+
+function IssueList({ issues, limit, empty }: { issues: Issue[]; limit: number; empty: string }) {
+  if (!issues.length) return <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> {empty}</p>;
+  const sorted = [...issues].sort((a, b) => Number(b.tone === "critical") - Number(a.tone === "critical"));
+  return (
+    <ul className="noc-issues">
+      {sorted.slice(0, limit).map((issue) => (
+        <li key={issue.key} className={`tone-${issue.tone}`}>
+          {issue.tone === "critical" ? <XCircle size={20} /> : <AlertTriangle size={20} />}
+          <div className="noc-vpn-who">
+            <strong title={issue.title}>{issue.title}</strong>
+            <small title={issue.detail}>{issue.detail}</small>
+          </div>
+          {issue.when ? <b className="noc-secalerts-when">{issue.when}</b> : null}
+        </li>
+      ))}
+      {sorted.length > limit ? <li className="noc-more">+ {sorted.length - limit} com problema</li> : null}
+    </ul>
+  );
+}
+
+// Todos os aparelhos so com nome e cor (com problema primeiro): o detalhe fica na lista "Com problema".
+function NameGrid({ items, max = 180 }: { items: { id: string; name: string; tone: string }[]; max?: number }) {
+  const rank = (tone: string) => (tone === "critical" ? 0 : tone === "warning" ? 1 : tone === "unknown" ? 2 : 3);
+  const sorted = [...items].sort((a, b) => rank(a.tone) - rank(b.tone) || a.name.localeCompare(b.name, "pt-BR", { numeric: true }));
+  const size = items.length > 120 ? "xs" : items.length > 60 ? "sm" : "md";
+  return (
+    <div className={`noc-names size-${size}`}>
+      {sorted.slice(0, max).map((item) => (
+        <span key={item.id} className={`tone-${item.tone}`} title={item.name}>{item.name}</span>
+      ))}
+      {sorted.length > max ? <span className="noc-names-more">+ {sorted.length - max}</span> : null}
+    </div>
+  );
+}
+
+/* ---------- Paginas ---------- */
+
+function OverviewPage({ data }: { data: NocData }) {
+  const group = (key: string) => data.groups.find((entry) => entry.key === key);
+  const zabbixDown = Boolean(sourceDown(data, "zabbix"));
+  const net = internetSummary(data);
+  const sec = securitySummary(data);
+  const srv = serversSummary(data);
+  const totalIn = data.links.reduce((sum, link) => sum + link.inBps, 0);
+  const totalOut = data.links.reduce((sum, link) => sum + link.outBps, 0);
+  const severityLine = [5, 4, 3]
+    .map((severity) => ({ severity, count: data.problems.filter((problem) => problem.severity === severity).length }))
+    .map((entry) => `${SEVERITY[entry.severity].label} ${entry.count}`)
+    .join(" · ");
+  const combined = useMemo(() => {
+    // Soma dos links; se nenhum link tem dado naquele momento, fica null (buraco), e nao zero.
+    const series = new Map<number, { t: number; in: number | null; out: number | null }>();
+    for (const link of data.traffic?.links || []) {
+      for (const point of link.series) {
+        const entry = series.get(point.t) || { t: point.t, in: null, out: null };
+        if (point.in !== null) entry.in = (entry.in ?? 0) + point.in;
+        if (point.out !== null) entry.out = (entry.out ?? 0) + point.out;
+        series.set(point.t, entry);
+      }
+    }
+    return Array.from(series.values()).sort((a, b) => a.t - b.t);
+  }, [data.traffic]);
+  // Pico de download nas 6 h (a serie vem em Mbps).
+  const peak = combined.reduce<{ t: number; in: number | null } | null>((best, point) => ((point.in ?? -1) > (best?.in ?? -1) ? point : best), null);
+
+  const groupTile = (key: string, title: string, icon: React.ReactNode) => {
+    const entry = group(key);
+    return (
+      <DomainTile title={title} icon={icon} tone={groupTone(entry)} main={entry ? `${entry.up}/${entry.total}` : "—"} sub={entry ? (entry.down ? `${entry.down} sem resposta` : "todos respondendo") : zabbixDown ? "Sem coleta do Zabbix" : "Grupo não encontrado no Zabbix"}>
+        {entry ? <AvailabilityBar group={entry} /> : null}
+      </DomainTile>
+    );
+  };
+
+  // Catracas, totens, impressoras e videowall num quadro so; o texto mostra so a excecao.
+  const accessTile = () => {
+    const parts = ACCESS_KEYS.map((key) => group(key)).filter((entry): entry is NocGroup => Boolean(entry?.total));
+    if (!parts.length) return null;
+    const total = parts.reduce((sum, entry) => sum + entry.total, 0);
+    const up = parts.reduce((sum, entry) => sum + entry.up, 0);
+    const unknown = parts.reduce((sum, entry) => sum + entry.unknown, 0);
+    const combinedGroup: NocGroup = { key: "acesso", title: "Acesso e atendimento", total, up, down: total - up - unknown, unknown, hosts: [] };
+    const down = parts.filter((entry) => entry.down).map((entry) => `${entry.title.toLowerCase()} ${entry.down} sem resposta`);
+    return (
+      <DomainTile title="Acesso" icon={<ScanFace size={18} />} tone={accessTone(data)} main={`${up}/${total}`} sub={down.join(" · ") || "catracas, totens, impressoras e videowall ok"}>
+        <AvailabilityBar group={combinedGroup} />
+      </DomainTile>
+    );
+  };
+
+  // Antenas e switches: o numero real vem das controladoras UniFi; vale o ping do Zabbix quando a UniFi
+  // nao cobre a maior parte dos aparelhos.
+  const okControllers = (data.unifi?.controllers || []).filter((controller) => controller.ok);
+  const failedControllers = (data.unifi?.controllers || []).filter((controller) => !controller.ok).length;
+  const unifiTile = (kind: "aps" | "switches", zabbixKey: string, title: string, icon: React.ReactNode) => {
+    const devices: { online: boolean }[] = okControllers.flatMap((controller): { online: boolean }[] => controller[kind]);
+    const zabbixTotal = group(zabbixKey)?.total || 0;
+    if (!devices.length && !zabbixTotal) return null;
+    if (!devices.length || devices.length < zabbixTotal * 0.6) return groupTile(zabbixKey, title, icon);
+    const up = devices.filter((device) => device.online).length;
+    const unifiGroup: NocGroup = { key: zabbixKey, title, total: devices.length, up, down: devices.length - up, unknown: 0, hosts: [] };
+    const label = kind === "aps" ? "desconectada(s)" : "desconectado(s)";
+    // Controladora sem resposta deixa o quadro em atencao: parte dos aparelhos esta sem leitura.
+    const tone = worst(groupTone(unifiGroup), failedControllers ? "warning" : "good");
+    const sub = failedControllers ? `${failedControllers} controladora sem resposta` : devices.length - up ? `${devices.length - up} ${label}` : "todos conectados";
+    return (
+      <DomainTile title={title} icon={icon} tone={tone} main={`${up}/${devices.length}`} sub={sub}>
+        <AvailabilityBar group={unifiGroup} />
+      </DomainTile>
+    );
+  };
+
+  const firstServerIssue = srv.issues.find((issue) => issue.tone === "critical") || srv.issues[0];
+  const hwOk = data.hardware.filter((hw) => hw.health === "ok").length;
+  const serversGroup = srv.group;
+
+  return (
+    <div className="noc-page noc-overview">
+      <div className="noc-domains">
+        <DomainTile
+          title="Internet"
+          icon={<Globe size={18} />}
+          tone={net.linkTone}
+          main={data.links.length ? `${net.online}/${data.links.length}` : "—"}
+          sub={
+            !data.links.length
+              ? zabbixDown ? "Sem coleta do Zabbix" : "Nenhum link configurado"
+              : net.offline.length
+                ? `${net.offline.map((link) => link.name).join(", ")} offline`
+                : net.saturated.length
+                  ? `${net.saturated.map((link) => `${link.name} ${pct(link.usagePercent)}`).join(", ")} saturado`
+                  : net.noData.length
+                    ? `${net.noData.length} sem coleta`
+                    : `↓ ${rate(totalIn)} · ↑ ${rate(totalOut)}`
+          }
+        />
+        <DomainTile
+          title="Firewall"
+          icon={<Shield size={18} />}
+          tone={net.fwTone}
+          main={net.fwState}
+          textMain={net.fwState !== "—"}
+          sub={net.fw ? `CPU ${pct(net.fw.cpu)} · memória ${pct(net.fw.memory)}` : zabbixDown ? "Sem coleta do Zabbix" : "Sem FortiGate no Zabbix"}
+        />
+        {unifiTile("switches", "switches", "Switches", <Network size={18} />)}
+        {unifiTile("aps", "antenas", "Antenas UniFi", <Radio size={18} />)}
+        <DomainTile
+          title="Servidores"
+          icon={<Server size={18} />}
+          tone={srv.tone}
+          main={serversGroup ? `${serversGroup.up}/${serversGroup.total}` : "—"}
+          sub={
+            firstServerIssue
+              ? `${firstServerIssue.title}: ${firstServerIssue.detail}`
+              : [data.hardware.length ? `Dell ${hwOk}/${data.hardware.length} ok` : "", srv.containers.length ? `${srv.containers.length} containers ok` : ""].filter(Boolean).join(" · ") || (zabbixDown ? "Sem coleta do Zabbix" : "todos respondendo")
+          }
+        >
+          {serversGroup ? <AvailabilityBar group={serversGroup} /> : null}
+        </DomainTile>
+        {accessTile()}
+        {sec.analyzer || sec.defender ? (
+          <DomainTile
+            title="Segurança"
+            icon={<ShieldAlert size={18} />}
+            tone={sec.tone}
+            main={sec.critical ? String(sec.critical) : sec.groups.length || sec.highIncidents.length ? String(sec.groups.length + sec.highIncidents.length) : "OK"}
+            textMain={!sec.critical && !sec.groups.length && !sec.highIncidents.length}
+            sub={sec.critical ? "pede ação agora" : sec.groups.length || sec.highIncidents.length ? "pedem atenção · veja Segurança" : "nada pedindo ação"}
+          />
+        ) : null}
+      </div>
+
+      <div className="noc-overview-bottom">
+        <section className="noc-card noc-problems-card">
+          <h3>
+            <AlertOctagon size={20} /> Problemas ativos
+            <small>{zabbixDown ? "Zabbix sem resposta" : severityLine}</small>
+          </h3>
+          <ProblemList problems={data.problems} limit={10} zabbixDown={zabbixDown} />
+        </section>
+        <div className="noc-overview-side">
+          <section className="noc-card noc-net-now">
+            <h3><Globe size={20} /> Internet agora <span className="noc-legend"><i className="in" /> Download <i className="out" /> Upload</span></h3>
+            <div className="noc-net-now-figures">
+              <div><ArrowDown size={22} className="noc-in" /> <strong>{rate(totalIn)}</strong></div>
+              <div><ArrowUp size={22} className="noc-out" /> <strong>{rate(totalOut)}</strong></div>
+            </div>
+            <div className="noc-fill"><TrafficMini series={combined} height="100%" /></div>
+            {peak?.in ? <small className="noc-net-peak">pico de download nas últimas 6 h: {rate(peak.in * 1e6)} às {hhmm(new Date(peak.t).toISOString())}</small> : null}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InternetPage({ data }: { data: NocData }) {
+  const net = internetSummary(data);
+  const fw = net.fw;
+  const trafficById = new Map((data.traffic?.links || []).map((link) => [link.id, link]));
+  const temps = (fw?.sensors || []).filter((sensor) => sensor.kind === "temp" && sensor.value !== null);
+  const maxTemp = temps.length ? Math.max(...temps.map((sensor) => sensor.value || 0)) : null;
+  const psu = (fw?.sensors || []).filter((sensor) => sensor.kind === "psu");
+  const fans = (fw?.sensors || []).filter((sensor) => sensor.kind === "fan");
+  // "0/0 OK" quando o firewall nao informa o sensor engana: vira "sem sensor".
+  const sensorCount = (list: Firewall["sensors"]) => (list.length ? `${list.filter((sensor) => !sensor.alarm).length}/${list.length} ok` : "sem sensor");
+  const live = data.vpn?.users || [];
+  // Sem leitura (nem lista, nem contador do FortiGate) fica "—", nunca "0".
+  const liveCount = data.vpn ? live.length : fw?.sslVpnUsers ?? null;
+  const VPN_LIMIT = 6;
+
+  if (!data.links.length && !fw) {
+    return (
+      <div className="noc-page noc-internet">
+        <p className="noc-empty">
+          <AlertTriangle size={20} /> {sourceDown(data, "zabbix") ? "Zabbix sem resposta: estado dos links e do firewall desconhecido." : "Nenhum link de internet nem FortiGate no Zabbix."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="noc-page noc-internet">
+      <div className="noc-links">
+        {data.links.map((link) => {
+          const sd = fw?.sdwan.find((entry) => entry.member === link.member);
+          // Sem leitura ha mais de 10 min: cinza "sem coleta", nunca "Online" com 0 Mbps.
+          const noData = Boolean(link.stale && link.configured !== false);
+          const usageTone = noData ? "unknown" : !link.online ? "critical" : (link.usagePercent ?? 0) >= 90 ? "critical" : (link.usagePercent ?? 0) >= 70 ? "warning" : "good";
+          const state = noData ? "unknown" : !link.online ? "critical" : usageTone === "critical" ? "warning" : "good";
+          return (
+            <section key={link.id} className={`noc-card noc-link tone-${state}`}>
+              <header>
+                <h3>{link.name}</h3>
+                <em className={`tone-${state}`}>
+                  {noData ? <AlertTriangle size={16} /> : link.online ? <CheckCircle2 size={16} /> : <XCircle size={16} />} {noData ? "Sem coleta" : link.online ? "Online" : "Offline"}
+                </em>
+              </header>
+              <div className="noc-link-now">
+                <div><span><ArrowDown size={15} className="noc-in" /> Download</span><strong>{rate(link.inBps)}</strong></div>
+                <div><span><ArrowUp size={15} className="noc-out" /> Upload</span><strong>{rate(link.outBps)}</strong></div>
+                <div className={`noc-link-usage tone-${usageTone}`}><span>Uso</span><strong>{pct(link.usagePercent)}</strong><small>de {link.contractedMbps >= 1000 ? `${link.contractedMbps / 1000} Gbps` : `${link.contractedMbps} Mbps`}</small></div>
+              </div>
+              <div className="noc-fill"><TrafficMini series={trafficById.get(link.id)?.series || []} height="100%" /></div>
+              <dl className="noc-sdwan">
+                <div><dt>Latência</dt><dd>{sd?.latencyMs ?? link.latencyMs ?? "—"}{(sd?.latencyMs ?? link.latencyMs) === null || (sd?.latencyMs ?? link.latencyMs) === undefined ? "" : " ms"}</dd></div>
+                <div><dt>Perda</dt><dd className={(sd?.loss ?? link.lossPercent ?? 0) > 0 ? "bad" : ""}>{sd?.loss ?? link.lossPercent ?? "—"}{(sd?.loss ?? link.lossPercent) === null || (sd?.loss ?? link.lossPercent) === undefined ? "" : "%"}</dd></div>
+                <div><dt>SD-WAN</dt><dd>{sd ? (sd.alive ? "Ativo" : "Falhou") : "—"}</dd></div>
+              </dl>
+            </section>
+          );
+        })}
+      </div>
+
+      <div className="noc-fw noc-fw3">
+        {fw ? (
+          <section className={`noc-card tone-${net.fwTone}`}>
+            <h3><Shield size={20} /> {fw.name} <small>{net.fwState === "OK" ? "operando normalmente" : net.fwState}</small></h3>
+            <div className="noc-fw-main">
+              <Meter label="CPU" value={fw.cpu} icon={<Cpu size={15} />} />
+              <Meter label="Memória" value={fw.memory} icon={<MemoryStick size={15} />} />
+              <div className="noc-big-stat"><span>Sessões ativas</span><strong>{fw.sessions === null ? "—" : fw.sessions.toLocaleString("pt-BR")}</strong></div>
+            </div>
+            <div className="noc-ha-nodes">
+              {fw.nodes.map((node, index) => (
+                <div key={node.hostname} className={`noc-ha-node ${node.synced === false ? "tone-critical" : "tone-good"}`}>
+                  <strong>{node.hostname} <em>{index === 0 ? "Principal" : "Secundário"}</em></strong>
+                  <small>{node.synced === false ? <><XCircle size={13} /> Fora de sincronia</> : <><CheckCircle2 size={13} /> Sincronizado</>}</small>
+                </div>
+              ))}
+            </div>
+            <p className={`noc-fw-line tone-${net.hwAlarms.length ? "critical" : "good"}`}>
+              <Thermometer size={16} /> {net.hwAlarms.length ? `${net.hwAlarms.length} alarme(s) de hardware` : "Hardware ok"} · {maxTemp === null ? "—" : `${Math.round(maxTemp)} °C`} · fontes {sensorCount(psu)} · ventoinhas {sensorCount(fans)}
+            </p>
+            {data.routers.map((router) => (
+              <p key={router.id} className={`noc-fw-line tone-${(router.cpu ?? 0) >= 90 ? "critical" : (router.cpu ?? 0) >= 70 ? "warning" : "good"}`}>
+                <Network size={16} /> {router.name} · CPU {pct(router.cpu)} · memória {pct(router.memory)}{router.temperature !== null ? ` · ${router.temperature} °C` : ""}
+              </p>
+            ))}
+          </section>
+        ) : null}
+        {fw ? (
+          <section className="noc-card">
+            <h3><Zap size={20} /> Túneis VPN <small>{fw.tunnels.length - net.tunnelsDown.length}/{fw.tunnels.length} ativos</small></h3>
+            {net.tunnelsDown.length ? (
+              <ul className="noc-tunnels">
+                {net.tunnelsDown.slice(0, 6).map((tunnel) => (
+                  <li key={tunnel.name} className="tone-critical">
+                    <XCircle size={16} />
+                    <strong>{tunnel.name}</strong>
+                    <span>Caído</span>
+                  </li>
+                ))}
+                {net.tunnelsDown.length > 6 ? <li className="noc-more">+ {net.tunnelsDown.length - 6} caídos</li> : null}
+              </ul>
+            ) : (
+              <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Todos os {fw.tunnels.length} túneis ativos.</p>
+            )}
+            {net.tunnelsDown.length && fw.tunnels.length > net.tunnelsDown.length ? <small className="noc-faz-foot">{fw.tunnels.length - net.tunnelsDown.length} túneis ativos (não listados)</small> : null}
+          </section>
+        ) : null}
+        <section className="noc-card noc-vpn-now">
+          <h3><KeyRound size={20} /> VPN agora <small>{liveCount === null ? "sem leitura" : `${liveCount} ${liveCount === 1 ? "conectado" : "conectados"}`}</small></h3>
+          {live.length ? (
+            <ul className="noc-res">
+              {live.slice(0, VPN_LIMIT).map((user) => (
+                <li key={`${user.login}-${user.connectedSec}`}>
+                  <strong title={user.name}>{user.name}</strong>
+                  <span>há {fmtSince(user.connectedSec)}</span>
+                </li>
+              ))}
+              {live.length > VPN_LIMIT ? <li className="noc-more">+ {live.length - VPN_LIMIT} conectados</li> : null}
+            </ul>
+          ) : (
+            <p className="noc-empty">{data.vpn ? "Ninguém conectado na VPN agora." : liveCount === null ? "Sem leitura da VPN no FortiGate." : `${liveCount} conectado(s) · lista de nomes indisponível`}</p>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// Incidentes iguais (ex.: varios "e-mails removidos") viram uma linha com a quantidade.
+function groupIncidents(incidents: Defender["incidents"]) {
+  const groups = new Map<string, { title: string; original: string; severity: string; count: number; oldest: string; newest: string }>();
+  for (const incident of incidents) {
+    const title = defenderName(incident.title);
+    const key = `${incident.severity}|${title}`;
+    const group = groups.get(key) || { title, original: incident.title, severity: incident.severity, count: 0, oldest: incident.created, newest: incident.created };
+    group.count++;
+    if (incident.created < group.oldest) group.oldest = incident.created;
+    if (incident.created > group.newest) group.newest = incident.created;
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => (DEFENDER_RANK[a.severity] ?? 4) - (DEFENDER_RANK[b.severity] ?? 4) || b.newest.localeCompare(a.newest));
+}
+
+// FortiAnalyzer (alertas e antivirus) + Microsoft Defender numa pagina so, organizada por "o que pede acao".
+function SecurityPage({ data }: { data: NocData }) {
+  const sec = securitySummary(data);
+  const { analyzer, defender } = sec;
+  const LIMIT = 5;
+  if (!analyzer && !defender) {
+    const failure = data.analyzer?.error || data.defender?.error;
+    return <p className="noc-empty">{failure ? `Segurança indisponível: ${failure}` : "Consultando o FortiAnalyzer e o Microsoft Defender..."}</p>;
+  }
+  const incidentRows = defender ? groupIncidents(defender.incidents) : [];
+  const unassignedHigh = sec.highIncidents.filter((incident) => !incident.assigned).length;
+  const alerts = analyzer?.alerts || [];
+  const attacks = alerts.filter((alert) => !alert.action && NOISE_KINDS[0][0].test(alert.handler)).length;
+  const av = analyzer?.antivirus;
+  const ipsBlocked = data.firewalls[0]?.security?.totals.blocked;
+  const score = defender?.secureScore ? Math.round((defender.secureScore.current / defender.secureScore.max) * 100) : null;
+  const lastSerious = sec.groups.find((group) => group.severity === "critical" || group.severity === "high");
+  return (
+    <div className="noc-page noc-sec2">
+      <div className="noc-faz-kpis noc-kpirow">
+        {analyzer ? (
+          analyzer.alertsError ? (
+            <div className="tone-unknown"><span>Pedem atenção</span><strong>—</strong><small>consulta de alertas falhou</small></div>
+          ) : (
+            <div className={`tone-${sec.urgentRecent ? "critical" : sec.groups.length ? "warning" : "good"}`}>
+              <span>Pedem atenção</span>
+              <strong>{sec.groups.length}</strong>
+              <small>{sec.urgentRecent ? `${sec.urgentRecent} grave(s) nas últimas 2 h` : lastSerious ? `último grave ${fmtWhen(lastSerious.last)}` : "últimas 24 h"}</small>
+            </div>
+          )
+        ) : null}
+        {defender ? (
+          <div className={sec.threats.length ? "tone-critical" : "tone-good"}>
+            <span>Máquinas com ameaça</span>
+            <strong>{sec.threats.length}</strong>
+            <small>{sec.threats.length ? `${sec.threats.slice(0, 2).map((device) => device.name).join(", ")}${sec.threats.length > 2 ? ` e +${sec.threats.length - 2}` : ""}` : "nenhuma ameaça ativa"}</small>
+          </div>
+        ) : null}
+        {defender ? (
+          <div className={sec.newHigh ? "tone-critical" : sec.highIncidents.length ? "tone-warning" : "tone-good"}>
+            <span>Incidentes altos</span>
+            <strong>{sec.highIncidents.length}</strong>
+            <small>{sec.highIncidents.length ? `${unassignedHigh} sem responsável${sec.newHigh ? ` · ${sec.newHigh} novo(s) hoje` : ""}` : "nenhum aberto"}</small>
+          </div>
+        ) : null}
+        {analyzer ? (
+          analyzer.antivirusError ? (
+            <div className="tone-unknown"><span>Vírus (7 dias)</span><strong>—</strong><small>consulta do antivírus falhou</small></div>
+          ) : (
+            <div className={sec.virus ? "tone-critical" : "tone-good"}><span>Vírus (7 dias)</span><strong>{sec.virus}</strong><small>{sec.virus ? "arquivos infectados barrados" : "nenhum arquivo infectado"}</small></div>
+          )
+        ) : null}
+      </div>
+
+      <div className="noc-vpn-grid" style={{ gridTemplateColumns: analyzer && defender ? undefined : "minmax(0, 1fr)" }}>
+        {analyzer ? (
+          <section className="noc-card">
+            <h3><AlertOctagon size={20} /> FortiAnalyzer · pedem ação <small>últimas 24 h · vão para o WhatsApp</small></h3>
+            {analyzer.alertsError ? (
+              <p className="noc-empty"><AlertTriangle size={18} /> Não foi possível consultar os alertas agora.</p>
+            ) : sec.groups.length ? (
+              <ul className="noc-secalerts-list">
+                {sec.groups.slice(0, LIMIT).map((group) => (
+                  <li key={group.key}>
+                    <em className={`noc-faz-level tone-${threatTone(group.severity)}`}>{LEVEL_NAMES[group.severity] || group.severity}</em>
+                    <div className="noc-vpn-who">
+                      <strong title={group.first.handler}>{alertName(group.first.handler, group.first.subject)}{group.alerts > 1 ? <span className="noc-secalerts-count"> · {group.alerts} alertas</span> : null}</strong>
+                      <small title={group.first.subject}>{groupDetail(group)}</small>
+                    </div>
+                    <b className="noc-secalerts-when">{fmtWhen(group.last)}</b>
+                  </li>
+                ))}
+                {sec.groups.length > LIMIT ? <li className="noc-more">+ {sec.groups.length - LIMIT} pedindo atenção</li> : null}
+              </ul>
+            ) : (
+              <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nada pedindo ação nas últimas 24 h.</p>
+            )}
+          </section>
+        ) : null}
+        {defender ? (
+          <section className="noc-card">
+            <h3><ShieldAlert size={20} /> Defender · incidentes abertos <small>mais graves primeiro · agrupados</small></h3>
+            {incidentRows.length ? (
+              <ul className="noc-secalerts-list">
+                {incidentRows.slice(0, LIMIT).map((row) => (
+                  <li key={`${row.severity}-${row.title}`}>
+                    <em className={`noc-faz-level tone-${defenderTone(row.severity)}`}>{DEFENDER_LEVEL[row.severity] || row.severity}</em>
+                    <div className="noc-vpn-who">
+                      <strong title={row.original}>{row.title}{row.count > 1 ? <span className="noc-secalerts-count"> · {row.count} incidentes</span> : null}</strong>
+                      <small>{row.count > 1 ? `o mais antigo aberto ${daysAgo(row.oldest)}` : `aberto ${daysAgo(row.oldest)}`}</small>
+                    </div>
+                    <b className="noc-secalerts-when">{fmtWhen(row.newest)}</b>
+                  </li>
+                ))}
+                {incidentRows.length > LIMIT ? <li className="noc-more">+ {incidentRows.length - LIMIT} outros tipos de incidente</li> : null}
+              </ul>
+            ) : (
+              <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nenhum incidente aberto.</p>
+            )}
+          </section>
+        ) : null}
+      </div>
+
+      <div className="noc-foot-lines">
+        {analyzer ? (
+          <span>
+            <b>Barrado sem ação:</b> {analyzer.alertsError ? "—" : fmtCount(attacks)} ataques da internet (24 h)
+            {av && !analyzer.antivirusError ? ` · ${fmtCount(av.total)} bloqueios preventivos do antivírus (7 dias)` : ""}
+            {ipsBlocked ? ` · IPS do firewall: ${fmtCount(ipsBlocked)} bloqueios (24 h)` : ""}
+          </span>
+        ) : null}
+        {defender ? (
+          <span>
+            <b>Postura:</b> Secure Score {score === null ? "—" : `${score}%`} · {defender.devices.secured}/{defender.devices.total} máquinas com Defender ativo
+            {defender.devices.deactivated ? ` · ${defender.devices.deactivated} sem Defender ativo` : ""}
+          </span>
+        ) : null}
+        <small>{[analyzer ? `FortiAnalyzer ${fmtWhen(analyzer.checkedAt)}` : "", defender ? `Defender ${fmtWhen(defender.checkedAt)}` : ""].filter(Boolean).join(" · ")}</small>
+      </div>
+    </div>
+  );
+}
+
+// Analise do trafego (FortiAnalyzer): fora do "esta tudo bem?", passa a cada duas voltas do carrossel.
+function TrafficPage({ analyzer }: { analyzer: Analyzer }) {
+  if (!analyzer.checkedAt) {
+    return <p className="noc-empty">{analyzer.error ? `FortiAnalyzer: ${analyzer.error}` : "Consultando o FortiAnalyzer (as visões de 24 h levam alguns segundos)..."}</p>;
+  }
+  const { totals } = analyzer;
+  const blockedPct = totals.sessions ? Math.round((totals.sessionsBlocked / totals.sessions) * 100) : 0;
+  const ips = analyzer.threats.filter((threat) => threat.type === "ips" && threat.incidents > 0).slice(0, 5);
+  const topIps = Math.max(1, ...ips.map((threat) => threat.incidents));
+  return (
+    <div className="noc-page noc-traffic">
+      <div className="noc-faz-kpis noc-kpirow">
+        <div><span>Tráfego da internet</span><strong>{fmtBytes(totals.bandwidth)}</strong><small>últimas {analyzer.windowHours} h</small></div>
+        <div><span>Sessões</span><strong>{fmtCount(totals.sessions)}</strong><small>conexões abertas</small></div>
+        <div><span>Sessões bloqueadas</span><strong>{blockedPct}%</strong><small>{fmtCount(totals.sessionsBlocked)} pelo firewall</small></div>
+      </div>
+      <div className="noc-cols3">
+        <section className="noc-card">
+          <h3><Network size={20} /> Quem mais usa</h3>
+          <BarList items={analyzer.sources.slice(0, 5)} value={(source) => source.bandwidth} label={(source) => source.name || source.ip} />
+        </section>
+        <section className="noc-card">
+          <h3><Activity size={20} /> Aplicações</h3>
+          <BarList items={analyzer.applications.slice(0, 5)} value={(app) => app.bandwidth} label={(app) => app.name} />
+        </section>
+        <section className="noc-card">
+          <h3><ShieldCheck size={20} /> Ameaças do IPS</h3>
+          {ips.length ? (
+            <ul className="noc-faz-list">
+              {ips.map((threat) => (
+                <li key={threat.name}>
+                  <div className="noc-faz-row">
+                    <span className="noc-faz-name" title={threat.name}>{THREAT_NAMES[threat.name] || threat.name}</span>
+                    <b>{fmtCount(threat.incidents)}</b>
+                  </div>
+                  <div className="noc-hbar" aria-hidden="true"><i style={{ width: `${Math.max(2, (threat.incidents / topIps) * 100)}%` }} /></div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Nenhuma ameaça do IPS em 24 h.</p>
+          )}
+        </section>
+      </div>
+      <small className="noc-faz-foot">FortiAnalyzer · atualizado {fmtWhen(analyzer.checkedAt)}{analyzer.error ? ` · última consulta falhou: ${analyzer.error}` : ""}</small>
+    </div>
+  );
+}
+
+const meterTone = (value: number | null, warn: number, crit: number) => (value === null ? "unknown" : value >= crit ? "critical" : value >= warn ? "warning" : "good");
+
+// Servidores (ping), hardware Dell e Docker numa pagina so, guiada por "com problema".
+function ServersPage({ data }: { data: NocData }) {
+  const srv = serversSummary(data);
+  const { group, systems, containers } = srv;
+  const zabbixDown = Boolean(sourceDown(data, "zabbix"));
+  const hwOk = data.hardware.filter((hw) => hw.health === "ok").length;
+  const failing = containers.filter((container) => container.health === 3).length;
+  const dockerUp = systems.filter((system) => system.status === "up").length;
+  return (
+    <div className="noc-page noc-srv2">
+      <div className="noc-faz-kpis noc-kpirow">
+        <div className={`tone-${groupTone(group)}`}>
+          <span>Servidores (ping)</span>
+          <strong>{group ? `${group.up}/${group.total}` : "—"}</strong>
+          <small>{group ? (group.down ? `${group.down} sem resposta` : "todos respondendo") : zabbixDown ? "sem coleta do Zabbix" : "grupo não encontrado no Zabbix"}</small>
+        </div>
+        {data.hardware.length ? (
+          <div className={`tone-${worst(...data.hardware.map((hw) => (hw.health === "ok" ? "good" : hw.health)))}`}>
+            <span>Hardware Dell</span>
+            <strong>{hwOk}/{data.hardware.length}</strong>
+            <small>{hwOk === data.hardware.length ? "todos saudáveis" : `${data.hardware.length - hwOk} com alerta`}</small>
+          </div>
+        ) : null}
+        {systems.length ? (
+          <div className={dockerUp === systems.length ? "tone-good" : "tone-critical"}>
+            <span>Servidores Docker</span>
+            <strong>{dockerUp}/{systems.length}</strong>
+            <small>{dockerUp === systems.length ? "todos online" : `${systems.length - dockerUp} fora do ar`}</small>
+          </div>
+        ) : null}
+        {data.beszel ? (
+          <div className={data.beszel.containersError ? "tone-unknown" : failing ? "tone-critical" : "tone-good"}>
+            <span>Containers</span>
+            <strong>{data.beszel.containersError ? "—" : containers.length}</strong>
+            <small>{data.beszel.containersError ? "lista indisponível" : failing ? `${failing} com falha` : "rodando, nenhum com falha"}</small>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="noc-vpn-grid">
+        <section className="noc-card">
+          <h3><AlertTriangle size={20} /> Com problema <small>{srv.issues.length ? `${srv.issues.length}` : "nenhum"}</small></h3>
+          <IssueList issues={srv.issues} limit={6} empty="Nenhum servidor, hardware ou container com problema." />
+        </section>
+        <section className="noc-card">
+          <h3><Cpu size={20} /> Recursos</h3>
+          {systems.length || data.hardware.length ? (
+            <ul className="noc-res">
+              {systems.map((system) => {
+                const online = system.status === "up";
+                const tone = online ? worst(meterTone(system.cpu, 70, 90), meterTone(system.memPct, 80, 92), meterTone(system.diskPct, 80, 90)) : "critical";
+                return (
+                  <li key={system.id} className={`tone-${tone}`}>
+                    <strong title={system.host}>{system.name}</strong>
+                    {online ? (
+                      <span>
+                        CPU <em className={`tone-${meterTone(system.cpu, 70, 90)}`}>{pct(system.cpu)}</em> · memória <em className={`tone-${meterTone(system.memPct, 80, 92)}`}>{pct(system.memPct)}</em> · disco{" "}
+                        <em className={`tone-${meterTone(system.diskPct, 80, 90)}`}>{pct(system.diskPct)}</em>
+                      </span>
+                    ) : (
+                      <span>fora do ar</span>
+                    )}
+                  </li>
+                );
+              })}
+              {data.hardware.map((hw) => {
+                const temps = hw.temps.map((temp) => temp.value).filter((value): value is number => value !== null);
+                return (
+                  <li key={hw.id} className={`tone-${hw.health === "ok" ? "good" : hw.health}`}>
+                    <strong>{hw.name}</strong>
+                    <span>
+                      {temps.length ? `${Math.max(...temps)} °C · ` : ""}fontes {partCount(hw.psu)} · discos {partCount(hw.disks)} · RAID {(RAID_STATE[hw.raid] || RAID_STATE.unknown).label}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="noc-empty">Sem Docker (Beszel) nem iDRAC no Zabbix.</p>
+          )}
+        </section>
+      </div>
+
+      {group ? (
+        <section className="noc-card noc-names-card">
+          <h3><Server size={20} /> Todos os servidores <small>{group.up}/{group.total} respondendo</small></h3>
+          <NameGrid items={group.hosts.map((host) => ({ id: host.id, name: host.name, tone: hostTone(host) }))} />
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+// Catracas (por conjunto), totens, impressoras e videowall: conjunto ok vira uma linha, so o que falhou se abre.
+function AccessPage({ data }: { data: NocData }) {
+  const group = (key: string) => data.groups.find((entry) => entry.key === key);
+  const turnstiles = group("catracas");
+  // Catracas agrupadas por conjunto; sem conjunto, cada host vira o proprio "conjunto".
+  const sets = new Map<string, NocHost[]>();
+  for (const host of turnstiles?.hosts || []) {
+    const key = host.set || host.name;
+    sets.set(key, [...(sets.get(key) || []), host]);
+  }
+  const byName = (a: [string, NocHost[]], b: [string, NocHost[]]) => a[0].localeCompare(b[0], "pt-BR", { numeric: true });
+  const setList = Array.from(sets.entries()).sort(byName);
+  const failingSets = setList.filter(([, hosts]) => hosts.some((host) => host.up === false));
+  const okSets = setList.filter(([, hosts]) => !hosts.some((host) => host.up === false));
+  const others = ["totens", "impressoras", "videowall"].map(group).filter((entry): entry is NocGroup => Boolean(entry?.total));
+  const icons: Record<string, React.ReactNode> = { totens: <MonitorPlay size={20} />, impressoras: <Printer size={20} />, videowall: <MonitorPlay size={20} /> };
+  return (
+    <div className="noc-page noc-acc2">
+      <div className="noc-faz-kpis noc-kpirow">
+        {turnstiles?.total ? (
+          <div className={`tone-${failingSets.length ? (okSets.length ? "warning" : "critical") : "good"}`}>
+            <span>Catracas</span>
+            <strong>{okSets.length}/{setList.length}</strong>
+            <small>{failingSets.length ? `${failingSets.length} conjunto(s) com falha` : "todos os conjuntos operando"}</small>
+          </div>
+        ) : null}
+        {others.map((entry) => (
+          <div key={entry.key} className={`tone-${groupTone(entry)}`}>
+            <span>{entry.title}</span>
+            <strong>{entry.up}/{entry.total}</strong>
+            <small>{entry.down ? `${entry.down} sem resposta` : "todos online"}</small>
+          </div>
+        ))}
+      </div>
+
+      {turnstiles?.total ? (
+        <section className="noc-card noc-acc2-sets">
+          <h3><ScanFace size={20} /> Catracas <small>{setList.length} {setList.length === 1 ? "conjunto" : "conjuntos"} · {turnstiles.up}/{turnstiles.total} aparelhos online</small></h3>
+          {failingSets.length ? (
+            <div className="noc-sets">
+              {failingSets.map(([name, hosts]) => <SetCard key={name} name={name} hosts={hosts} problems={data.problems} />)}
+            </div>
+          ) : (
+            <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Todas as catracas operando.</p>
+          )}
+          {okSets.length ? (
+            <div className="noc-setchips">
+              {okSets.map(([name, hosts]) => (
+                <span key={name}><CheckCircle2 size={15} /> {name} <small>{hosts.length}/{hosts.length}</small></span>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {others.length ? (
+        <div className="noc-cols3" style={{ gridTemplateColumns: `repeat(${others.length}, minmax(0, 1fr))` }}>
+          {others.map((entry) => (
+            <section key={entry.key} className="noc-card">
+              <h3>{icons[entry.key]} {entry.title} <small>{entry.up}/{entry.total} online</small></h3>
+              <IssueList
+                issues={entry.hosts.filter((host) => host.up === false).map((host) => ({ key: host.id, tone: "critical" as const, title: host.name, detail: "sem resposta ao ping", when: downSince(data, host.id) }))}
+                limit={4}
+                empty={`Todos online (${entry.total}).`}
+              />
+            </section>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function ControllerPage({ controller }: { controller: UnifiController }) {
   if (!controller.ok) {
@@ -1799,35 +1658,46 @@ function ControllerPage({ controller }: { controller: UnifiController }) {
 
   const apsOnline = controller.aps.filter((ap) => ap.online).length;
   const swOnline = controller.switches.filter((sw) => sw.online).length;
-  const apFocus = controller.aps.length >= controller.switches.length;
-  const busiest = Math.max(1, ...controller.aps.map((ap) => ap.clients));
   const poe = controller.switches.reduce((sum, sw) => sum + sw.poeWatts, 0);
   const traffic = controller.traffic.txBps + controller.traffic.rxBps;
   const upgrades = controller.aps.filter((ap) => ap.upgradable).length + controller.switches.filter((sw) => sw.upgradable).length;
-  const congested = controller.aps
-    .filter((ap) => ap.online)
-    .flatMap((ap) => ap.radios.filter((radio) => (radio.utilization ?? 0) >= 70).map((radio) => ({ ap: ap.name, ...radio })))
-    .sort((a, b) => (b.utilization ?? 0) - (a.utilization ?? 0));
   const apTone = onlineTone(apsOnline, controller.aps.length);
   const swTone = onlineTone(swOnline, controller.switches.length);
   const satTone = satisfactionTone(controller.clients.satisfaction);
   // Quedas em 24 h: pelo log de eventos; sem eventos (consulta desligada), pelos alarmes de desconexao.
-  const dayAgo = Date.now() - 24 * 3600 * 1000;
+  const dayAgo = Date.now() - DAY_MS;
   const drops = controller.events.length
     ? controller.events.filter(isDropEvent).length
     : controller.alarms.filter((alarm) => /disconnected|lost contact/i.test(alarm.message) && new Date(alarm.time).getTime() >= dayAgo).length;
   // MAC -> nome (o id do aparelho termina no MAC, com ou sem prefixo da controladora).
   const deviceNames = new Map<string, string>([...controller.aps, ...controller.switches].map((device) => [device.id.slice(-17).toLowerCase(), device.name]));
+  const busy = (ap: UnifiAp) => Math.max(0, ...ap.radios.map((radio) => radio.utilization ?? 0));
+
+  // Com problema: desconectados, canais congestionados, switch quente/CPU alta, experiencia ruim.
+  const issues: Issue[] = [
+    ...controller.aps.filter((ap) => !ap.online).map((ap): Issue => ({ key: ap.id, tone: "critical", title: ap.name, detail: "antena desconectada da controladora" })),
+    ...controller.switches.filter((sw) => !sw.online).map((sw): Issue => ({ key: sw.id, tone: "critical", title: sw.name, detail: "switch desconectado da controladora" })),
+    ...controller.switches
+      .filter((sw) => sw.online && ((sw.cpu ?? 0) >= 90 || (sw.temperature ?? 0) >= 75))
+      .map((sw): Issue => ({ key: `${sw.id}-hot`, tone: "warning", title: sw.name, detail: [`CPU ${pct(sw.cpu)}`, sw.temperature !== null ? `${sw.temperature} °C` : ""].filter(Boolean).join(" · ") })),
+    ...controller.aps
+      .filter((ap) => ap.online)
+      // Canal congestionado e desempenho, nao queda: fica em atencao (vermelho so para desconectado).
+      .flatMap((ap) => ap.radios.filter((radio) => (radio.utilization ?? 0) >= 70).map((radio): Issue => ({ key: `${ap.id}-${radio.band}`, tone: "warning", title: ap.name, detail: `${radio.band} canal ${radio.channel ?? "—"} · uso do canal ${pct(radio.utilization)}` }))),
+    ...controller.aps
+      .filter((ap) => ap.online && ap.satisfaction !== null && ap.satisfaction < 60)
+      .map((ap): Issue => ({ key: `${ap.id}-sat`, tone: "warning", title: ap.name, detail: `experiência ruim dos clientes (${ap.satisfaction}%)` })),
+  ];
+  const all = [
+    ...controller.aps.map((ap) => ({ id: ap.id, name: ap.name, tone: !ap.online ? "critical" : busy(ap) >= 80 || (ap.satisfaction !== null && ap.satisfaction < 60) ? "warning" : "good" })),
+    ...controller.switches.map((sw) => ({ id: sw.id, name: sw.name, tone: !sw.online ? "critical" : (sw.cpu ?? 0) >= 90 || (sw.temperature ?? 0) >= 75 ? "warning" : "good" })),
+  ];
+  const lastEvents = controller.events.slice(0, 4);
 
   return (
-    <div className="noc-page noc-unifi">
+    <div className="noc-page noc-unifi noc-unifi2">
       {controller.message ? <p className="noc-collect-warn"><AlertTriangle size={18} /> {controller.message}</p> : null}
       <div className="noc-group-head noc-ctrl-head">
-        <div>
-          <span>Clientes conectados</span>
-          <strong>{controller.clients.total.toLocaleString("pt-BR")}</strong>
-          <small>{controller.clients.wireless.toLocaleString("pt-BR")} Wi-Fi · {controller.clients.wired.toLocaleString("pt-BR")} cabo{controller.clients.guests ? ` · ${controller.clients.guests} convidados` : ""}</small>
-        </div>
         <div className={`tone-${apTone}`}>
           <span>Antenas</span>
           <strong>{apsOnline}/{controller.aps.length}</strong>
@@ -1839,128 +1709,53 @@ function ControllerPage({ controller }: { controller: UnifiController }) {
           <small>{controller.switches.length ? <>{toneIcon(swTone, 13)} PoE {Math.round(poe).toLocaleString("pt-BR")} W</> : "nenhum nesta controladora"}</small>
         </div>
         <div>
-          <span>Tráfego agora</span>
-          <strong>{traffic ? rate(traffic) : "—"}</strong>
-          <small>somando as antenas</small>
+          <span>Clientes conectados</span>
+          <strong>{controller.clients.total.toLocaleString("pt-BR")}</strong>
+          <small>{controller.clients.wireless.toLocaleString("pt-BR")} Wi-Fi · {controller.clients.wired.toLocaleString("pt-BR")} cabo</small>
         </div>
         <div className={`tone-${satTone}`}>
           <span>Experiência Wi-Fi</span>
           <strong>{controller.clients.satisfaction === null ? "—" : `${controller.clients.satisfaction}%`}</strong>
           <small>satisfação média dos clientes</small>
         </div>
-        <div className={drops ? "tone-warning" : "tone-good"}>
+        <div>
+          <span>Tráfego agora</span>
+          <strong>{traffic ? rate(traffic) : "—"}</strong>
+          <small>somando as antenas</small>
+        </div>
+        <div className={drops >= 3 ? "tone-warning" : ""}>
           <span>Quedas em 24 h</span>
           <strong>{drops}</strong>
           <small>{controller.alarms.length ? `${controller.alarms.length} alarmes abertos` : upgrades ? `${upgrades} com firmware novo` : `UniFi ${controller.version}`}</small>
         </div>
       </div>
 
-      <div className="noc-unifi-body">
-        <section className="noc-card noc-unifi-switches">
-          {apFocus ? (
-            <>
-              <h3><Radio size={20} /> Antenas <small>clientes · uso do canal 2,4 / 5 GHz · tráfego</small></h3>
-              <div className={`noc-swgrid ${gridSize(controller.aps.length)}`}>
-                {controller.aps.map((ap) => <ApTile key={ap.id} ap={ap} busiest={busiest} compact={controller.aps.length > 60} />)}
-              </div>
-            </>
-          ) : (
-            <>
-              <h3><Network size={20} /> Switches <small>portas ativas · PoE · CPU · temperatura</small></h3>
-              <div className={`noc-swgrid ${gridSize(controller.switches.length)}`}>
-                {/* Desconectados primeiro, como nas antenas. */}
-                {[...controller.switches].sort((a, b) => Number(a.online) - Number(b.online)).map((sw) => <SwitchTile key={sw.id} sw={sw} />)}
-              </div>
-            </>
-          )}
+      <div className="noc-unifi2-body">
+        <section className="noc-card">
+          <h3><AlertTriangle size={20} /> Com problema <small>{issues.length ? `${issues.length}` : "nenhum"}</small></h3>
+          <IssueList issues={issues} limit={7} empty="Antenas e switches desta controladora sem problema." />
         </section>
-
-        <div className="noc-unifi-side noc-ctrl-side">
-          <section className="noc-card">
-            <h3><Wifi size={20} /> Clientes por banda</h3>
-            <HBarList rows={controller.clients.byBand.map((entry) => ({ label: entry.band, count: entry.count }))} empty="Sem clientes no Wi-Fi." />
-          </section>
-          <section className="noc-card">
-            <h3><Wifi size={20} /> Redes Wi-Fi</h3>
-            <HBarList rows={controller.clients.bySsid.slice(0, 5).map((entry) => ({ label: entry.ssid, count: entry.count }))} empty="Sem clientes no Wi-Fi." />
-          </section>
-          {apFocus && controller.switches.length ? (
-            <section className="noc-card">
-              <h3><Network size={20} /> Switches <small>{swOnline}/{controller.switches.length} online</small></h3>
-              <ul className="noc-mini-list">
-                {[...controller.switches].sort((a, b) => Number(a.online) - Number(b.online)).slice(0, 5).map((sw) => (
-                  <li key={sw.id} className={`tone-${sw.online ? "good" : "critical"}`}>
-                    {sw.online ? <CheckCircle2 size={14} /> : <WifiOff size={14} />}
-                    <span>{sw.name}</span>
-                    <b>{sw.online ? `${sw.portsUp}/${sw.portsTotal} portas` : "desconectado"}</b>
-                  </li>
-                ))}
-                {controller.switches.length > 5 ? <li className="noc-more">+ {controller.switches.length - 5} switches</li> : null}
-              </ul>
-            </section>
-          ) : null}
-          {!apFocus && controller.aps.length ? (
-            <section className="noc-card">
-              <h3><Radio size={20} /> Antenas <small>{apsOnline}/{controller.aps.length} online</small></h3>
-              <ul className="noc-mini-list">
-                {controller.aps.slice(0, 5).map((ap) => (
-                  <li key={ap.id} className={`tone-${ap.online ? "good" : "critical"}`}>
-                    {ap.online ? <CheckCircle2 size={14} /> : <WifiOff size={14} />}
-                    <span>{ap.name}</span>
-                    <b>{ap.online ? `${ap.clients} clientes` : "desconectada"}</b>
-                  </li>
-                ))}
-                {controller.aps.length > 5 ? <li className="noc-more">+ {controller.aps.length - 5} antenas</li> : null}
-              </ul>
-            </section>
-          ) : null}
-          <section className="noc-card">
-            <h3><AlertTriangle size={20} /> Canais congestionados <small>uso acima de 70%</small></h3>
-            {congested.length ? (
-              <ul className="noc-mini-list">
-                {congested.slice(0, 5).map((entry) => (
-                  <li key={`${entry.ap}-${entry.band}`} className={(entry.utilization ?? 0) >= 85 ? "tone-critical" : "tone-warning"}>
-                    <AlertTriangle size={14} />
-                    <span>{entry.ap}</span>
-                    <b>{entry.band} canal {entry.channel ?? "—"} · {pct(entry.utilization)}</b>
-                  </li>
-                ))}
-                {congested.length > 5 ? <li className="noc-more">+ {congested.length - 5} canais</li> : null}
-              </ul>
-            ) : (
-              <p className="noc-all-clear small"><ShieldCheck size={20} /> Nenhum canal congestionado</p>
-            )}
-          </section>
-          <section className="noc-card noc-unifi-alarms noc-unifi-log">
-            <h3><AlertTriangle size={20} /> Log da controladora <small>últimas 24 h</small></h3>
-            {controller.events.length ? (
-              <ol>
-                {controller.events.slice(0, 8).map((event, index) => (
-                  <li key={`${event.time}-${index}`} className={isDropEvent(event) ? "drop" : /voltou|connected/i.test(event.message) ? "back" : ""}>
-                    <time>{eventTime(event.time)}</time>
-                    <span>{translateUnifiEvent(event.message, deviceNames)}</span>
-                  </li>
-                ))}
-              </ol>
-            ) : controller.alarms.length ? (
-              <ol>
-                {controller.alarms.slice(0, 8).map((alarm) => (
-                  <li key={alarm.id} className={/disconnected|lost contact/i.test(alarm.message) ? "drop" : ""}>
-                    <time>{alarm.time ? eventTime(alarm.time) : ""}</time>
-                    <span>{translateUnifiEvent(alarm.message, deviceNames)}</span>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="noc-all-clear small"><ShieldCheck size={20} /> Nenhum evento nas últimas 24 h</p>
-            )}
-          </section>
-        </div>
+        <section className="noc-card noc-names-card">
+          <h3>
+            <Radio size={20} /> Todos os aparelhos <small>{controller.aps.length} antenas · {controller.switches.length} switches</small>
+          </h3>
+          <NameGrid items={all} />
+        </section>
       </div>
+
+      <p className="noc-logline">
+        <b>Log da controladora:</b>{" "}
+        {lastEvents.length
+          ? lastEvents.map((event, index) => (
+              <span key={`${event.time}-${index}`} className={isDropEvent(event) ? "drop" : ""}>
+                {eventTime(event.time)} {translateUnifiEvent(event.message, deviceNames)}
+              </span>
+            ))
+          : "nenhum evento nas últimas 24 h"}
+      </p>
     </div>
   );
 }
-
 
 type ControllerForm = { id: string; name: string; url: string; user: string; password: string; hasPassword: boolean; sites: string; insecureTls: boolean };
 type TestResult = { id: string; name: string; ok: boolean; message: string; viaZabbix?: boolean };
@@ -2343,6 +2138,12 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
   const pagesKey = computed.map((entry) => `${entry.id}|${entry.title}`).join(",");
   const pages = useMemo(() => computed, [pagesKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const pageCount = pages.length;
+  const index = page % pageCount;
+  const current = pages[index];
+  // Tempo da pagina: base da pagina x estado (verde passa rapido, critico fica mais) x ritmo escolhido.
+  const currentTone: Tone = data ? pageTone(current, data) : "unknown";
+  const pageSeconds = Math.max(8, Math.round(current.seconds * TONE_FACTOR[currentTone] * (intervalSec / 20)));
+  const [round, setRound] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -2374,11 +2175,18 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
   }, [paused]);
 
   useEffect(() => {
-    if (elapsed >= intervalSec) {
-      setElapsed(0);
-      setPage((value) => (value + 1) % pageCount);
+    if (elapsed < pageSeconds) return;
+    let next = (index + 1) % pageCount;
+    let nextRound = next === 0 ? round + 1 : round;
+    // Trafego (analise, sem estado) passa so a cada duas voltas.
+    if (pages[next]?.id === "trafego" && nextRound % 2 === 1) {
+      next = (next + 1) % pageCount;
+      if (next === 0) nextRound += 1;
     }
-  }, [elapsed, intervalSec, pageCount]);
+    setElapsed(0);
+    setPage(next);
+    setRound(nextRound);
+  }, [elapsed, pageSeconds, index, pageCount, pages, round]);
 
   const go = useCallback((delta: number) => {
     setElapsed(0);
@@ -2417,26 +2225,33 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
     }
   }, [intervalSec]);
 
-  const current = pages[page % pageCount];
   // Faixa de alertas: graves e o que mudou nos ultimos 7 dias (leves antigos ficam no rodape da Visao geral).
   const tickerProblems = data ? data.problems.filter(isMainProblem) : [];
-  const critical = data ? data.problems.filter((problem) => problem.severity >= 4).length : 0;
-  const warnings = data ? data.problems.filter((problem) => problem.severity >= 2 && problem.severity < 4).length : 0;
   const stale = data ? Date.now() - new Date(data.generatedAt).getTime() > 120000 : false;
   const zabbixDown = sourceDown(data, "zabbix");
+  // Estado de cada pagina (chips) e estado global = pior entre elas. Seguranca so pesa no global quando
+  // critica: incidentes abertos antigos nao deixam o topo amarelo o dia inteiro.
+  const pageStates = data ? pages.filter((entry) => entry.id !== "overview-2").map((entry) => ({ entry, tone: pageTone(entry, data) })) : [];
+  const counted = pageStates.filter(({ entry }) => entry.id !== "trafego").map(({ entry, tone }) => ({ entry, tone: entry.id === "seguranca" && tone === "warning" ? "good" : tone }));
+  const attention = counted.filter(({ tone }) => tone === "critical" || tone === "warning").map(({ entry }) => entry.short);
+  const criticalCount = data
+    ? data.problems.filter((problem) => problem.severity >= 4).length +
+      securitySummary(data).critical +
+      serversSummary(data).issues.filter((issue) => issue.tone === "critical" && !issue.key.startsWith("srv-")).length
+    : 0;
   // Sem dado novo (servidor fora ou leitura velha) ou sem Zabbix, o estado e desconhecido: nunca "Tudo operando".
   const blind = Boolean(data && (error || stale || zabbixDown));
-  const globalTone = !data || blind ? "unknown" : critical ? "critical" : warnings ? "warning" : "good";
+  const globalTone: Tone = !data || blind ? "unknown" : worst(...counted.map(({ tone }) => tone));
   const globalTitle = !data
     ? "Carregando"
     : error || stale
       ? "Sem dados atualizados"
       : zabbixDown
         ? "Zabbix sem resposta"
-        : critical
-          ? `${critical} críticos`
-          : warnings
-            ? `${warnings} alertas`
+        : globalTone === "critical"
+          ? criticalCount ? `${criticalCount} ${criticalCount === 1 ? "crítico" : "críticos"}` : "Crítico"
+          : globalTone === "warning"
+            ? "Atenção"
             : "Tudo operando";
   const globalDetail = !data
     ? "aguardando dados"
@@ -2444,7 +2259,9 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
       ? `última leitura às ${hhmm(data.generatedAt)}`
       : zabbixDown
         ? "estado da rede desconhecido"
-        : `${data.problems.length} problemas no Zabbix`;
+        : attention.length
+          ? attention.join(" · ")
+          : "nenhum alerta ativo";
   // Fontes fora do ar, uma linha cada, na faixa de aviso.
   const downSources = (data?.sources || []).filter((source) => !source.ok);
 
@@ -2461,23 +2278,28 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
         <div className="noc-page-title">
           <current.icon size={22} />
           <h1>{current.title}</h1>
-          <div className="noc-dots" role="tablist" aria-label="Páginas do painel">
-            {pages.map((entry, index) => (
-              <button
-                key={entry.id}
-                type="button"
-                role="tab"
-                aria-selected={entry.id === current.id}
-                aria-label={entry.title}
-                title={`${index + 1}. ${entry.title}`}
-                className={entry.id === current.id ? "active" : ""}
-                onClick={() => {
-                  setElapsed(0);
-                  setPage(index);
-                }}
-              />
-            ))}
-          </div>
+          {/* Uma pilula por pagina, na cor do estado dela: mostra onde ha problema sem esperar o carrossel. */}
+          <nav className="noc-chips" aria-label="Páginas do painel">
+            {pageStates.map(({ entry, tone }) => {
+              const position = pages.indexOf(entry);
+              const active = entry.id === current.id || (current.id === "overview-2" && entry.id === "overview");
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  aria-current={active ? "page" : undefined}
+                  title={`${position + 1}. ${entry.title} · ${toneLabel(tone)}`}
+                  className={`tone-${tone}${active ? " active" : ""}`}
+                  onClick={() => {
+                    setElapsed(0);
+                    setPage(position);
+                  }}
+                >
+                  <i aria-hidden="true" /> {entry.short}
+                </button>
+              );
+            })}
+          </nav>
         </div>
         <div className={`noc-global tone-${globalTone}`}>
           {toneIcon(globalTone, 22)}
@@ -2496,7 +2318,12 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
             {paused ? <Play size={18} /> : <Pause size={18} />}
           </button>
           <button type="button" aria-label="Próxima página" title="Próxima (→)" onClick={() => go(1)}><ChevronRight size={18} /></button>
-          <select value={intervalSec} onChange={(event) => setIntervalSec(Number(event.target.value))} aria-label="Tempo por página">
+          <select
+            value={intervalSec}
+            onChange={(event) => setIntervalSec(Number(event.target.value))}
+            aria-label="Ritmo do carrossel"
+            title="Ritmo do carrossel: 20 s é o normal (cada página tem seu tempo; verde passa mais rápido, crítico fica mais)"
+          >
             {[10, 15, 20, 30, 45, 60].map((value) => <option key={value} value={value}>{value}s</option>)}
           </select>
           {!kiosk && isAdmin ? (
@@ -2516,7 +2343,7 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           ) : null}
         </div>
       </header>
-      <div className="noc-progress" aria-hidden="true"><i style={{ width: `${paused ? 100 : (elapsed / intervalSec) * 100}%` }} className={paused ? "paused" : ""} /></div>
+      <div className="noc-progress" aria-hidden="true"><i style={{ width: `${paused ? 100 : Math.min(100, (elapsed / pageSeconds) * 100)}%` }} className={paused ? "paused" : ""} /></div>
 
       <div className="noc-stale-slot">
         {data && (error || stale) ? (
@@ -2546,14 +2373,10 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
       <main className="noc-stage">
         {!data ? (
           <p className="noc-empty">Carregando dados do Zabbix...</p>
-        ) : current.id === "overview" ? (
+        ) : current.id === "overview" || current.id === "overview-2" ? (
           <OverviewPage data={data} />
         ) : current.id === "internet" ? (
           <InternetPage data={data} />
-        ) : current.id === "seguranca" && data.analyzer ? (
-          <AnalyzerPage analyzer={data.analyzer} />
-        ) : current.id === "vpn" ? (
-          <VpnPage data={data} />
         ) : current.controllerId ? (
           (() => {
             const controller = data.unifi?.controllers.find((entry) => entry.id === current.controllerId);
@@ -2570,38 +2393,47 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           </div>
         ) : current.id === "antenas" ? (
           <GroupPage data={data} keys={["antenas"]} />
+        ) : current.id === "seguranca" ? (
+          <SecurityPage data={data} />
         ) : current.id === "servidores" ? (
           <ServersPage data={data} />
-        ) : current.id === "docker" && data.beszel ? (
-          <DockerPage beszel={data.beszel} />
         ) : current.id === "acesso" ? (
           <AccessPage data={data} />
-        ) : current.id === "alertas" && data.analyzer ? (
-          <SecurityAlertsPage analyzer={data.analyzer} />
-        ) : current.id === "defender" && data.defender ? (
-          <DefenderPage defender={data.defender} />
+        ) : current.id === "trafego" && data.analyzer ? (
+          <TrafficPage analyzer={data.analyzer} />
         ) : (
-          <GroupPage data={data} keys={["videowall"]} />
+          <p className="noc-empty">Página indisponível.</p>
         )}
       </main>
 
-      <footer className="noc-ticker" aria-label="Alertas ativos">
+      <footer className="noc-ticker noc-foot" aria-label="Alertas ativos e fontes de dados">
         <span className={`noc-ticker-label tone-${globalTone}`}><AlertOctagon size={16} /> Alertas</span>
         <div className="noc-ticker-track">
           {tickerProblems.length ? (
-            <div className="noc-ticker-run" style={{ animationDuration: `${Math.max(40, tickerProblems.length * 4)}s` }}>
-              {[...tickerProblems.slice(0, 40), ...tickerProblems.slice(0, 40)].map((problem, index) => (
-                <span key={`${problem.id}-${index}`} className={SEVERITY[problem.severity]?.tone}>
+            (() => {
+              // Um alerta por vez, parado, trocando a cada 6 s (texto rolando e ruim de ler de longe).
+              const position = Math.floor(now.getTime() / 6000) % tickerProblems.length;
+              const problem = tickerProblems[position];
+              return (
+                <span key={problem.id} className={`noc-ticker-item ${SEVERITY[problem.severity]?.tone}`}>
                   <b>{SEVERITY[problem.severity]?.label}</b> {problem.host} · {translateProblem(problem.name)} · há {duration(problem.since)}
+                  {tickerProblems.length > 1 ? <small> {position + 1}/{tickerProblems.length}</small> : null}
                 </span>
-              ))}
-            </div>
+              );
+            })()
           ) : (
             <span className="noc-ticker-ok">
               {zabbixDown ? <><AlertTriangle size={16} /> Zabbix sem resposta: alertas indisponíveis</> : <><ShieldCheck size={16} /> Nenhum alerta grave ou dos últimos 7 dias</>}
             </span>
           )}
         </div>
+        <span className="noc-sources" aria-label="Fontes de dados">
+          {(data?.sources || []).map((source) => (
+            <span key={source.id} className={source.ok ? "tone-good" : "tone-critical"} title={source.ok ? `${source.label}: ok` : `${source.label}: ${source.error}`}>
+              <i aria-hidden="true" /> {source.label}
+            </span>
+          ))}
+        </span>
         <span className="noc-updated">{data ? `atualizado ${new Date(data.generatedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}</span>
       </footer>
       {showUnifi ? <UnifiSettings onClose={() => setShowUnifi(false)} onSaved={() => window.setTimeout(load, 1500)} /> : null}
