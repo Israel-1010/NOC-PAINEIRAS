@@ -83,15 +83,20 @@ export type BeszelContainer = {
   memoryMb: number | null;
 };
 
-export type BeszelOverview = { generatedAt: string; systems: BeszelSystem[]; containers: BeszelContainer[] };
+// containersError: so a lista de containers falhou (o painel mostra "indisponivel", nunca "0 rodando").
+export type BeszelOverview = { generatedAt: string; systems: BeszelSystem[]; containers: BeszelContainer[]; containersError: string };
 
 const round = (value: unknown, digits = 1) => (typeof value === "number" && Number.isFinite(value) ? Math.round(value * 10 ** digits) / 10 ** digits : null);
 const filter = (expression: string) => encodeURIComponent(expression);
 
 async function build(): Promise<BeszelOverview> {
+  let containersError = "";
   const [systems, containers] = await Promise.all([
     get<List<RawSystem>>("/api/collections/systems/records?perPage=200&sort=name"),
-    get<List<RawContainer>>("/api/collections/containers/records?perPage=500&sort=name").catch(() => ({ items: [] as RawContainer[], totalItems: 0 })),
+    get<List<RawContainer>>("/api/collections/containers/records?perPage=500&sort=name").catch((error) => {
+      containersError = error instanceof Error ? error.message : "Falha";
+      return { items: [] as RawContainer[], totalItems: 0 };
+    }),
   ]);
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString().replace("T", " ");
   const enriched = await Promise.all(
@@ -147,6 +152,7 @@ async function build(): Promise<BeszelOverview> {
       cpu: round(container.cpu),
       memoryMb: round(container.memory, 0),
     })),
+    containersError,
   };
 }
 

@@ -529,6 +529,15 @@ button:disabled {
   text-align: left;
 }
 
+a.nav-item {
+  text-decoration: none;
+}
+
+.nav-item .nav-external {
+  margin-left: auto;
+  opacity: 0.7;
+}
+
 .nav-item:hover,
 .nav-item.active {
   color: var(--on-brand);
@@ -3759,6 +3768,26 @@ h1 {
   grid-template-columns: minmax(170px, 1fr) minmax(0, 1.25fr) 120px;
 }
 
+.milvus-portal-link {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  max-width: 520px;
+  margin: 40px auto;
+  padding: 32px;
+  text-align: center;
+}
+
+.milvus-portal-link p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.topbar-actions a.secondary-action,
+.milvus-portal-link a.primary-action {
+  text-decoration: none;
+}
+
 .milvus-portal-shell {
   display: grid;
   height: calc(100vh - 96px);
@@ -4370,26 +4399,39 @@ h1 {
   white-space: nowrap;
 }
 
-.status-pill.pendente {
-  color: var(--warning-ink);
-  background: var(--warning-soft);
-}
-
-.status-pill.aprovado,
-.status-pill.executando,
-.status-pill.ativo {
+/* Tom pelo significado do status (statusTone em main.tsx), igual em todas as telas */
+.status-pill.tone-good {
   color: var(--success-ink);
   background: var(--success-soft);
 }
 
-.status-pill.bloqueado {
+.status-pill.tone-warn {
+  color: var(--warning-ink);
+  background: var(--warning-soft);
+}
+
+.status-pill.tone-bad {
   color: var(--danger-ink);
   background: var(--danger-soft);
 }
 
-.status-pill.desativado {
+.status-pill.tone-info {
+  color: var(--info-ink);
+  background: var(--info-soft);
+}
+
+.status-pill.tone-neutral {
   color: var(--muted);
   background: var(--border-soft);
+}
+
+.account-status-control .account-status-hint {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.risk-zone {
+  border: 1px solid var(--danger-soft);
 }
 
 .ad-alert {
@@ -10008,13 +10050,38 @@ thead .ac-person-col {
 
 .noc-stale {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 10px;
   margin: 0;
-  padding: 6px 22px;
+  padding: 8px 22px;
   color: #ffd27a;
-  background: rgba(245, 176, 20, 0.12);
+  background: rgba(245, 176, 20, 0.14);
+  border-bottom: 1px solid rgba(245, 176, 20, 0.35);
+  font-size: 1.05em;
+}
+
+.noc-stale strong {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.noc-stale span {
+  color: var(--noc-ink-2);
   font-size: 0.9em;
+}
+
+/* Painel sem dado novo: faixa larga e cinza, lida de longe */
+.noc-stale.is-blind {
+  padding: 12px 22px;
+  color: #eef2fb;
+  background: color-mix(in srgb, var(--noc-unknown) 40%, transparent);
+  border-bottom: 2px solid var(--noc-unknown);
+  font-size: 1.3em;
+}
+
+.noc-all-clear.tone-unknown {
+  color: var(--noc-muted);
 }
 
 .noc-stage {
@@ -10741,7 +10808,8 @@ thead .ac-person-col {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--noc-critical);
+  /* Mesma cor do estado global: vermelho so quando ha critico */
+  color: var(--tone, var(--noc-muted));
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -12856,13 +12924,18 @@ thead .ac-person-col {
   font-size: 11px;
 }
 
+/* Barra de decisao fixa no topo do leitor: liberar/excluir sempre a vista, mesmo com e-mail longo */
 .qt-actions {
+  position: sticky;
+  top: -16px;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  padding: 10px 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
 .qt-actions p {
@@ -12870,8 +12943,9 @@ thead .ac-person-col {
   margin: 0;
 }
 
-.qt-actions .ct-link {
-  margin-left: auto;
+.qt-reader-foot {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .qt-header {

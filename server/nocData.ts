@@ -62,6 +62,7 @@ type ZbxItem = { itemid: string; hostid: string; name: string; key_: string; las
 // set/role = tags "conjunto"/"funcao" do host (ex.: Catraca 1 / Facial), cadastradas pelo painel.
 export type NocHost = { id: string; name: string; ip: string; up: boolean | null; latencyMs: number | null; loss: number | null; problems: number; set: string; role: string };
 export type NocGroup = { key: string; title: string; total: number; up: number; down: number; unknown: number; hosts: NocHost[] };
+export type NocSource = { id: string; label: string; ok: boolean; error: string; at: string };
 
 // Grupos do Zabbix -> secoes do painel (por palavra-chave no nome do grupo).
 const sections = [
@@ -472,6 +473,19 @@ function buildNocOverview() {
     for (const problem of problems.data) byHost.set(problem.hostId, (byHost.get(problem.hostId) || 0) + 1);
     for (const group of groups.data.groups) for (const host of group.hosts) host.problems = byHost.get(host.id) || 0;
 
+    // Estado de cada fonte: com uma fonte fora, o painel avisa em vez de mostrar lista vazia como "tudo certo".
+    // at = horario da ultima leitura boa (fontes com cache), para dizer "desde".
+    const unifiConfigured = isUnifiConfigured() || Boolean(unifi.data);
+    const sources: NocSource[] = [
+      { id: "zabbix", label: "Zabbix", error: groups.error || problems.error, at: "" },
+      ...(unifiConfigured ? [{ id: "unifi", label: "UniFi", error: unifi.error, at: "" }] : []),
+      ...(isBeszelConfigured() ? [{ id: "beszel", label: "Servidores Docker", error: beszel.error || (beszel.data?.containersError ? `containers: ${beszel.data.containersError}` : ""), at: "" }] : []),
+      ...(analyzer
+        ? [{ id: "analyzer", label: "FortiAnalyzer", error: analyzer.error || [analyzer.data?.alertsError && "alertas", analyzer.data?.antivirusError && "antivírus"].filter(Boolean).map((part) => `consulta de ${part} falhou`).join(" · "), at: analyzer.data?.checkedAt || "" }]
+        : []),
+      ...(defender ? [{ id: "defender", label: "Microsoft Defender", error: defender.error, at: defender.data?.checkedAt || "" }] : []),
+    ].map((source) => ({ ...source, ok: !source.error }));
+
     return {
       generatedAt: new Date().toISOString(),
       groups: groups.data.groups,
@@ -482,11 +496,12 @@ function buildNocOverview() {
       links: links.data.links.map((link) => ({ ...link, member: linkMembers.get(link.id) || "" })),
       traffic: traffic.data,
       unifi: unifi.data,
-      unifiConfigured: isUnifiConfigured() || Boolean(unifi.data),
+      unifiConfigured,
       beszel: beszel.data,
       analyzer: analyzer ? { ...analyzer.data, loading: analyzer.loading, error: analyzer.error } : null,
       defender: defender ? { ...defender.data, loading: defender.loading, error: defender.error } : null,
       vpn: vpn.data,
+      sources,
       errors: [groups, problems, firewalls, routers, hardware, links, traffic, unifi, beszel, vpn].map((entry) => entry.error).filter(Boolean),
     };
   })();

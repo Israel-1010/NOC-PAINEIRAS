@@ -41,6 +41,7 @@ import {
   Signal,
   Table as TableIcon,
   Trash2,
+  Unlock,
   Tv,
   UserCheck,
   Users,
@@ -1963,12 +1964,6 @@ function App() {
     };
   }, [session, topology, topologyLoaded]);
 
-  useEffect(() => {
-    if (activeView === "milvusPortal") {
-      setSidebarCollapsed(true);
-    }
-  }, [activeView]);
-
   if (!session) {
     return <LoginPage onLogin={handleLogin} />;
   }
@@ -2007,6 +2002,16 @@ function App() {
               {section.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = item.view === activeView;
+                // O Milvus nao abre dentro do portal (o navegador bloqueia a sessao no iframe): vai em nova aba.
+                if (item.view === "milvusPortal") {
+                  return (
+                    <a className="nav-item" key={item.view} href={MILVUS_URL} target="_blank" rel="noreferrer" title={`${item.label} (abre em nova aba)`}>
+                      <Icon size={18} />
+                      <span>{item.label}</span>
+                      <ExternalLink size={14} className="nav-external" aria-label="abre em nova aba" />
+                    </a>
+                  );
+                }
                 return (
                   <button
                     className={`nav-item ${isActive ? "active" : ""}`}
@@ -2046,10 +2051,11 @@ function App() {
 
           <div className="topbar-actions">
             {canView("milvusPortal") ? (
-              <button className="action-button" type="button" onClick={() => setActiveView("milvusPortal")}>
-                <Plus size={17} />
+              <a className="secondary-action" href={MILVUS_URL} target="_blank" rel="noreferrer" title="Abre o Milvus em nova aba">
+                <Plus size={16} />
                 Abrir chamado
-              </button>
+                <ExternalLink size={14} aria-hidden="true" />
+              </a>
             ) : null}
             <div className="session-chip" title={`${session.user.login}${session.user.domain ? ` · ${session.user.domain}` : ""}`}>
               <span className="session-avatar" aria-hidden="true">{userInitials(session.user.name || session.user.login)}</span>
@@ -3445,7 +3451,7 @@ function AdDashboard({
           <PanelHeader icon={KeyRound} title="Bloqueios de senha" meta="AD Security" />
           <LockoutPanel
             adSummary={adSummary}
-            lockouts={adDetails.lockouts}
+            lockouts={filterItems(adDetails.lockouts, lockoutSearch, (lockout) => [lockout.user, lockout.cn, lockout.department])}
             events={paginate(filteredLockoutEvents, lockoutPage)}
             allEvents={adDetails.lockoutEvents}
             eventErrors={adDetails.lockoutEventErrors}
@@ -4246,15 +4252,20 @@ function TicketsDashboard({
   );
 }
 
+// Endereco do Milvus: abre sempre em nova aba (dentro do portal o navegador bloqueia a sessao).
+const MILVUS_URL = "https://app.milvus.com.br/login";
+
+// So aparece para quem tinha esta tela salva como a ultima aberta: o menu ja abre o Milvus em nova aba.
 function MilvusPortalView() {
   return (
-    <section className="milvus-portal-shell">
-      <iframe
-        className="milvus-portal-frame"
-        src="https://app.milvus.com.br/login"
-        title="Portal oficial Milvus"
-        referrerPolicy="no-referrer-when-downgrade"
-      />
+    <section className="panel milvus-portal-link">
+      <ClipboardList size={32} />
+      <h2>Chamados no Milvus</h2>
+      <p>O Milvus abre em uma nova aba, já com o login do próprio Milvus.</p>
+      <a className="primary-action" href={MILVUS_URL} target="_blank" rel="noreferrer">
+        Abrir o Milvus
+        <ExternalLink size={16} aria-hidden="true" />
+      </a>
     </section>
   );
 }
@@ -5097,6 +5108,8 @@ function IpsDashboard({
     search,
     (link) => [link.provider, link.type, link.name, link.speed, link.fortinetIp, link.gateway, link.mask, link.range, link.usedIp, link.location, link.service, link.ports, link.category, link.status, link.notes],
   );
+  // Agrupa (circuito + servicos) antes de paginar: paginar antes separava o servico do seu circuito.
+  const linkGroups = buildInternetLinkGroups(filteredLinks);
   const filterCategories = Array.from(new Set([...ipDetails.categories, ...ipDetails.links.map((link) => link.category).filter(Boolean)])).sort();
 
   function openCreateIp() {
@@ -5421,7 +5434,7 @@ function IpsDashboard({
             setPage(1);
           }}
           page={page}
-          total={ipSection === "subnets" ? filteredNetworks.length : ipSection === "links" ? filteredLinks.length : filteredItems.length}
+          total={ipSection === "subnets" ? filteredNetworks.length : ipSection === "links" ? linkGroups.length : filteredItems.length}
           onPageChange={setPage}
           placeholder={ipSection === "subnets" ? "Procurar rede, VLAN ou categoria" : ipSection === "links" ? "Procurar link, URL ou categoria" : "Procurar IP, local, categoria ou observacao"}
           pageSizeOverride={12}
@@ -5429,7 +5442,7 @@ function IpsDashboard({
         {ipSection === "subnets" ? (
           <IpSubnetsTable summaries={paginate(filteredNetworks, page, 12)} onEditVlan={openVlanModal} />
         ) : ipSection === "links" ? (
-          <IpLinksTable links={paginate(filteredLinks, page, 12)} onEdit={openEditLink} />
+          <IpLinksTable groups={paginate(linkGroups, page, 12)} onEdit={openEditLink} />
         ) : (
           <IpTable items={paginate(filteredItems, page, 12)} onEdit={openEditIp} />
         )}
@@ -6572,6 +6585,17 @@ function LockoutPanel({
       </div>
       {unlockError ? <div className="action-feedback error lockout-feedback">{unlockError}</div> : null}
       {unlockMessage ? <div className="action-feedback success lockout-feedback">{unlockMessage}</div> : null}
+      {/* A busca filtra as contas bloqueadas (acima) e o historico de bloqueios (abaixo). */}
+      {onSearchChange && onPageChange ? (
+        <DirectoryTools
+          value={search}
+          onChange={onSearchChange}
+          page={page}
+          total={totalEvents}
+          onPageChange={onPageChange}
+          placeholder="Procurar conta bloqueada, máquina de origem ou DC"
+        />
+      ) : null}
       <div className="lockout-list">
         {lockouts.length ? (
           lockouts.map((lockout) => (
@@ -6584,20 +6608,14 @@ function LockoutPanel({
               unlocking={unlockingUser === (lockout.user || lockout.cn)}
             />
           ))
+        ) : search.trim() ? (
+          <EmptyState title="Nenhuma conta bloqueada com essa busca" detail="Limpe a busca para ver todas." />
         ) : (
           <EmptyState title="Nenhuma conta bloqueada agora" detail="O AD nao retornou bloqueios ativos." />
         )}
       </div>
       {onSearchChange && onPageChange ? (
         <div className="event-log-section">
-          <DirectoryTools
-            value={search}
-            onChange={onSearchChange}
-            page={page}
-            total={totalEvents}
-            onPageChange={onPageChange}
-            placeholder="Procurar usuario, maquina de origem ou DC"
-          />
           <LockoutEventsList events={events} errors={eventErrors} />
         </div>
       ) : null}
@@ -7055,12 +7073,10 @@ function buildInternetLinkGroups(links: IpInventoryLink[]) {
   return groups;
 }
 
-function IpLinksTable({ links, onEdit }: { links: IpInventoryLink[]; onEdit: (link: IpInventoryLink) => void }) {
-  if (!links.length) {
+function IpLinksTable({ groups, onEdit }: { groups: ReturnType<typeof buildInternetLinkGroups>; onEdit: (link: IpInventoryLink) => void }) {
+  if (!groups.length) {
     return <EmptyState title="Nenhum link cadastrado" detail="Adicione os circuitos de internet e os IPs publicados em uso." />;
   }
-
-  const groups = buildInternetLinkGroups(links);
 
   return (
     <div className="internet-links-table" role="table" aria-label="Links de internet">
@@ -8181,6 +8197,20 @@ function UserDetailsModal({
     });
   }
 
+  async function unlockUser() {
+    const login = currentDetails?.profile.samAccountName || user.samAccountName;
+    if (!window.confirm(`Desbloquear a conta ${login}? A senha continua a mesma.`)) {
+      return;
+    }
+
+    await runUserAction("unlock-user", async () => {
+      await adRequest(`/api/ad/users/${encodeURIComponent(login)}/unlock`, { method: "POST" });
+      const updated = await adRequest<AdUserDetails>(`/api/ad/users/${encodeURIComponent(login)}/details`, { method: "GET" });
+      setCurrentDetails(updated);
+      setActionMessage(`Conta ${login} desbloqueada.`);
+    });
+  }
+
   function generatePassword() {
     const password = generateStrongPassword();
     setNewPassword(password);
@@ -8294,8 +8324,9 @@ function UserDetailsModal({
                   samAccountName={currentDetails.profile.samAccountName}
                   enabled={currentDetails.profile.enabled}
                   locked={currentDetails.profile.locked}
-                  loading={actionLoading === "enable-user" || actionLoading === "disable-user"}
-                  onToggle={setUserEnabled}
+                  loading={actionLoading}
+                  onUnlock={unlockUser}
+                  onEnable={() => setUserEnabled(true)}
                 />
                 <DetailItem label="Responsavel" value={currentDetails.profile.manager?.name || "Nao informado"} />
                 <DetailItem label="Criado em" value={formatAdDate(currentDetails.account.whenCreated)} />
@@ -8369,6 +8400,18 @@ function UserDetailsModal({
               <h3>Distinguished Name</h3>
               <p className="dn-text">{currentDetails.profile.distinguishedName}</p>
             </section>
+
+            {currentDetails.profile.enabled && currentDetails.profile.samAccountName.toLowerCase() !== "krbtgt" ? (
+              <section className="modal-section modal-section-wide risk-zone">
+                <h3>Zona de risco</h3>
+                <p className="dn-text">Desativar impede o login em tudo (computador, e-mail, VPN). Para uma conta bloqueada por senha errada, use Desbloquear.</p>
+                <div className="modal-footer-actions">
+                  <button className="danger-action" type="button" onClick={() => setUserEnabled(false)} disabled={Boolean(actionLoading)}>
+                    {actionLoading === "disable-user" ? "Desativando" : "Desativar conta"}
+                  </button>
+                </div>
+              </section>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -9211,18 +9254,22 @@ function UserIdentityPreview({
   );
 }
 
+// Status da conta com a acao que resolve o estado atual (desbloquear ou ativar). Desativar fica
+// separado, na "Zona de risco" da ficha, para nao ser clicado no lugar de desbloquear.
 function AccountStatusControl({
   samAccountName,
   enabled,
   locked,
   loading,
-  onToggle,
+  onUnlock,
+  onEnable,
 }: {
   samAccountName: string;
   enabled: boolean;
   locked: boolean;
-  loading: boolean;
-  onToggle: (enabled: boolean) => void;
+  loading: string;
+  onUnlock: () => void;
+  onEnable: () => void;
 }) {
   const status = locked ? "Bloqueado" : enabled ? "Ativo" : "Desativado";
   const isProtected = samAccountName.toLowerCase() === "krbtgt";
@@ -9231,17 +9278,25 @@ function AccountStatusControl({
     <div className="detail-item account-status-control">
       <span>Status</span>
       <div>
-        <strong>{status}</strong>
-        <button
-          className={enabled ? "danger-action" : "primary-action"}
-          type="button"
-          onClick={() => onToggle(!enabled)}
-          disabled={loading || isProtected}
-          title={isProtected ? "Conta interna do Kerberos protegida pelo AD" : undefined}
-        >
-          {loading ? "Aplicando" : enabled ? "Desativar" : "Ativar"}
-        </button>
+        <StatusPill label={status} />
+        {locked ? (
+          <button className="primary-action" type="button" onClick={onUnlock} disabled={Boolean(loading)}>
+            <Unlock size={14} />
+            {loading === "unlock-user" ? "Desbloqueando" : "Desbloquear"}
+          </button>
+        ) : !enabled ? (
+          <button
+            className="primary-action"
+            type="button"
+            onClick={onEnable}
+            disabled={Boolean(loading) || isProtected}
+            title={isProtected ? "Conta interna do Kerberos protegida pelo AD" : undefined}
+          >
+            {loading === "enable-user" ? "Ativando" : "Ativar"}
+          </button>
+        ) : null}
       </div>
+      {locked ? <small className="account-status-hint">Desbloquear libera o login de novo; a senha continua a mesma.</small> : null}
       {isProtected ? <small>Conta interna do Kerberos. Nao ativar pelo painel.</small> : null}
     </div>
   );
@@ -9444,16 +9499,12 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
   );
 }
 
+// Busca sem diferenciar acentos nem maiusculas ("joao" acha "João").
 function filterItems<T>(items: T[], search: string, getFields: (item: T) => Array<string | number | undefined | null>) {
-  const normalized = search.trim().toLowerCase();
+  const normalized = normalizeText(search);
   if (!normalized) return items;
 
-  return items.filter((item) =>
-    getFields(item)
-      .join(" ")
-      .toLowerCase()
-      .includes(normalized),
-  );
+  return items.filter((item) => normalizeText(getFields(item).join(" ")).includes(normalized));
 }
 
 function paginate<T>(items: T[], page: number, size = pageSize) {
@@ -10069,8 +10120,18 @@ function GroupRow({ group }: { group: AdGroup }) {
   );
 }
 
+// Cor pelo significado: verde ok/disponivel, ambar atencao, vermelho problema, azul informativo, cinza neutro.
+function statusTone(label: string) {
+  const value = normalizeText(label);
+  if (/^(ativo|ativa|aprovado|executando|conforme|livre)$/.test(value)) return "good";
+  if (/bloquead|nao conforme|conflito|erro|falha/.test(value)) return "bad";
+  if (/pendente|reservado|atencao|faltando/.test(value)) return "warn";
+  if (/^usado$/.test(value)) return "info";
+  return "neutral";
+}
+
 function StatusPill({ label }: { label: string }) {
-  return <span className={`status-pill ${label.toLowerCase()}`}>{label}</span>;
+  return <span className={`status-pill tone-${statusTone(label)}`}>{label}</span>;
 }
 
 function RiskPill({ risk }: { risk: AdGroup["risk"] }) {

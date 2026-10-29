@@ -780,6 +780,10 @@ function QuarantineTab({ enabled }: { enabled: boolean | null }) {
       ? `Liberar ${targets.length === 1 ? `"${targets[0].subject || "(sem assunto)"}"` : `${targets.length} e-mails`} ${who}?\n\nO e-mail vai para a caixa de entrada do destinatário.${dangerous.length ? `\n\nATENÇÃO: ${dangerous.length === 1 && targets.length === 1 ? "este e-mail foi classificado" : `${dangerous.length} foram classificados`} como MALWARE ou GOLPE DE ALTA CONFIANÇA. Só libere se tiver certeza.` : ""}`
       : `Excluir ${targets.length === 1 ? "este e-mail" : `${targets.length} e-mails`} da quarentena? Não dá para desfazer.`;
     if (!window.confirm(question)) return;
+    // Depois de decidir sobre o e-mail aberto, ja abre o proximo da lista (fluxo de triagem).
+    const openIndex = rows.findIndex((message) => message.identity === openId);
+    const decidedOpen = targets.some((message) => message.identity === openId);
+    const nextOpen = decidedOpen ? rows.slice(openIndex + 1).concat(rows.slice(0, Math.max(0, openIndex)).reverse()).find((message) => !targets.includes(message)) : null;
     setBusy(action);
     setNotice(null);
     try {
@@ -794,7 +798,7 @@ function QuarantineTab({ enabled }: { enabled: boolean | null }) {
       setNotice(failed.length
         ? { ok: false, text: `${done} ${verb}(s), ${failed.length} com erro: ${failed[0].error}` }
         : { ok: true, text: done === 1 ? `E-mail ${verb}${action === "release" ? ": já está a caminho da caixa de entrada" : ""}.` : `${done} e-mails ${verb}s.` });
-      if (action === "delete" && targets.some((message) => message.identity === openId)) setOpenId(null);
+      if (decidedOpen && !failed.length) setOpenId(nextOpen?.identity || null);
       await load();
     } catch (actError) {
       setNotice({ ok: false, text: actError instanceof Error ? actError.message : String(actError) });
@@ -841,7 +845,15 @@ function QuarantineTab({ enabled }: { enabled: boolean | null }) {
               </label>
               {chosen.length ? (
                 <>
-                  <button type="button" className="ct-primary" disabled={Boolean(busy)} onClick={() => act(chosen, "release")}><CheckCircle2 size={14} /> Liberar</button>
+                  {/* Com malware ou golpe na selecao, Liberar perde o destaque (mesma regra do leitor). */}
+                  <button
+                    type="button"
+                    className={chosen.some((message) => DANGEROUS_QUARANTINE.test(message.type)) ? "ct-secondary" : "ct-primary"}
+                    disabled={Boolean(busy)}
+                    onClick={() => act(chosen, "release")}
+                  >
+                    <CheckCircle2 size={14} /> Liberar
+                  </button>
                   <button type="button" className="ct-danger" disabled={Boolean(busy)} onClick={() => act(chosen, "delete")}><Trash2 size={14} /> Excluir</button>
                 </>
               ) : null}
@@ -907,6 +919,27 @@ function QuarantineReader({ message, busy, onClose, onAct }: { message: Quaranti
         <button type="button" className="pm-icon-btn" aria-label="Fechar" onClick={onClose}><X size={18} /></button>
       </header>
 
+      {/* Decisao sempre visivel (fixa no topo do leitor), longe do fim do corpo do e-mail. */}
+      <div className="qt-actions">
+        {released ? (
+          <p className="ct-muted">Este e-mail já foi liberado.</p>
+        ) : (
+          <>
+            {dangerous ? <p className="qt-warn">Classificado como {QUARANTINE_TYPES[message.type]}: não recomendado liberar.</p> : null}
+            <button type="button" className={dangerous ? "ct-secondary" : "ct-primary"} disabled={Boolean(busy)} onClick={() => onAct("release")}>
+              <CheckCircle2 size={16} /> {busy === "release" ? "Liberando..." : `Liberar para ${message.recipients.length === 1 ? message.recipients[0] : `${message.recipients.length} destinatários`}`}
+            </button>
+            {/* Avisar "nao e spam" so faz sentido quando o filtro pode ter errado: nunca em malware ou golpe de alta confianca. */}
+            {dangerous ? null : (
+              <button type="button" className="ct-secondary" disabled={Boolean(busy)} onClick={() => onAct("release", true)} title="Libera e avisa a Microsoft que o filtro errou, para melhorar a detecção">
+                Liberar e avisar que não é spam
+              </button>
+            )}
+          </>
+        )}
+        <button type="button" className="ct-danger" disabled={Boolean(busy)} onClick={() => onAct("delete")}><Trash2 size={16} /> Excluir</button>
+      </div>
+
       <dl className="qt-facts">
         <dt>De</dt>
         <dd><b>{summary?.from ? senderName(summary.from) || message.sender : message.sender}</b> <span className="ct-muted">&lt;{message.sender}&gt;</span></dd>
@@ -957,23 +990,11 @@ function QuarantineReader({ message, busy, onClose, onAct }: { message: Quaranti
       ) : null}
       {detail ? <p className="ct-muted qt-safe">Mostrando só o texto: imagens e links não são carregados aqui.</p> : null}
 
-      <footer className="qt-actions">
-        {released ? (
-          <p className="ct-muted">Este e-mail já foi liberado.</p>
-        ) : (
-          <>
-            {dangerous ? <p className="qt-warn">Classificado como {QUARANTINE_TYPES[message.type]}: não recomendado liberar.</p> : null}
-            <button type="button" className={dangerous ? "ct-secondary" : "ct-primary"} disabled={Boolean(busy)} onClick={() => onAct("release")}>
-              <CheckCircle2 size={16} /> {busy === "release" ? "Liberando..." : `Liberar para ${message.recipients.length === 1 ? message.recipients[0] : `${message.recipients.length} destinatários`}`}
-            </button>
-            <button type="button" className="ct-secondary" disabled={Boolean(busy)} onClick={() => onAct("release", true)} title="Libera e avisa a Microsoft que o filtro errou, para melhorar a detecção">
-              Liberar e avisar que não é spam
-            </button>
-          </>
-        )}
-        <button type="button" className="ct-danger" disabled={Boolean(busy)} onClick={() => onAct("delete")}><Trash2 size={16} /> Excluir</button>
-        {detail?.header ? <button type="button" className="ct-link" onClick={() => setShowHeader(!showHeader)}>{showHeader ? "Esconder" : "Ver"} cabeçalho completo</button> : null}
-      </footer>
+      {detail?.header ? (
+        <footer className="qt-reader-foot">
+          <button type="button" className="ct-link" onClick={() => setShowHeader(!showHeader)}>{showHeader ? "Esconder" : "Ver"} cabeçalho completo</button>
+        </footer>
+      ) : null}
       {showHeader && detail?.header ? <pre className="df-header qt-header">{detail.header}</pre> : null}
     </article>
   );

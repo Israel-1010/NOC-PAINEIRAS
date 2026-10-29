@@ -209,6 +209,9 @@ export type AnalyzerOverview = {
     realVirus: number;
     items: { reason: string; virus: string; srcip: string; iface: string; site: string; file: string; action: string; count: number; lastSeen: string }[];
   };
+  // Falha so desta consulta: a lista vem vazia e o painel mostra "indisponivel" (nunca "nada encontrado").
+  alertsError: string;
+  antivirusError: string;
 };
 
 // Alertas dos event handlers (Event Monitor) das ultimas 24 h, mais novos primeiro.
@@ -296,8 +299,17 @@ async function load(): Promise<AnalyzerOverview> {
   const logins = Array.from(new Set(vpnRows.map((row) => String(row.f_user || "")).filter(Boolean)));
   const names = await adNames(logins);
   // Alertas e antivirus nao derrubam o resto se falharem.
-  const alerts = await fetchAnalyzerAlerts().catch(() => [] as AnalyzerAlert[]);
-  const antivirus = await loadAntivirus().catch(() => ({ total: 0, realVirus: 0, items: [] }));
+  const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  let alertsError = "";
+  let antivirusError = "";
+  const alerts = await fetchAnalyzerAlerts().catch((error) => {
+    alertsError = message(error);
+    return [] as AnalyzerAlert[];
+  });
+  const antivirus = await loadAntivirus().catch((error) => {
+    antivirusError = message(error);
+    return { total: 0, realVirus: 0, items: [] };
+  });
   return {
     checkedAt: new Date().toISOString(),
     windowHours: 24,
@@ -342,6 +354,8 @@ async function load(): Promise<AnalyzerOverview> {
       .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen)),
     alerts,
     antivirus,
+    alertsError,
+    antivirusError,
   };
 }
 
