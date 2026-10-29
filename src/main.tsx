@@ -3,9 +3,7 @@ import ReactDOM from "react-dom/client";
 import {
   Activity,
   AlertTriangle,
-  Bell,
   CheckCircle2,
-  ChevronDown,
   CircleGauge,
   ClipboardList,
   Clock3,
@@ -44,6 +42,11 @@ import {
   Unlock,
   UserX,
   HardDrive,
+  Home,
+  Mail,
+  Smartphone,
+  Stethoscope,
+  ChevronRight,
   Tv,
   UserCheck,
   Users,
@@ -53,20 +56,6 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { ProjectsDashboard } from "./projects";
 import { AccessDashboard } from "./access";
 import { DiagnosticsDashboard } from "./diagnostics";
@@ -557,11 +546,6 @@ type IpNetworkSummary = {
   reserved: number;
 };
 
-type InternetLinkGroup = {
-  circuit: IpInventoryLink;
-  services: IpInventoryLink[];
-};
-
 type IpSummary = {
   total: number;
   used: number;
@@ -851,29 +835,6 @@ async function authFetch(path: string, options: RequestInit = {}) {
   return response;
 }
 
-const latencyHistory = [
-  { time: "08:00", core: 12, unifi: 18, fortinet: 9 },
-  { time: "09:00", core: 11, unifi: 21, fortinet: 10 },
-  { time: "10:00", core: 15, unifi: 24, fortinet: 11 },
-  { time: "11:00", core: 13, unifi: 22, fortinet: 12 },
-  { time: "12:00", core: 16, unifi: 29, fortinet: 15 },
-  { time: "13:00", core: 14, unifi: 25, fortinet: 12 },
-  { time: "14:00", core: 13, unifi: 20, fortinet: 10 },
-  { time: "15:00", core: 12, unifi: 19, fortinet: 9 },
-];
-
-const wanTraffic = [
-  { link: "WAN 1", download: 684, upload: 182, color: "#16a085" },
-  { link: "WAN 2", download: 298, upload: 86, color: "#277da1" },
-  { link: "Backup", download: 74, upload: 22, color: "#d9902f" },
-];
-
-const sites = [
-  { name: "Matriz", health: 98, devices: 42, clients: 312, alerts: 1 },
-  { name: "Filial Norte", health: 93, devices: 18, clients: 147, alerts: 2 },
-  { name: "Filial Sul", health: 88, devices: 21, clients: 164, alerts: 3 },
-];
-
 const assets: Asset[] = [
   {
     name: "FortiGate Borda",
@@ -949,13 +910,6 @@ const incidents = [
   },
 ];
 
-const adCompliance = [
-  { label: "Maquinas no dominio", current: 486, expected: 512, status: "Atencao" },
-  { label: "Usuarios com cadastro OK", current: 728, expected: 741, status: "OK" },
-  { label: "Usuarios fora do padrao", current: 13, expected: 0, status: "Revisar" },
-  { label: "Maquinas inativas 30d", current: 18, expected: 0, status: "Limpar" },
-];
-
 const lockouts: Lockout[] = [
   {
     user: "j.silva",
@@ -990,55 +944,6 @@ const lockouts: Lockout[] = [
     ticket: "#42817",
     severity: "Info",
   },
-];
-
-const adGroups: AdGroup[] = [
-  { name: "GG-Financeiro-Sistema", members: 42, owner: "Financeiro", risk: "Medio", lastChange: "Hoje 15:41" },
-  { name: "GG-VPN-Usuarios", members: 186, owner: "Seguranca", risk: "Alto", lastChange: "Hoje 14:18" },
-  { name: "GG-WiFi-Corporativo", members: 612, owner: "Infra", risk: "Baixo", lastChange: "Ontem 18:22" },
-  { name: "GG-ERP-Administradores", members: 9, owner: "Sistemas", risk: "Alto", lastChange: "Ontem 11:04" },
-];
-
-const accessRequests: AccessRequest[] = [
-  {
-    user: "a.pereira",
-    action: "Criar usuario",
-    target: "OU=Usuarios,OU=Matriz",
-    requestedBy: "RH",
-    status: "Pendente",
-  },
-  {
-    user: "m.costa",
-    action: "Adicionar grupo",
-    target: "GG-VPN-Usuarios",
-    requestedBy: "Service Desk",
-    status: "Aprovado",
-  },
-  {
-    user: "r.alves",
-    action: "Remover grupo",
-    target: "GG-ERP-Administradores",
-    requestedBy: "Seguranca",
-    status: "Executando",
-  },
-];
-
-const ticketQueue = [
-  { code: "#42822", title: "Usuario j.silva bloqueado por tentativas invalidas", team: "Seguranca", sla: "11 min", status: "Novo" },
-  { code: "#42819", title: "Cadastro AD divergente do RH", team: "Service Desk", sla: "23 min", status: "Novo" },
-  { code: "#42813", title: "VPN usuario financeiro sem MFA", team: "Seguranca", sla: "41 min", status: "Em andamento" },
-  { code: "#42802", title: "AP Filial Sul oscilando", team: "Redes", sla: "1h 12m", status: "Aguardando" },
-];
-
-const callVolume = [
-  { hour: "08h", opened: 7, closed: 5 },
-  { hour: "09h", opened: 11, closed: 8 },
-  { hour: "10h", opened: 16, closed: 12 },
-  { hour: "11h", opened: 10, closed: 14 },
-  { hour: "12h", opened: 8, closed: 9 },
-  { hour: "13h", opened: 13, closed: 10 },
-  { hour: "14h", opened: 18, closed: 15 },
-  { hour: "15h", opened: 12, closed: 16 },
 ];
 
 const fallbackAdSummary: AdSummary = {
@@ -1220,53 +1125,52 @@ const requiredCreateUserFields: Array<{ field: keyof CreateUserForm; label: stri
   { field: "description", label: "Descricao" },
 ];
 
+// Menu por assunto (o que se usa junto fica junto); cada icone com um significado so.
 const navSections: { title: string; items: { label: string; icon: LucideIcon; view: View }[] }[] = [
   {
-    title: "Monitoramento",
+    title: "Visão geral",
     items: [
-      { label: "Painel NOC", icon: Activity, view: "noc" },
-      { label: "Visão geral (TV)", icon: Tv, view: "tv" },
+      { label: "Início", icon: Home, view: "tv" },
+      { label: "Painel NOC (TV)", icon: Tv, view: "noc" },
+    ],
+  },
+  {
+    title: "Rede e monitoramento",
+    items: [
       { label: "Links de internet", icon: Zap, view: "links" },
       { label: "Topologia", icon: Network, view: "topology" },
       { label: "Infraestrutura 3D", icon: Boxes, view: "infra3d" },
-      { label: "SNMP", icon: Signal, view: "snmp" },
+      { label: "Equipamentos (SNMP)", icon: Signal, view: "snmp" },
+      { label: "IPs e VLANs", icon: Router, view: "ips" },
+      { label: "Wi-Fi (portal)", icon: Wifi, view: "wifi" },
     ],
   },
   {
-    title: "Gestão",
-    items: [
-      { label: "Projetos", icon: FolderKanban, view: "projects" },
-      { label: "Contratos", icon: Receipt, view: "contracts" },
-    ],
+    title: "Segurança",
+    items: [{ label: "Microsoft Defender", icon: ShieldAlert, view: "defender" }],
   },
   {
-    title: "Identidade e acesso",
+    title: "Usuários e dispositivos",
     items: [
       { label: "Active Directory", icon: Users, view: "ad" },
-      { label: "Intune", icon: ShieldCheck, view: "intune" },
-      { label: "Office 365", icon: TableIcon, view: "office365" },
-      { label: "Microsoft Defender", icon: ShieldAlert, view: "defender" },
+      { label: "Office 365", icon: Mail, view: "office365" },
+      { label: "Intune", icon: Smartphone, view: "intune" },
     ],
   },
   {
-    title: "Rede",
+    title: "Atendimento e gestão",
     items: [
-      { label: "IPs e VLANs", icon: Router, view: "ips" },
-      { label: "WiFi", icon: Wifi, view: "wifi" },
-    ],
-  },
-  {
-    title: "Atendimento",
-    items: [
-      { label: "Chamados Milvus", icon: ClipboardList, view: "milvusPortal" },
+      { label: "Chamados (Milvus)", icon: ClipboardList, view: "milvusPortal" },
       { label: "Procedimentos (POP)", icon: BookOpen, view: "pop" },
+      { label: "Projetos", icon: FolderKanban, view: "projects" },
+      { label: "Contratos", icon: Receipt, view: "contracts" },
     ],
   },
   {
     title: "Administração",
     items: [
       { label: "Acessos", icon: UserCheck, view: "access" },
-      { label: "Diagnóstico", icon: Activity, view: "diagnostics" },
+      { label: "Diagnóstico", icon: Stethoscope, view: "diagnostics" },
     ],
   },
 ];
@@ -1282,15 +1186,15 @@ function statusLabel(status: Status) {
 }
 
 function viewEyebrow(view: View) {
-  if (view === "tv") return "Operacao de TI ao vivo";
+  if (view === "tv") return "O que precisa de você agora";
   if (view === "intune") return "Gerenciamento de dispositivos";
-  if (view === "office365") return "Administracao Microsoft 365";
+  if (view === "office365") return "Administração Microsoft 365";
   if (view === "tickets") return "Atendimento e SLA";
-  if (view === "milvusPortal") return "Portal oficial";
-  if (view === "ips") return "Inventario de rede";
+  if (view === "milvusPortal") return "Atendimento";
+  if (view === "ips") return "Inventário de rede";
   if (view === "snmp") return "Monitoramento de equipamentos";
-  if (view === "wifi") return "Portal WiFi";
-  if (view === "pop") return "Procedimento operacional padrao";
+  if (view === "wifi") return "Cadastro do Wi-Fi do clube";
+  if (view === "pop") return "Procedimento operacional padrão";
   if (view === "projects") return "Gestão de projetos da TI";
   if (view === "contracts") return "Gestão de fornecedores";
   if (view === "infra3d") return "Digital Twin · dados ao vivo";
@@ -1300,25 +1204,26 @@ function viewEyebrow(view: View) {
   if (view === "access") return "Administração do portal";
   if (view === "diagnostics") return "Administração do portal";
   if (view === "topology") return "Mapa e monitoramento";
-  return "Administracao de identidade";
+  return "Administração de identidade";
 }
 
+// Titulo da tela igual ao nome no menu.
 function viewTitle(view: View) {
-  if (view === "tv") return "Painel da TV";
-  if (view === "intune") return "Microsoft Intune";
+  if (view === "tv") return "Início";
+  if (view === "intune") return "Intune";
   if (view === "office365") return "Office 365";
-  if (view === "tickets") return "Chamados Milvus";
-  if (view === "milvusPortal") return "Chamado Milvus";
-  if (view === "ips") return "IPs";
-  if (view === "snmp") return "SNMP";
-  if (view === "wifi") return "WiFi";
-  if (view === "pop") return "POP";
+  if (view === "tickets") return "Chamados (Milvus)";
+  if (view === "milvusPortal") return "Chamados (Milvus)";
+  if (view === "ips") return "IPs e VLANs";
+  if (view === "snmp") return "Equipamentos (SNMP)";
+  if (view === "wifi") return "Wi-Fi (portal)";
+  if (view === "pop") return "Procedimentos (POP)";
   if (view === "projects") return "Projetos";
-  if (view === "contracts") return "Contratos de fornecedores";
+  if (view === "contracts") return "Contratos";
   if (view === "infra3d") return "Infraestrutura 3D";
   if (view === "defender") return "Microsoft Defender";
   if (view === "links") return "Links de internet";
-  if (view === "noc") return "Painel NOC";
+  if (view === "noc") return "Painel NOC (TV)";
   if (view === "access") return "Acessos";
   if (view === "diagnostics") return "Diagnóstico das integrações";
   if (view === "topology") return "Topologia";
@@ -1338,6 +1243,20 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => getStoredSidebarCollapsed());
   const [session, setSession] = useState<AuthSession | null>(() => getStoredSession());
   const [access, setAccess] = useState<{ isAdmin: boolean; views: string[]; openMode: boolean } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Muda a cada busca: remonta a tela de destino para ela ler o filtro pedido.
+  const [searchNonce, setSearchNonce] = useState(0);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Permissoes do usuario (o servidor tambem bloqueia; aqui so evita chamadas e esconde o menu).
   useEffect(() => {
@@ -2053,6 +1972,11 @@ function App() {
           </div>
 
           <div className="topbar-actions">
+            <button className="global-search-trigger" type="button" onClick={() => setSearchOpen(true)} aria-keyshortcuts="Control+K">
+              <Search size={16} />
+              <span>Buscar no portal</span>
+              <kbd>Ctrl K</kbd>
+            </button>
             {canView("milvusPortal") ? (
               <a className="secondary-action" href={MILVUS_URL} target="_blank" rel="noreferrer" title="Abre o Milvus em nova aba">
                 <Plus size={16} />
@@ -2117,27 +2041,20 @@ function App() {
         ) : activeView === "noc" ? (
           <NocWall isAdmin={Boolean(access?.isAdmin)} />
         ) : activeView === "tv" ? (
-          <TvDashboard
-            adSummary={adSummaryState}
+          <HomeDashboard
             adStatus={adStatus}
             adDetails={adDetails}
-            intuneStatus={intuneStatus}
-            intuneSummary={intuneSummary}
             intuneDetails={intuneDetails}
-            office365Status={office365Status}
-            office365Summary={office365Summary}
             office365Details={office365Details}
-            milvusAssetsSummary={milvusAssetsSummary}
             snmpSummary={snmpSummary}
-            snmpDetails={snmpDetails}
-            topology={topology}
-            ipDetails={ipDetails}
-            onRefreshAd={loadAd}
+            myOpenTasks={myOpenTasks}
+            canView={canView}
+            onNavigate={setActiveView}
           />
         ) : activeView === "topology" ? (
           <TopologyDashboard topology={topology} onChange={setTopology} ipDetails={ipDetails} onRefreshIps={loadIps} saveStatus={topologySaveStatus} />
         ) : activeView === "intune" ? (
-          <IntuneDashboard intuneStatus={intuneStatus} intuneSummary={intuneSummary} intuneDetails={intuneDetails} onRefreshIntune={loadIntune} />
+          <IntuneDashboard key={`intune-${searchNonce}`} intuneStatus={intuneStatus} intuneSummary={intuneSummary} intuneDetails={intuneDetails} onRefreshIntune={loadIntune} />
         ) : activeView === "office365" ? (
           <Office365Dashboard office365Status={office365Status} office365Summary={office365Summary} office365Details={office365Details} onRefreshOffice365={loadOffice365} />
         ) : activeView === "snmp" ? (
@@ -2147,7 +2064,7 @@ function App() {
         ) : activeView === "milvusPortal" ? (
           <MilvusPortalView />
         ) : activeView === "ips" ? (
-          <IpsDashboard ipSummary={ipSummary} ipDetails={ipDetails} onRefreshIps={loadIps} />
+          <IpsDashboard key={`ips-${searchNonce}`} ipSummary={ipSummary} ipDetails={ipDetails} onRefreshIps={loadIps} />
         ) : activeView === "wifi" ? (
           <WifiPortalDashboard />
         ) : activeView === "pop" ? (
@@ -2155,10 +2072,29 @@ function App() {
         ) : activeView === "projects" ? (
           <ProjectsDashboard currentUser={{ login: session.user.login, name: session.user.name || session.user.login }} />
         ) : (
-          <AdDashboard adSummary={adSummaryState} adStatus={adStatus} adDetails={adDetails} onRefreshAd={loadAd} />
+          <AdDashboard key={`ad-${searchNonce}`} adSummary={adSummaryState} adStatus={adStatus} adDetails={adDetails} onRefreshAd={loadAd} />
         )}
         </ViewErrorBoundary>
       </section>
+      {searchOpen ? (
+        <GlobalSearch
+          canView={canView}
+          adDetails={adDetails}
+          intuneDetails={intuneDetails}
+          ipDetails={ipDetails}
+          onClose={() => setSearchOpen(false)}
+          onGo={(hit) => {
+            try {
+              if (hit.term) window.sessionStorage.setItem(PENDING_SEARCH_KEY, JSON.stringify({ view: hit.view, tab: hit.tab, term: hit.term }));
+            } catch {
+              /* abre a tela sem filtro */
+            }
+            setSearchOpen(false);
+            setSearchNonce((value) => value + 1);
+            setActiveView(hit.view);
+          }}
+        />
+      ) : null}
     </main>
   );
 }
@@ -2280,263 +2216,337 @@ function LoginPage({ onLogin }: { onLogin: (session: AuthSession) => void }) {
   );
 }
 
-function TvDashboard({
-  adSummary,
+// Aba do AD a abrir quando o Inicio leva direto para os bloqueados.
+const AD_TAB_KEY = "rede-clube-ad-tab";
+
+// Busca global: a tela de destino abre ja filtrada (lido uma vez, na abertura da tela).
+const PENDING_SEARCH_KEY = "rede-clube-pending-search";
+type PendingSearch = { view: View; tab?: string; term: string };
+function takePendingSearch(view: View): PendingSearch | null {
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(PENDING_SEARCH_KEY) || "null") as PendingSearch | null;
+    if (!parsed || parsed.view !== view) return null;
+    window.sessionStorage.removeItem(PENDING_SEARCH_KEY);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+type SearchHit = { key: string; group: string; title: string; detail: string; view: View; tab?: string; term?: string };
+
+// Ctrl+K: procura telas, usuarios e maquinas do AD, dispositivos do Intune e IPs com os dados ja carregados.
+function GlobalSearch({
+  canView,
+  adDetails,
+  intuneDetails,
+  ipDetails,
+  onGo,
+  onClose,
+}: {
+  canView: (view: string) => boolean;
+  adDetails: AdDetails;
+  intuneDetails: IntuneDetails;
+  ipDetails: IpDetails;
+  onGo: (hit: SearchHit) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const term = normalizeText(query);
+  const has = (...values: Array<string | undefined | null>) => normalizeText(values.filter(Boolean).join(" ")).includes(term);
+
+  const hits: SearchHit[] = [];
+  if (term) {
+    for (const item of navSections.flatMap((section) => section.items).filter((entry) => canView(entry.view) && has(entry.label)).slice(0, 4)) {
+      hits.push({ key: `view-${item.view}`, group: "Telas", title: item.label, detail: "abrir a tela", view: item.view });
+    }
+    if (canView("ad")) {
+      for (const user of adDetails.users.filter((entry) => has(entry.cn, entry.displayName, entry.samAccountName, entry.mail, entry.department)).slice(0, 6)) {
+        hits.push({ key: `user-${user.samAccountName}`, group: "Usuários do AD", title: user.cn || user.displayName || user.samAccountName, detail: [user.samAccountName, user.department, user.locked ? "BLOQUEADO" : ""].filter(Boolean).join(" · "), view: "ad", tab: "users", term: user.samAccountName });
+      }
+      for (const computer of adDetails.computers.filter((entry) => has(entry.cn, entry.dNSHostName)).slice(0, 4)) {
+        hits.push({ key: `pc-${computer.cn}`, group: "Máquinas do AD", title: computer.cn, detail: computer.operatingSystem || "sistema não informado", view: "ad", tab: "computers", term: computer.cn });
+      }
+    }
+    if (canView("intune")) {
+      for (const device of intuneDetails.devices.filter((entry) => has(entry.deviceName, entry.userDisplayName, entry.userPrincipalName, entry.serialNumber)).slice(0, 4)) {
+        hits.push({ key: `intune-${device.id || device.deviceName}`, group: "Dispositivos do Intune", title: device.deviceName || "Sem nome", detail: [device.userDisplayName, device.serialNumber].filter(Boolean).join(" · "), view: "intune", term: device.deviceName || device.serialNumber });
+      }
+    }
+    if (canView("ips")) {
+      for (const item of ipDetails.items.filter((entry) => has(entry.ip, entry.name, entry.location)).slice(0, 4)) {
+        hits.push({ key: `ip-${item.id}`, group: "IPs", title: item.ip, detail: [item.name, item.location, item.status].filter(Boolean).join(" · "), view: "ips", term: item.ip });
+      }
+    }
+  }
+  const safeCursor = Math.min(cursor, Math.max(0, hits.length - 1));
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop global-search-backdrop" role="presentation" onClick={onClose}>
+      <section className="global-search" role="dialog" aria-modal="true" aria-label="Buscar no portal" onClick={(event) => event.stopPropagation()}>
+        <label className="global-search-input">
+          <Search size={18} />
+          <input
+            autoFocus
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setCursor(0);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setCursor((value) => Math.min(value + 1, hits.length - 1));
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setCursor((value) => Math.max(value - 1, 0));
+              }
+              if (event.key === "Enter" && hits[safeCursor]) onGo(hits[safeCursor]);
+            }}
+            placeholder="Buscar usuário, máquina, dispositivo, IP ou tela..."
+            aria-label="Buscar no portal"
+          />
+          <kbd>Esc</kbd>
+        </label>
+        {term ? (
+          hits.length ? (
+            <ul className="global-search-results" role="listbox" aria-label="Resultados">
+              {hits.map((hit, index) => (
+                <li key={hit.key}>
+                  {index === 0 || hits[index - 1].group !== hit.group ? <span className="global-search-group">{hit.group}</span> : null}
+                  <button type="button" role="option" aria-selected={index === safeCursor} className={index === safeCursor ? "active" : ""} onMouseEnter={() => setCursor(index)} onClick={() => onGo(hit)}>
+                    <strong>{hit.title}</strong>
+                    <small>{hit.detail}</small>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="global-search-empty">Nada encontrado para "{query.trim()}".</p>
+          )
+        ) : (
+          <p className="global-search-empty">Digite parte do nome, login, e-mail, setor, serial ou IP. Use ↑ ↓ e Enter para abrir.</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+type HomeItem = { key: string; tone: "danger" | "warn"; title: string; detail: string; action: string; view: View; prepare?: () => void };
+
+// Inicio: fila do que precisa de alguem agora, cada item leva a tela certa (substitui a "Visao geral (TV)",
+// que repetia a TV no computador e nao levava a lugar nenhum).
+function HomeDashboard({
   adStatus,
   adDetails,
-  intuneStatus,
-  intuneSummary,
   intuneDetails,
-  office365Status,
-  office365Summary,
   office365Details,
-  milvusAssetsSummary,
   snmpSummary,
-  snmpDetails,
-  topology,
-  ipDetails,
-  onRefreshAd,
+  myOpenTasks,
+  canView,
+  onNavigate,
 }: {
-  adSummary: AdSummary;
   adStatus: AdStatus;
   adDetails: AdDetails;
-  intuneStatus: IntuneStatus;
-  intuneSummary: IntuneSummary;
   intuneDetails: IntuneDetails;
-  office365Status: Office365Status;
-  office365Summary: Office365Summary;
   office365Details: Office365Details;
-  milvusAssetsSummary: MilvusAssetsSummary;
   snmpSummary: SnmpSummary;
-  snmpDetails: SnmpDetails;
-  topology: TopologyState;
-  ipDetails: IpDetails;
-  onRefreshAd: () => Promise<void>;
+  myOpenTasks: number;
+  canView: (view: string) => boolean;
+  onNavigate: (view: View) => void;
 }) {
-  // Links ao vivo do Zabbix (velocidade real e % do contratado). Sem Zabbix, usa o inventario.
-  const [zabbixLinks, setZabbixLinks] = useState<TvZabbixLink[] | null>(null);
+  const [links, setLinks] = useState<TvZabbixLink[] | null>(null);
+  const [defender, setDefender] = useState<{ unassigned: number; high: number } | null>(null);
+  const [contracts, setContracts] = useState<{ title: string; days: number }[] | null>(null);
+  const [checkedAt, setCheckedAt] = useState(() => new Date());
+  const canLinks = canView("links") || canView("tv");
+  const canDefender = canView("defender");
+  const canContracts = canView("contracts");
+
   useEffect(() => {
+    if (!canLinks) return undefined;
     let cancelled = false;
     const load = async () => {
       try {
         const response = await authFetch("/api/links");
         if (!response.ok) return;
         const payload = await parseApiPayload<{ links?: TvZabbixLink[] }>(response, {});
-        if (!cancelled) setZabbixLinks(payload.links || []);
+        if (!cancelled) {
+          setLinks(payload.links || []);
+          setCheckedAt(new Date());
+        }
       } catch {
         /* mantem o ultimo valor */
       }
     };
     load();
-    const timer = window.setInterval(load, 10000);
+    const timer = window.setInterval(load, 30000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [canLinks]);
 
-  const lockoutEventsTotal = adDetails.lockoutEvents.length;
-  const intuneRiskDevices = intuneDetails.devices.filter((device) => intuneDeviceRiskReasons(device).length);
-  const mobileDevices = intuneDetails.devices.filter((device) => !intuneDeviceIsWindows(device));
-  const officeUnlicensedUsers = Math.max(0, office365Summary.users - office365Summary.licensedUsers);
-  const fullLicenses = office365Details.licenses.filter((license) => license.enabledUnits > 0 && license.availableUnits === 0);
-  const mdmManagedDevices = intuneSummary.total || intuneDetails.devices.length;
-  const cloudServicesOk = intuneStatus.ok && office365Status.ok;
-  const overallTone = !adStatus.ok || !cloudServicesOk || adSummary.users.locked ? "danger" : adSummary.computers.inactive30d || intuneSummary.nonCompliant || officeUnlicensedUsers ? "warn" : "good";
-  const sourceLabel = adSummary.source === "ldap" ? "AD real" : "Modo mock";
-  const adAttention = adSummary.users.locked + adSummary.computers.inactive30d;
-  const mdmAttention = intuneSummary.nonCompliant + intuneSummary.staleSync + intuneRiskDevices.length;
-  const officeAttention = officeUnlicensedUsers + fullLicenses.length;
-  const topologyLinks = topology.links.length + ipDetails.links.filter((link) => link.type === "Circuito").length;
-  const internetLinkGroups = buildInternetLinkGroups(ipDetails.links).filter((group) => group.circuit.type === "Circuito").slice(0, 3);
-  const tvAlerts = [
-    {
-      icon: LockKeyhole,
-      title: "Bloqueios no AD",
-      value: adSummary.users.locked,
-      detail: adSummary.users.locked ? `${adDetails.lockouts.length} contas em destaque` : "Nenhuma conta bloqueada agora",
-      tone: adSummary.users.locked ? "danger" : "good",
-    },
-    {
-      icon: ShieldCheck,
-      title: "Intune nao conforme",
-      value: intuneSummary.nonCompliant,
-      detail: `${intuneSummary.staleSync} sem sincronizar em 7 dias`,
-      tone: intuneSummary.nonCompliant || intuneSummary.staleSync ? "warn" : "good",
-    },
-    {
-      icon: TableIcon,
-      title: "Office 365 sem licenca",
-      value: officeUnlicensedUsers,
-      detail: fullLicenses.length ? `${fullLicenses.length} SKU(s) sem saldo` : "licencas com saldo",
-      tone: officeUnlicensedUsers || fullLicenses.length ? "warn" : "good",
-    },
-    {
-      icon: KeyRound,
-      title: "Eventos 4740",
-      value: lockoutEventsTotal,
-      detail: adDetails.lockoutEventErrors.length ? "coleta parcial nos DCs" : "ultimas 24 horas",
-      tone: adDetails.lockoutEventErrors.length ? "warn" : "calm",
-    },
-  ] satisfies TvAlertItem[];
+  useEffect(() => {
+    if (canDefender) {
+      authFetch("/api/defender/incidents?status=open")
+        .then((response) => (response.ok ? parseApiPayload<{ incidents?: { assignedTo?: string | null; severity: string }[] }>(response, {}) : null))
+        .then((payload) => {
+          const open = payload?.incidents || [];
+          const unassigned = open.filter((incident) => !incident.assignedTo);
+          setDefender({ unassigned: unassigned.length, high: unassigned.filter((incident) => incident.severity === "high").length });
+        })
+        .catch(() => undefined);
+    }
+    if (canContracts) {
+      authFetch("/api/contracts")
+        .then((response) => (response.ok ? parseApiPayload<{ contracts?: { title: string; endDate: string; active: boolean }[] }>(response, {}) : null))
+        .then((payload) => {
+          const today = new Date(new Date().toDateString()).getTime();
+          setContracts(
+            (payload?.contracts || [])
+              .filter((contract) => contract.active && contract.endDate)
+              .map((contract) => ({ title: contract.title, days: Math.round((new Date(`${contract.endDate}T00:00:00`).getTime() - today) / 864e5) }))
+              .filter((contract) => contract.days <= 30)
+              .sort((a, b) => a.days - b.days),
+          );
+        })
+        .catch(() => undefined);
+    }
+  }, [canDefender, canContracts]);
 
-  return (
-    <>
-      <section className="tv-command-center" aria-label="Resumo operacional da TV">
-        <div className={`tv-overall ${overallTone}`}>
-          <span>Operacao agora</span>
-          <strong>{overallTone === "danger" ? "Atencao" : overallTone === "warn" ? "Observando" : "Estavel"}</strong>
-          <small>{adStatus.ok && cloudServicesOk ? `${sourceLabel} / Graph conectado` : [adStatus.ok ? "" : adStatus.message, intuneStatus.ok ? "" : "Intune com falha", office365Status.ok ? "" : "Office 365 com falha"].filter(Boolean).join(" | ")}</small>
-        </div>
-        <TvDomainCard
-          icon={Users}
-          title="Active Directory"
-          status={adStatus.ok ? "Online" : "Falha"}
-          tone={adAttention ? "warn" : "good"}
-          primaryLabel="Usuarios ativos"
-          primaryValue={String(adSummary.users.enabled)}
-          meta={`${adSummary.users.total} totais`}
-          stats={[
-            { label: "Bloqueios", value: adSummary.users.locked, tone: adSummary.users.locked ? "danger" : "good" },
-            { label: "Maquinas", value: adSummary.computers.total, tone: adSummary.computers.inactive30d ? "warn" : "good" },
-            { label: "Grupos", value: adSummary.groups.total, tone: "calm" },
-          ]}
-        />
-        <TvDomainCard
-          icon={ShieldCheck}
-          title="MDM / Intune"
-          status={intuneStatus.ok ? "Online" : "Falha"}
-          tone={!intuneStatus.ok ? "danger" : mdmAttention ? "warn" : "good"}
-          primaryLabel="Dispositivos"
-          primaryValue={String(mdmManagedDevices)}
-          meta={`${intuneSummary.compliant} conformes`}
-          stats={[
-            { label: "Nao conformes", value: intuneSummary.nonCompliant, tone: intuneSummary.nonCompliant ? "danger" : "good" },
-            { label: "Sem sync", value: intuneSummary.staleSync, tone: intuneSummary.staleSync ? "warn" : "good" },
-            { label: "Celulares", value: mobileDevices.length, tone: "calm" },
-          ]}
-        />
-        <TvDomainCard
-          icon={TableIcon}
-          title="Office 365"
-          status={office365Status.ok ? "Online" : "Falha"}
-          tone={!office365Status.ok ? "danger" : officeAttention ? "warn" : "good"}
-          primaryLabel="Usuarios"
-          primaryValue={String(office365Summary.users)}
-          meta={`${office365Summary.licensedUsers} licenciados`}
-          stats={[
-            { label: "Sem licenca", value: officeUnlicensedUsers, tone: officeUnlicensedUsers ? "warn" : "good" },
-            { label: "SKUs", value: office365Summary.licenses, tone: "calm" },
-            { label: "Sem saldo", value: fullLicenses.length, tone: fullLicenses.length ? "danger" : "good" },
-          ]}
-        />
-      </section>
+  const items: HomeItem[] = [];
+  if (canView("ad") && adDetails.lockouts.length) {
+    const names = adDetails.lockouts.slice(0, 3).map((lockout) => lockout.user || lockout.cn).join(", ");
+    items.push({
+      key: "ad-locked",
+      tone: "danger",
+      title: `${adDetails.lockouts.length} ${adDetails.lockouts.length === 1 ? "conta bloqueada" : "contas bloqueadas"} no AD`,
+      detail: `${names}${adDetails.lockouts.length > 3 ? ` e +${adDetails.lockouts.length - 3}` : ""}`,
+      action: "Ver e desbloquear",
+      view: "ad",
+      prepare: () => {
+        try {
+          window.sessionStorage.setItem(AD_TAB_KEY, "locked");
+        } catch {
+          /* so a aba inicial */
+        }
+      },
+    });
+  }
+  if (defender?.unassigned) {
+    items.push({
+      key: "defender",
+      tone: defender.high ? "danger" : "warn",
+      title: `${defender.unassigned} ${defender.unassigned === 1 ? "incidente" : "incidentes"} do Defender sem responsável`,
+      detail: defender.high ? `${defender.high} de severidade alta` : "ninguém analisando ainda",
+      action: "Triar",
+      view: "defender",
+    });
+  }
+  for (const link of (links || []).filter((entry) => !entry.online)) {
+    items.push({ key: `link-${link.id}`, tone: "danger", title: `Link ${link.name} offline`, detail: "sem resposta no Zabbix", action: "Ver link", view: "links" });
+  }
+  if (canView("snmp") && snmpSummary.offline) {
+    items.push({ key: "snmp", tone: "warn", title: `${snmpSummary.offline} ${snmpSummary.offline === 1 ? "equipamento SNMP sem resposta" : "equipamentos SNMP sem resposta"}`, detail: "coleta do portal", action: "Ver", view: "snmp" });
+  }
+  const overdue = (contracts || []).filter((contract) => contract.days < 0);
+  const dueSoon = (contracts || []).filter((contract) => contract.days >= 0);
+  if (overdue.length) {
+    items.push({ key: "contracts-overdue", tone: "danger", title: `${overdue.length} ${overdue.length === 1 ? "contrato ativo vencido" : "contratos ativos vencidos"}`, detail: overdue.slice(0, 2).map((contract) => contract.title).join(", "), action: "Abrir", view: "contracts" });
+  }
+  if (dueSoon.length) {
+    items.push({
+      key: "contracts-soon",
+      tone: "warn",
+      title: `${dueSoon.length} ${dueSoon.length === 1 ? "contrato vence" : "contratos vencem"} em até 30 dias`,
+      detail: dueSoon.slice(0, 2).map((contract) => `${contract.title} (${contract.days === 0 ? "hoje" : `${contract.days} dias`})`).join(", "),
+      action: "Abrir",
+      view: "contracts",
+    });
+  }
+  const nonCompliant = intuneDetails.devices.filter((device) => normalizeText(device.complianceState) === "noncompliant").length;
+  if (canView("intune") && nonCompliant) {
+    items.push({ key: "intune", tone: "warn", title: `${nonCompliant} ${nonCompliant === 1 ? "dispositivo não conforme" : "dispositivos não conformes"} no Intune`, detail: "fora das políticas de segurança", action: "Ver", view: "intune" });
+  }
+  const disabledLicensed = office365Details.users.filter((user) => !user.accountEnabled && user.assignedLicenses.length).length;
+  if (canView("office365") && disabledLicensed) {
+    items.push({ key: "o365", tone: "warn", title: `${disabledLicensed} ${disabledLicensed === 1 ? "conta desativada ainda ocupa" : "contas desativadas ainda ocupam"} licença`, detail: "custo sem uso no Office 365", action: "Ver", view: "office365" });
+  }
+  items.sort((a, b) => Number(b.tone === "danger") - Number(a.tone === "danger"));
 
-      <section className="tv-priority-grid">
-        <article className="panel tv-attention-panel">
-          <PanelHeader icon={AlertTriangle} title="Fila de atencao" meta="Prioridade operacional" />
-          <TvAlertQueue items={tvAlerts} />
-        </article>
-
-        <article className="panel tv-links-panel">
-          <PanelHeader
-            icon={CircleGauge}
-            title="Links de internet"
-            meta={zabbixLinks?.length ? `Zabbix ao vivo · ${zabbixLinks.filter((link) => link.online).length}/${zabbixLinks.length} online` : `${internetLinkGroups.length} circuitos`}
-          />
-          {zabbixLinks?.length ? <TvLiveLinkGauges links={zabbixLinks} /> : <TvLinkGauges groups={internetLinkGroups} />}
-        </article>
-      </section>
-
-      <section className="tv-board">
-        <article className="panel tv-milvus-panel">
-          <PanelHeader icon={Server} title="Inventario Milvus" meta={milvusAssetsSummary.configured ? milvusAssetsSummary.source : "Configurar API"} />
-          <TvMilvusInventoryPanel summary={milvusAssetsSummary} />
-        </article>
-
-        <article className="panel tv-tickets-panel">
-          <PanelHeader icon={TableIcon} title="Office 365" meta={`${office365Summary.users} usuarios`} />
-          <TvOffice365Panel summary={office365Summary} details={office365Details} />
-        </article>
-      </section>
-    </>
-  );
-}
-
-type TvTone = "good" | "warn" | "danger" | "calm";
-
-type TvAlertItem = {
-  icon: LucideIcon;
-  title: string;
-  value: number;
-  detail: string;
-  tone: TvTone;
-};
-
-function TvDomainCard({
-  icon: Icon,
-  title,
-  status,
-  tone,
-  primaryLabel,
-  primaryValue,
-  meta,
-  stats,
-}: {
-  icon: LucideIcon;
-  title: string;
-  status: string;
-  tone: TvTone;
-  primaryLabel: string;
-  primaryValue: string;
-  meta: string;
-  stats: Array<{ label: string; value: number; tone: TvTone }>;
-}) {
-  const normalizedStatus = status.toLowerCase();
-  const statusTone = normalizedStatus.includes("falha") ? "danger" : normalizedStatus.includes("online") || normalizedStatus.includes("ok") ? "online" : "neutral";
+  const go = (item: { view: View; prepare?: () => void }) => {
+    item.prepare?.();
+    onNavigate(item.view);
+  };
 
   return (
-    <article className={`tv-domain-card ${tone}`}>
-      <header>
-        <div>
-          <Icon size={20} />
-          <span>{title}</span>
-        </div>
-        <strong className={`tv-status-pill ${statusTone}`}>{status}</strong>
-      </header>
-      <div className="tv-domain-main">
-        <span>{primaryLabel}</span>
-        <strong>{primaryValue}</strong>
-        <small>{meta}</small>
-      </div>
-      <div className="tv-domain-stats">
-        {stats.map((stat) => (
-          <div className={stat.tone} key={stat.label}>
-            <span>{stat.label}</span>
-            <strong>{stat.value}</strong>
+    <div className="home-page">
+      {!adStatus.ok && canView("ad") ? (
+        <section className="ad-alert" role="alert">
+          <AlertTriangle size={20} />
+          <div>
+            <strong>O Active Directory não está respondendo</strong>
+            <span>Contas bloqueadas não aparecem nesta lista até ele voltar. {adStatus.message}</span>
           </div>
-        ))}
-      </div>
-    </article>
-  );
-}
+        </section>
+      ) : null}
 
-function TvAlertQueue({ items }: { items: TvAlertItem[] }) {
-  return (
-    <div className="tv-alert-queue">
-      {items.map((item) => {
-        const Icon = item.icon;
-        return (
-          <div className={`tv-alert-item ${item.tone}`} key={item.title}>
-            <Icon size={18} />
-            <div>
-              <strong>{item.title}</strong>
-              <span>{item.detail}</span>
-            </div>
-            <b>{item.value}</b>
-          </div>
-        );
-      })}
+      <section className="panel home-queue" aria-labelledby="home-queue-title">
+        <header>
+          <h2 id="home-queue-title">Precisa de você agora</h2>
+          <small>atualizado às {checkedAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</small>
+        </header>
+        {items.length ? (
+          <ul>
+            {items.map((item) => (
+              <li key={item.key} className={`tone-${item.tone}`}>
+                {item.tone === "danger" ? <XCircle size={20} /> : <AlertTriangle size={20} />}
+                <div>
+                  <strong>{item.title}</strong>
+                  {item.detail ? <small>{item.detail}</small> : null}
+                </div>
+                <button className={item.tone === "danger" ? "primary-action" : "secondary-action"} type="button" onClick={() => go(item)}>
+                  {item.action}
+                  <ChevronRight size={15} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="home-clear"><CheckCircle2 size={20} /> Nada pedindo ação agora.</p>
+        )}
+      </section>
+
+      <section className="home-grid">
+        {canLinks ? (
+          <article className="panel home-links">
+            <PanelHeader icon={CircleGauge} title="Links agora" meta={links?.length ? `${links.filter((link) => link.online).length}/${links.length} online` : "Zabbix"} />
+            {links?.length ? <TvLiveLinkGauges links={links} /> : <EmptyState title="Sem leitura dos links" detail="O Zabbix ainda não respondeu." />}
+          </article>
+        ) : null}
+        {canView("projects") ? (
+          <article className="panel home-tasks">
+            <PanelHeader icon={FolderKanban} title="Minhas tarefas" meta="Projetos" />
+            <strong className="home-big">{myOpenTasks}</strong>
+            <p>{myOpenTasks ? `${myOpenTasks === 1 ? "tarefa atribuída" : "tarefas atribuídas"} a você em aberto` : "Nenhuma tarefa sua em aberto."}</p>
+            <button className="secondary-action" type="button" onClick={() => onNavigate("projects")}>
+              Abrir Projetos
+              <ChevronRight size={15} />
+            </button>
+          </article>
+        ) : null}
+      </section>
     </div>
   );
 }
@@ -2585,56 +2595,6 @@ function TvLiveLinkGauges({ links }: { links: TvZabbixLink[] }) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function TvLinkGauges({ groups }: { groups: InternetLinkGroup[] }) {
-  if (!groups.length) {
-    return <EmptyState title="Links nao cadastrados" detail="Cadastre os circuitos em IPS > Links para a TV montar os velocimetros." />;
-  }
-
-  const speeds = groups.map((group) => parseLinkSpeedMbps(group.circuit.speed));
-  const maxSpeed = Math.max(...speeds, 1);
-
-  return (
-    <div className="tv-link-gauges">
-      {groups.map((group, index) => {
-        const speedMbps = speeds[index] || 0;
-        const gaugeFill = Math.min(100, Math.max(12, (speedMbps / maxSpeed) * 100));
-        const isDown = group.circuit.status === "Inativo";
-        const isWarn = group.circuit.status === "Atencao";
-        return (
-          <div
-            className={`tv-link-gauge ${isDown ? "danger critical" : isWarn ? "warn" : ""}`}
-            key={group.circuit.id}
-            style={{ "--gauge-fill": `${gaugeFill / 2}%`, "--gauge-angle": `${180 + gaugeFill * 1.8}deg` } as React.CSSProperties}
-          >
-            <div className="tv-gauge-dial" aria-hidden="true">
-              <span />
-            </div>
-            <div className="tv-gauge-copy">
-              <strong>{group.circuit.provider || group.circuit.name}</strong>
-              <b>{group.circuit.speed || "Sem velocidade"}</b>
-              <span>{group.circuit.gateway || group.circuit.usedIp || group.circuit.fortinetIp || "Sem IP"}</span>
-              <small>{group.services.length} servicos publicados</small>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function TvCollectionPanel({ items }: { items: Array<{ label: string; value: string; tone: TvTone }> }) {
-  return (
-    <div className="tv-collection-grid">
-      {items.map((item) => (
-        <div className={item.tone} key={item.label}>
-          <span>{item.label}</span>
-          <strong>{item.value}</strong>
-        </div>
-      ))}
     </div>
   );
 }
@@ -3102,8 +3062,20 @@ function AdDashboard({
   onRefreshAd: () => Promise<void>;
 }) {
   // Uma tabela com abas e uma busca (antes eram 4 paineis de 360 px, cada um com a sua busca).
-  const [adTab, setAdTab] = useState<AdTab>("users");
-  const [search, setSearch] = useState("");
+  // A busca global pode abrir o AD numa aba e ja filtrado.
+  const [pending] = useState(() => takePendingSearch("ad"));
+  const [adTab, setAdTab] = useState<AdTab>(() => {
+    if (pending?.tab) return pending.tab as AdTab;
+    // O Inicio pode pedir para abrir direto numa aba (ex.: "Bloqueados").
+    try {
+      const requested = window.sessionStorage.getItem(AD_TAB_KEY) as AdTab | null;
+      window.sessionStorage.removeItem(AD_TAB_KEY);
+      return requested || "users";
+    } catch {
+      return "users";
+    }
+  });
+  const [search, setSearch] = useState(() => pending?.term || "");
   const [page, setPage] = useState(1);
   const [lockoutSearch, setLockoutSearch] = useState("");
   const [lockoutPage, setLockoutPage] = useState(1);
@@ -3544,7 +3516,7 @@ function IntuneDashboard({
   intuneDetails: IntuneDetails;
   onRefreshIntune: () => Promise<void>;
 }) {
-  const [deviceSearch, setDeviceSearch] = useState("");
+  const [deviceSearch, setDeviceSearch] = useState(() => takePendingSearch("intune")?.term || "");
   const [devicePage, setDevicePage] = useState(1);
   const [deviceFilter, setDeviceFilter] = useState<IntuneFilter>("all");
   const [selectedDevice, setSelectedDevice] = useState<IntuneDevice | null>(null);
@@ -4938,7 +4910,7 @@ function IpsDashboard({
   ipDetails: IpDetails;
   onRefreshIps: () => Promise<void>;
 }) {
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => takePendingSearch("ips")?.term || "");
   const [ipSection, setIpSection] = useState<"addresses" | "subnets" | "links">("addresses");
   const [statusFilter, setStatusFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -5366,49 +5338,6 @@ function IpsDashboard({
   );
 }
 
-function HealthTile({
-  icon: Icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-  tone: "good" | "warn" | "danger";
-}) {
-  return (
-    <div className={`health-tile ${tone}`}>
-      <Icon size={18} />
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function TvMetric({
-  icon: Icon,
-  label,
-  value,
-  detail,
-  tone,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-  detail: string;
-  tone: "good" | "warn" | "danger" | "calm";
-}) {
-  return (
-    <div className={`tv-metric ${tone}`}>
-      <Icon size={22} />
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </div>
-  );
-}
-
 function TicketStatusCard({
   icon: Icon,
   label,
@@ -5435,56 +5364,6 @@ function TicketStatusCard({
       <strong>{value}</strong>
       <small>{detail}</small>
     </button>
-  );
-}
-
-function percentOf(value: number, total: number) {
-  if (!total) return 0;
-  return Math.round((value / total) * 100);
-}
-
-function TvEventFeed({ adSummary, adDetails }: { adSummary: AdSummary; adDetails: AdDetails }) {
-  const lockoutEvents = adDetails.lockouts.slice(0, 3).map((lockout) => ({
-    title: `${lockout.user || lockout.cn} bloqueado`,
-    detail: lockout.department || "Active Directory",
-    tone: "danger" as const,
-    time: formatWindowsFileTime(lockout.lockoutTime),
-  }));
-  const operationalEvents = [
-    {
-      title: adSummary.users.locked ? "Contas bloqueadas requerem acao" : "Sem bloqueios ativos",
-      detail: "Active Directory",
-      tone: adSummary.users.locked ? ("warn" as const) : ("good" as const),
-      time: "Agora",
-    },
-    {
-      title: `${adSummary.users.enabled} usuarios habilitados`,
-      detail: `${adSummary.users.disabled} contas desativadas`,
-      tone: "good" as const,
-      time: "AD",
-    },
-    {
-      title: `${adSummary.computers.total} maquinas no dominio`,
-      detail: `${adSummary.computers.inactive30d} inativas em 30d`,
-      tone: adSummary.computers.inactive30d ? ("warn" as const) : ("good" as const),
-      time: "AD",
-    },
-  ];
-  const events = [...lockoutEvents, ...operationalEvents].slice(0, 6);
-
-  return (
-    <div className="tv-event-feed">
-      {events.map((event) => (
-        <div className={`tv-event ${event.tone}`} key={`${event.title}-${event.time}`}>
-          <i />
-          <div>
-            <strong>{event.title}</strong>
-            <span>{event.detail}</span>
-          </div>
-          <small>{event.time}</small>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -5944,386 +5823,6 @@ function AddUserToGroupModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>
-  );
-}
-
-function TvAdOverviewPanel({
-  adSummary,
-  adDetails,
-  standardIssues,
-}: {
-  adSummary: AdSummary;
-  adDetails: AdDetails;
-  standardIssues: number;
-}) {
-  const enabledPercent = percentOf(adSummary.users.enabled, adSummary.users.total);
-  const disabledPercent = percentOf(adSummary.users.disabled, adSummary.users.total);
-  const computerPercent = percentOf(adSummary.computers.domainJoined, adSummary.computers.total);
-
-  const stats = [
-    { label: "Usuarios habilitados", value: adSummary.users.enabled, detail: `${enabledPercent}% do total`, tone: "good" },
-    { label: "Usuarios desativados", value: adSummary.users.disabled, detail: `${disabledPercent}% do total`, tone: adSummary.users.disabled ? "warn" : "good" },
-    { label: "Maquinas no dominio", value: adSummary.computers.domainJoined, detail: `${computerPercent}% inventariado`, tone: "good" },
-    { label: "Cadastro incompleto", value: standardIssues, detail: "usuarios ativos", tone: standardIssues ? "warn" : "good" },
-    { label: "Bloqueios ativos", value: adSummary.users.locked, detail: `${adDetails.lockouts.length} listados`, tone: adSummary.users.locked ? "danger" : "good" },
-    { label: "Eventos coletados", value: adDetails.lockoutEvents.length, detail: "4740 / 24h", tone: adDetails.lockoutEventErrors.length ? "warn" : "good" },
-  ];
-
-  return (
-    <div className="tv-ad-live-grid">
-      {stats.map((stat) => (
-        <div className={`tv-ad-live-tile ${stat.tone}`} key={stat.label}>
-          <span>{stat.label}</span>
-          <strong>{stat.value}</strong>
-          <small>{stat.detail}</small>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TvStandardUsersPanel({ items }: { items: UserStandardItem[] }) {
-  const visibleItems = items.slice(0, 5);
-
-  if (!visibleItems.length) {
-    return <EmptyState title="Cadastro em ordem" detail="Nenhum usuario ativo fora do padrao nesta coleta." />;
-  }
-
-  return (
-    <div className="tv-compact-list">
-      {visibleItems.map(({ user, missingFields }) => (
-        <div className="tv-compact-row warn" key={user.distinguishedName || user.samAccountName}>
-          <div>
-            <strong>{user.displayName || user.cn || user.samAccountName}</strong>
-            <span>{user.department || "Sem departamento"}</span>
-          </div>
-          <small>{formatMissingFields(missingFields)}</small>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TvComputersPanel({ computers }: { computers: AdComputer[] }) {
-  const visibleComputers = computers.slice(0, 5);
-
-  if (!visibleComputers.length) {
-    return <EmptyState title="Maquinas nao carregadas" detail="A API ainda nao retornou computadores do dominio." />;
-  }
-
-  return (
-    <div className="tv-compact-list">
-      {visibleComputers.map((computer) => (
-        <div className="tv-compact-row" key={computer.distinguishedName || computer.cn}>
-          <div>
-            <strong>{computer.cn}</strong>
-            <span>{computer.dNSHostName || "Sem DNS"}</span>
-          </div>
-          <small>{computer.operatingSystem || "SO nao informado"}</small>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TvIntunePanel({ summary, devices }: { summary: IntuneSummary; devices: IntuneDevice[] }) {
-  const riskDevices = devices.filter((device) => intuneDeviceRiskReasons(device).length);
-  const staleDevices = devices.filter((device) => intuneDeviceIsStale(device));
-  const windowsDevices = devices.filter((device) => intuneDeviceIsWindows(device));
-  const mobileDevices = devices.filter((device) => !intuneDeviceIsWindows(device));
-  const attentionDevices = riskDevices.slice(0, 4);
-
-  return (
-    <div className="tv-service-panel">
-      <div className="tv-service-grid">
-        <div>
-          <span>Total MDM</span>
-          <strong>{summary.total || devices.length}</strong>
-        </div>
-        <div>
-          <span>Conformes</span>
-          <strong>{summary.compliant}</strong>
-        </div>
-        <div className={summary.nonCompliant ? "warn" : ""}>
-          <span>Nao conformes</span>
-          <strong>{summary.nonCompliant}</strong>
-        </div>
-        <div className={summary.staleSync ? "warn" : ""}>
-          <span>Sem sync 7d</span>
-          <strong>{summary.staleSync}</strong>
-        </div>
-      </div>
-
-      <div className="tv-mini-split">
-        <span>{windowsDevices.length} Windows</span>
-        <span>{mobileDevices.length} Mobile</span>
-      </div>
-
-      <div className="tv-compact-list">
-        {attentionDevices.map((device) => (
-          <div className="tv-compact-row warn" key={device.id || device.deviceName}>
-            <div>
-              <strong>{device.deviceName || "Sem nome"}</strong>
-              <span>{device.userDisplayName || device.userPrincipalName || "Sem usuario"}</span>
-            </div>
-            <small>{intuneDeviceRiskReasons(device).join(", ")}</small>
-          </div>
-        ))}
-        {!attentionDevices.length ? <EmptyState title="MDM em ordem" detail="Nenhum dispositivo Intune com alerta nesta coleta." /> : null}
-      </div>
-    </div>
-  );
-}
-
-function TvGroupsPanel({ groups }: { groups: ApiAdGroup[] }) {
-  const visibleGroups = [...groups]
-    .sort((first, second) => second.memberCount - first.memberCount)
-    .slice(0, 5);
-
-  if (!visibleGroups.length) {
-    return <EmptyState title="Grupos nao carregados" detail="A API ainda nao retornou grupos do AD." />;
-  }
-
-  return (
-    <div className="tv-compact-list">
-      {visibleGroups.map((group) => (
-        <div className="tv-compact-row" key={group.distinguishedName || group.cn}>
-          <div>
-            <strong>{group.cn}</strong>
-            <span>{group.description || "Sem descricao"}</span>
-          </div>
-          <small>{group.memberCount} membros</small>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TvOffice365Panel({ summary, details }: { summary: Office365Summary; details: Office365Details }) {
-  const unlicensedUsers = details.users.filter((user) => !user.assignedLicenses.length).slice(0, 4);
-  const fullLicenses = details.licenses.filter((license) => license.enabledUnits > 0 && license.availableUnits === 0);
-  const topLicenses = [...details.licenses]
-    .filter((license) => license.consumedUnits > 0)
-    .sort((first, second) => second.consumedUnits - first.consumedUnits)
-    .slice(0, 3);
-
-  return (
-    <div className="tv-service-panel">
-      <div className="tv-service-grid">
-        <div>
-          <span>Usuarios 365</span>
-          <strong>{summary.users}</strong>
-        </div>
-        <div>
-          <span>Licenciados</span>
-          <strong>{summary.licensedUsers}</strong>
-        </div>
-        <div className={summary.users - summary.licensedUsers ? "warn" : ""}>
-          <span>Sem licenca</span>
-          <strong>{Math.max(0, summary.users - summary.licensedUsers)}</strong>
-        </div>
-        <div className={fullLicenses.length ? "danger" : ""}>
-          <span>SKUs lotadas</span>
-          <strong>{fullLicenses.length}</strong>
-        </div>
-      </div>
-
-      <div className="tv-license-strip">
-        {topLicenses.map((license) => (
-          <span key={license.skuId}>{formatSkuName(license.skuPartNumber)}: {license.consumedUnits}/{license.enabledUnits}</span>
-        ))}
-      </div>
-
-      <div className="tv-compact-list">
-        {unlicensedUsers.map((user) => (
-          <div className="tv-compact-row warn" key={user.id || user.userPrincipalName}>
-            <div>
-              <strong>{user.displayName || user.userPrincipalName}</strong>
-              <span>{user.department || "Sem departamento"}</span>
-            </div>
-            <small>Sem licenca</small>
-          </div>
-        ))}
-        {!unlicensedUsers.length ? <EmptyState title="Office 365 em ordem" detail="Todos os usuarios listados possuem licenca." /> : null}
-      </div>
-    </div>
-  );
-}
-
-function TvNetworkPanel({
-  snmpSummary,
-  snmpDetails,
-  topology,
-  ipDetails,
-}: {
-  snmpSummary: SnmpSummary;
-  snmpDetails: SnmpDetails;
-  topology: TopologyState;
-  ipDetails: IpDetails;
-}) {
-  const metricByDevice = new Map(snmpDetails.metrics.map((metric) => [metric.deviceId, metric]));
-  const monitoredDevices = snmpDetails.devices.map((device) => {
-    const metric = metricByDevice.get(device.id);
-    const status = metric ? (metric.ok ? "online" : "offline") : "sem coleta";
-    return { device, metric, status };
-  });
-  const topologySwitches = topology.nodes.filter((node) => node.type === "switch").length;
-  const topologyFirewalls = topology.nodes.filter((node) => node.type === "firewall").length;
-  const snmpSwitches = snmpDetails.devices.filter((device) => /switch/i.test(device.type) || /switch/i.test(device.name)).length;
-  const fortinetDevices = Math.max(
-    topologyFirewalls,
-    snmpDetails.devices.filter((device) => /fortinet|fortigate/i.test(`${device.type} ${device.name} ${device.notes}`)).length,
-  );
-  const unifiDevices = snmpDetails.devices.filter((device) => /unifi|uap|anten|radio/i.test(`${device.type} ${device.name} ${device.notes}`)).length;
-  const unifiAntennas = snmpDetails.devices.filter((device) => /uap|ap|anten|radio/i.test(`${device.name} ${device.notes}`)).length;
-  const links = topology.links.length + ipDetails.links.filter((link) => link.type === "Circuito").length;
-  const pending = Math.max(0, snmpSummary.enabled - snmpSummary.online - snmpSummary.offline);
-  const offlineDevices = monitoredDevices.filter((item) => item.status === "offline");
-  const visibleDevices = (offlineDevices.length ? offlineDevices : monitoredDevices).slice(0, 4);
-  const fallbackNodes = !visibleDevices.length ? topology.nodes.filter((node) => node.type !== "internet").slice(0, 4) : [];
-  const tiles = [
-    { icon: Shield, label: "Fortinet", value: fortinetDevices, detail: fortinetDevices ? "firewall monitorado" : "cadastre no SNMP", tone: snmpSummary.offline && fortinetDevices ? "warn" : "good" },
-    { icon: Network, label: "Switches", value: Math.max(topologySwitches, snmpSwitches), detail: `${topologySwitches} no mapa`, tone: snmpSummary.offline ? "warn" : "good" },
-    { icon: RadioTower, label: "Antenas UniFi", value: unifiAntennas || unifiDevices, detail: unifiDevices ? "UniFi encontrado" : "sem cadastro SNMP", tone: "calm" },
-    { icon: Zap, label: "Links", value: links, detail: `${ipDetails.links.filter((link) => link.type === "Circuito").length} internet`, tone: "calm" },
-    { icon: CheckCircle2, label: "Online", value: snmpSummary.online, detail: snmpSummary.enabled ? `${snmpSummary.enabled} habilitados` : "aguardando SNMP", tone: "good" },
-    { icon: XCircle, label: "Offline", value: snmpSummary.offline, detail: pending ? `${pending} sem coleta` : "queda monitorada", tone: snmpSummary.offline ? "danger" : "good" },
-  ] satisfies Array<{ icon: LucideIcon; label: string; value: number; detail: string; tone: TvTone }>;
-
-  return (
-    <div className="tv-service-panel tv-infra-panel">
-      <div className="tv-infra-grid">
-        {tiles.map((tile) => {
-          const Icon = tile.icon;
-          return (
-            <div className={`tv-infra-tile ${tile.tone} ${tile.tone === "danger" ? "critical" : ""}`} key={tile.label}>
-              <Icon size={18} />
-              <span>{tile.label}</span>
-              <strong>{tile.value}</strong>
-              <small>{tile.detail}</small>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="tv-compact-list tv-network-watch-list">
-        {visibleDevices.map(({ device, metric, status }) => (
-          <div className={`tv-compact-row ${status === "offline" ? "danger critical" : status === "online" ? "" : "warn"}`} key={device.id}>
-            <div>
-              <strong>{device.name}</strong>
-              <span>{device.host}:{device.port} - {device.type}</span>
-            </div>
-            <small>{metric?.latencyMs != null ? `${metric.latencyMs.toFixed(metric.latencyMs < 10 ? 1 : 0)} ms` : status}</small>
-          </div>
-        ))}
-        {fallbackNodes.map((node) => (
-          <div className="tv-compact-row warn" key={node.id}>
-            <div>
-              <strong>{node.name}</strong>
-              <span>{node.ip || node.vendor || node.network || "Sem IP monitorado"}</span>
-            </div>
-            <small>sem SNMP</small>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TvMilvusInventoryPanel({ summary }: { summary: MilvusAssetsSummary }) {
-  return (
-    <div className="tv-service-panel">
-      <div className="tv-service-grid">
-        <div className={summary.configured ? "" : "warn"}>
-          <span>Maquinas Milvus</span>
-          <strong>{summary.total}</strong>
-        </div>
-        <div>
-          <span>Computadores</span>
-          <strong>{summary.computers}</strong>
-        </div>
-        <div>
-          <span>Celulares</span>
-          <strong>{summary.mobile}</strong>
-        </div>
-        <div className={summary.unknown ? "warn" : ""}>
-          <span>Sem tipo</span>
-          <strong>{summary.unknown}</strong>
-        </div>
-      </div>
-      <div className="tv-mini-split">
-        <span>{summary.configured ? "Milvus API" : "Aguardando path"}</span>
-        <span>{summary.message}</span>
-      </div>
-    </div>
-  );
-}
-
-function TvLockoutEventsPanel({ events, errors }: { events: LockoutEvent[]; errors: string[] }) {
-  const visibleEvents = events.slice(0, 5);
-
-  if (!visibleEvents.length) {
-    return <EmptyState title="Sem eventos recentes" detail={errors.length ? "A coleta de 4740 retornou erro nos DCs." : "Nenhum evento 4740 retornado nas ultimas 24h."} />;
-  }
-
-  return (
-    <div className="tv-compact-list">
-      {visibleEvents.map((event) => (
-        <div className="tv-compact-row danger" key={`${event.domainController}-${event.targetUser}-${event.timeCreated}`}>
-          <div>
-            <strong>{event.targetUser}</strong>
-            <span>{event.callerComputer || "Origem nao informada"}</span>
-          </div>
-          <small>{event.domainController} - {formatDateTime(event.timeCreated)}</small>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function AdCompliancePanel({ adSummary }: { adSummary: AdSummary }) {
-  const dynamicCompliance = [
-    {
-      label: "Maquinas no dominio",
-      current: adSummary.computers.domainJoined,
-      expected: adSummary.computers.total,
-      status: "Atencao",
-    },
-    {
-      label: "Usuarios com cadastro OK",
-      current: adSummary.users.enabled,
-      expected: adSummary.users.total,
-      status: "OK",
-    },
-    { label: "Usuarios fora do padrao", current: adSummary.users.disabled, expected: 0, status: "Revisar" },
-    { label: "Maquinas inativas 30d", current: adSummary.computers.inactive30d, expected: 0, status: "Limpar" },
-  ];
-
-  return (
-    <div className="ad-grid">
-      <div className="inventory-strip">
-        <div>
-          <CheckCircle2 size={20} />
-          <strong>{adSummary.users.enabled}</strong>
-          <span>usuarios OK</span>
-        </div>
-        <div>
-          <XCircle size={20} />
-          <strong>{adSummary.users.disabled}</strong>
-          <span>fora do padrao</span>
-        </div>
-        <div>
-          <Monitor size={20} />
-          <strong>{adSummary.computers.inactive30d}</strong>
-          <span>maquinas inativas</span>
-        </div>
-      </div>
-      <div className="compliance-stack">
-        {dynamicCompliance.map((item) => (
-          <ComplianceBar key={item.label} {...item} />
-        ))}
       </div>
     </div>
   );
@@ -8692,16 +8191,6 @@ function emptyTopologyNode(): TopologyNode {
   };
 }
 
-function emptyTopologyLink(nodes: TopologyNode[]): TopologyLink {
-  return {
-    id: "",
-    from: nodes[0]?.id || "",
-    to: nodes[1]?.id || "",
-    label: "",
-    medium: "trunk",
-  };
-}
-
 function topologyNodeIcon(type: TopologyNodeType) {
   if (type === "firewall") return Shield;
   if (type === "core") return Router;
@@ -9500,221 +8989,6 @@ function extractOu(distinguishedName: string | undefined) {
   return ou || "Builtin/raiz";
 }
 
-function TicketList() {
-  return (
-    <div className="ticket-list">
-      {ticketQueue.map((ticket) => (
-        <div className="ticket-row" key={ticket.code}>
-          <span className="ticket-code">{ticket.code}</span>
-          <strong>{ticket.title}</strong>
-          <div>
-            <span>{ticket.team}</span>
-            <small>{ticket.sla}</small>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TicketChart() {
-  return (
-    <div className="chart-wrap compact">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={callVolume} margin={{ left: -18, right: 8, top: 8, bottom: 0 }}>
-          <CartesianGrid stroke="#e6ebe6" vertical={false} />
-          <XAxis dataKey="hour" tickLine={false} axisLine={false} />
-          <YAxis tickLine={false} axisLine={false} />
-          <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #dfe6df" }} />
-          <Bar dataKey="opened" fill="#d9902f" radius={[6, 6, 0, 0]} name="Abertos" />
-          <Bar dataKey="closed" fill="#16a085" radius={[6, 6, 0, 0]} name="Resolvidos" />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function LatencyChart() {
-  return (
-    <div className="chart-wrap">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={latencyHistory} margin={{ left: 0, right: 12, top: 8, bottom: 0 }}>
-          <CartesianGrid stroke="#e6ebe6" vertical={false} />
-          <XAxis dataKey="time" tickLine={false} axisLine={false} />
-          <YAxis tickLine={false} axisLine={false} width={38} unit="ms" />
-          <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #dfe6df" }} />
-          <Line type="monotone" dataKey="core" stroke="#16a085" strokeWidth={3} dot={false} name="Core" />
-          <Line type="monotone" dataKey="unifi" stroke="#277da1" strokeWidth={3} dot={false} name="UniFi" />
-          <Line type="monotone" dataKey="fortinet" stroke="#c0392b" strokeWidth={3} dot={false} name="Fortinet" />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function WanChart() {
-  return (
-    <div className="chart-wrap compact">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={wanTraffic} margin={{ left: -18, right: 8, top: 8, bottom: 0 }}>
-          <CartesianGrid stroke="#e6ebe6" vertical={false} />
-          <XAxis dataKey="link" tickLine={false} axisLine={false} />
-          <YAxis tickLine={false} axisLine={false} />
-          <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #dfe6df" }} />
-          <Bar dataKey="download" radius={[6, 6, 0, 0]} name="Download">
-            {wanTraffic.map((entry) => (
-              <Cell key={entry.link} fill={entry.color} />
-            ))}
-          </Bar>
-          <Bar dataKey="upload" fill="#9aa79e" radius={[6, 6, 0, 0]} name="Upload" />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function SiteHealth() {
-  return (
-    <div className="site-stack">
-      {sites.map((site) => (
-        <div className="site-row" key={site.name}>
-          <div className="site-row-top">
-            <strong>{site.name}</strong>
-            <span>{site.health}%</span>
-          </div>
-          <div className="progress-track">
-            <span style={{ width: `${site.health}%` }} />
-          </div>
-          <div className="site-row-meta">
-            <span>{site.devices} devices</span>
-            <span>{site.clients} clientes</span>
-            <span>{site.alerts} alertas</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function AssetTable() {
-  return (
-    <div className="asset-table" role="table" aria-label="Ativos monitorados">
-      <div className="asset-head" role="row">
-        <span>Ativo</span>
-        <span>Grupo</span>
-        <span>Fornecedor</span>
-        <span>Status</span>
-        <span>Latencia</span>
-        <span>Uptime</span>
-      </div>
-      {assets.map((asset) => (
-        <div className="asset-row" role="row" key={asset.ip}>
-          <span>
-            <strong>{asset.name}</strong>
-            <small>{asset.ip}</small>
-          </span>
-          <span>{asset.group}</span>
-          <span>{asset.vendor}</span>
-          <span>
-            <i className={`status-dot ${asset.status}`} />
-            {statusLabel(asset.status)}
-          </span>
-          <span>{asset.latency}</span>
-          <span>{asset.uptime}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function IncidentList({ adSummary }: { adSummary: AdSummary }) {
-  const dynamicIncidents =
-    adSummary.users.locked > 0
-      ? incidents
-      : incidents.filter((incident) => incident.area !== "Active Directory");
-
-  return (
-    <div className="incident-list">
-      {dynamicIncidents.map((incident) => (
-        <div className="incident-row" key={incident.title}>
-          <div>
-            <strong>{incident.title}</strong>
-            <span>{incident.area}</span>
-          </div>
-          <div className="incident-meta">
-            <SeverityBadge severity={incident.severity} />
-            <small>
-              <Clock3 size={13} />
-              {incident.age}
-            </small>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function FortinetPanel() {
-  return (
-    <>
-      <div className="firewall-snapshot">
-        <div>
-          <span>CPU</span>
-          <strong>42%</strong>
-        </div>
-        <div>
-          <span>Memoria</span>
-          <strong>61%</strong>
-        </div>
-        <div>
-          <span>Sessoes</span>
-          <strong>18.4k</strong>
-        </div>
-        <div>
-          <span>VPNs</span>
-          <strong>14/15</strong>
-        </div>
-      </div>
-      <div className="chart-wrap mini">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={latencyHistory} margin={{ left: 0, right: 0, top: 8, bottom: 0 }}>
-            <defs>
-              <linearGradient id="fortinetLoad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#c0392b" stopOpacity={0.28} />
-                <stop offset="95%" stopColor="#c0392b" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <Area type="monotone" dataKey="fortinet" stroke="#c0392b" fill="url(#fortinetLoad)" strokeWidth={3} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-    </>
-  );
-}
-
-function UnifiPanel() {
-  return (
-    <div className="unifi-grid">
-      <div>
-        <strong>37</strong>
-        <span>APs online</span>
-      </div>
-      <div>
-        <strong>623</strong>
-        <span>Clientes</span>
-      </div>
-      <div>
-        <strong>91%</strong>
-        <span>Wi-Fi exp.</span>
-      </div>
-      <div>
-        <strong>2</strong>
-        <span>Portas down</span>
-      </div>
-    </div>
-  );
-}
-
 function MetricCard({
   icon: Icon,
   label,
@@ -9791,76 +9065,6 @@ function ComplianceBar({
       <small>
         {current} de {expected || "meta zero"}
       </small>
-    </div>
-  );
-}
-
-function LockoutRow({ lockout }: { lockout: Lockout }) {
-  return (
-    <div className={`lockout-row ${lockout.severity.toLowerCase()}`}>
-      <div className="lockout-main">
-        <div className="lockout-user">
-          <strong>{lockout.user}</strong>
-          <span>{lockout.department}</span>
-        </div>
-        <SeverityBadge severity={lockout.severity} />
-      </div>
-      <div className="lockout-meta">
-        <span>
-          Origem
-          <strong>{lockout.source}</strong>
-        </span>
-        <span>
-          DC
-          <strong>{lockout.controller}</strong>
-        </span>
-        <span>
-          Falhas
-          <strong>{lockout.attempts}</strong>
-        </span>
-      </div>
-      <div className="lockout-footer">
-        <span>{lockout.reason}</span>
-        <button className="small-action" type="button">
-          {lockout.ticket}
-        </button>
-      </div>
-      <small className="lockout-time">
-        <Clock3 size={13} />
-        {lockout.lastSeen}
-      </small>
-    </div>
-  );
-}
-
-function AccessRequestRow({ request }: { request: AccessRequest }) {
-  return (
-    <div className="access-row">
-      <div>
-        <strong>{request.user}</strong>
-        <span>{request.action}</span>
-      </div>
-      <div>
-        <span>{request.target}</span>
-        <small>{request.requestedBy}</small>
-      </div>
-      <StatusPill label={request.status} />
-    </div>
-  );
-}
-
-function GroupRow({ group }: { group: AdGroup }) {
-  return (
-    <div className="group-row">
-      <div>
-        <strong>{group.name}</strong>
-        <span>{group.owner}</span>
-      </div>
-      <div className="group-meta">
-        <span>{group.members} membros</span>
-        <RiskPill risk={group.risk} />
-      </div>
-      <small>{group.lastChange}</small>
     </div>
   );
 }

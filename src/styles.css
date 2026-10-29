@@ -14726,3 +14726,249 @@ thead .ac-person-col {
 .office365-actions-cell .status-pill {
   flex: 0 0 auto;
 }
+
+/* ---------- Inicio: fila do que precisa de voce agora ---------- */
+.home-page {
+  display: grid;
+  gap: 16px;
+}
+
+.home-queue header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.home-queue h2 {
+  margin: 0;
+  color: var(--heading);
+  font-size: 20px;
+}
+
+.home-queue header small {
+  color: var(--muted);
+}
+
+.home-queue ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-queue li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warning);
+  border-radius: 10px;
+}
+
+.home-queue li.tone-danger {
+  border-left-color: var(--danger);
+}
+
+.home-queue li > svg {
+  color: var(--warning-ink);
+}
+
+.home-queue li.tone-danger > svg {
+  color: var(--danger-ink);
+}
+
+.home-queue li strong {
+  display: block;
+  color: var(--heading);
+  font-size: 15px;
+}
+
+.home-queue li small {
+  color: var(--muted);
+}
+
+.home-clear {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+  color: var(--success-ink);
+  font-weight: 700;
+  background: var(--success-soft);
+  border-radius: 10px;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: 16px;
+}
+
+.home-tasks {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.home-tasks p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.home-big {
+  color: var(--heading);
+  font-size: 40px;
+  line-height: 1;
+}
+
+@media (max-width: 900px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-queue li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .home-queue li > button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+/* Menu mais compacto: cabe inteiro num notebook */
+.nav-item {
+  min-height: 36px;
+}
+
+/* ---------- Busca global (Ctrl+K) ---------- */
+.global-search-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  min-width: 240px;
+  padding: 0 12px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.global-search-trigger span {
+  flex: 1;
+  text-align: left;
+}
+
+.global-search-trigger kbd,
+.global-search-input kbd {
+  padding: 1px 6px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.global-search-backdrop {
+  align-items: flex-start;
+  padding-top: 10vh;
+}
+
+.global-search {
+  display: grid;
+  width: min(640px, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(2, 29, 73, 0.3);
+}
+
+.global-search-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.global-search-input input {
+  flex: 1;
+  min-width: 0;
+  color: var(--heading);
+  font: inherit;
+  font-size: 16px;
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+.global-search-results {
+  display: grid;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.global-search-group {
+  display: block;
+  padding: 10px 10px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.global-search-results button {
+  display: grid;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.global-search-results button.active {
+  background: var(--brand-soft);
+}
+
+.global-search-results strong {
+  color: var(--heading);
+}
+
+.global-search-results small {
+  color: var(--muted);
+}
+
+.global-search-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--muted);
+}
+
+@media (max-width: 980px) {
+  .global-search-trigger {
+    min-width: 0;
+  }
+
+  .global-search-trigger span,
+  .global-search-trigger kbd {
+    display: none;
+  }
+}

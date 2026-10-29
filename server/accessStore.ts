@@ -7,12 +7,12 @@ import type { AuthUser } from "./auth";
 
 // Itens do menu que podem ser liberados por usuario.
 export const portalViews = [
-  { id: "tv", label: "Visão geral (TV)", sensitive: false },
+  { id: "tv", label: "Início", sensitive: false },
   { id: "noc", label: "Painel NOC (TV)", sensitive: false },
   { id: "links", label: "Links de internet", sensitive: false },
   { id: "topology", label: "Topologia", sensitive: true },
   { id: "infra3d", label: "Infraestrutura 3D", sensitive: true },
-  { id: "snmp", label: "SNMP", sensitive: true },
+  { id: "snmp", label: "Equipamentos (SNMP)", sensitive: true },
   { id: "projects", label: "Projetos", sensitive: false },
   { id: "contracts", label: "Contratos", sensitive: true },
   { id: "ad", label: "Active Directory", sensitive: true },
@@ -20,8 +20,8 @@ export const portalViews = [
   { id: "office365", label: "Office 365", sensitive: true },
   { id: "defender", label: "Microsoft Defender", sensitive: true },
   { id: "ips", label: "IPs e VLANs", sensitive: true },
-  { id: "wifi", label: "WiFi", sensitive: true },
-  { id: "milvusPortal", label: "Chamados Milvus", sensitive: false },
+  { id: "wifi", label: "Wi-Fi (portal)", sensitive: true },
+  { id: "milvusPortal", label: "Chamados (Milvus)", sensitive: false },
   { id: "pop", label: "Procedimentos (POP)", sensitive: false },
 ] as const;
 
