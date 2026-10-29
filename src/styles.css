@@ -14467,3 +14467,262 @@ thead .ac-person-col {
   gap: 14px;
   font-size: 1.3em;
 }
+
+/* ---------- Defender: abas com contador, filtros, triagem fixa e acoes por estado ---------- */
+
+/* Abas de area (sublinhado), iguais em todo o portal e diferentes dos filtros (segmentado) */
+.ui-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ui-tabs button {
+  margin-bottom: -1px;
+  padding: 10px 16px;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 700;
+  background: none;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+}
+
+.ui-tabs button:hover {
+  color: var(--heading);
+}
+
+.ui-tabs button.active {
+  color: var(--heading);
+  border-bottom-color: var(--accent);
+}
+
+.ui-tab-count {
+  min-width: 22px;
+  padding: 1px 7px;
+  color: var(--on-brand);
+  font-size: 12px;
+  text-align: center;
+  background: var(--danger);
+  border-radius: 999px;
+}
+
+.ui-tab-count.zero {
+  color: var(--muted);
+  background: var(--border-soft);
+}
+
+/* KPI que filtra a lista */
+.df-kpi-btn {
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.df-kpi-btn:hover {
+  border-color: var(--border-strong);
+}
+
+.df-kpi-btn.active {
+  border-color: var(--brand);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+
+.ct-table tbody tr:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: -2px;
+}
+
+/* Incidente: leitura a esquerda, triagem fixa a direita */
+.ct-modal.df-modal.df-incident {
+  width: min(1180px, calc(100vw - 32px));
+}
+
+.df-incident header h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.df-incident-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  gap: 0;
+}
+
+.df-triage {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 10px;
+  padding: 4px 20px 20px;
+  border-left: 1px solid var(--border);
+}
+
+.df-triage h4 {
+  margin: 0;
+  color: var(--heading);
+  font-size: 14px;
+}
+
+.df-triage-who {
+  margin: 0;
+}
+
+.df-triage-form {
+  display: grid;
+  gap: 10px;
+}
+
+.df-triage-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.df-triage-form select,
+.df-triage-form textarea {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  color: var(--heading);
+  font: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.df-triage-form select:disabled {
+  opacity: 0.6;
+}
+
+.ct-message.neutral {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+@media (max-width: 900px) {
+  .df-incident-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .df-triage {
+    position: static;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+}
+
+/* Maquina: estado de contencao e acoes por grupo */
+.df-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--danger-ink);
+  font-weight: 700;
+  background: var(--danger-soft);
+  border-radius: 8px;
+}
+
+.df-action-group {
+  display: grid;
+  gap: 6px;
+}
+
+.df-group-conter h4 {
+  color: var(--danger-ink);
+}
+
+
+/* ---------- AD: uma tabela com abas e uma busca ---------- */
+.ad-main-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.ad-main-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+
+.ad-main-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+
+.ad-main-panel .ui-tabs {
+  flex: 1 1 auto;
+}
+
+/* Linha do usuario + acao rapida (Desbloquear) ao lado */
+.ad-user-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Intune e Office 365: faixa de filtros no topo e tabela na largura toda */
+.intune-main {
+  display: grid;
+}
+
+.intune-main .intune-devices-panel,
+.intune-main .office365-main-panel {
+  grid-column: auto;
+  min-height: 0;
+}
+
+.intune-filter-board {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.intune-risk-reason {
+  color: var(--danger-ink) !important;
+  font-weight: 700;
+}
+
+/* Filtros com o nome inteiro (quebra em 2 linhas em vez de cortar) */
+.intune-filter-card span {
+  overflow: visible;
+  line-height: 1.25;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+/* Office 365: coluna de acoes com espaco para o status e o botao */
+.office365-users-table .office365-table-head,
+.office365-users-table .office365-table-row {
+  grid-template-columns: minmax(220px, 1.3fr) minmax(180px, 1fr) minmax(240px, 1.4fr) minmax(210px, 0.8fr);
+}
+
+/* Abas: rotulo e contador com respiro */
+.ui-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.df-action-label small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.office365-actions-cell .status-pill {
+  flex: 0 0 auto;
+}

@@ -42,6 +42,8 @@ import {
   Table as TableIcon,
   Trash2,
   Unlock,
+  UserX,
+  HardDrive,
   Tv,
   UserCheck,
   Users,
@@ -1189,7 +1191,8 @@ const fallbackTopology: TopologyState = {
   ],
 };
 
-const pageSize = 3;
+// Itens por pagina nas listas do portal (AD, Intune, Office 365, bloqueios).
+const pageSize = 20;
 
 const requiredUserProfileFields: Array<{ field: keyof EditableUserProfile; label: string }> = [
   { field: "displayName", label: "Nome exibido" },
@@ -3098,16 +3101,14 @@ function AdDashboard({
   adDetails: AdDetails;
   onRefreshAd: () => Promise<void>;
 }) {
-  const [userSearch, setUserSearch] = useState("");
-  const [computerSearch, setComputerSearch] = useState("");
-  const [groupSearch, setGroupSearch] = useState("");
+  // Uma tabela com abas e uma busca (antes eram 4 paineis de 360 px, cada um com a sua busca).
+  const [adTab, setAdTab] = useState<AdTab>("users");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [lockoutSearch, setLockoutSearch] = useState("");
-  const [standardSearch, setStandardSearch] = useState("");
-  const [userPage, setUserPage] = useState(1);
-  const [computerPage, setComputerPage] = useState(1);
-  const [groupPage, setGroupPage] = useState(1);
   const [lockoutPage, setLockoutPage] = useState(1);
-  const [standardPage, setStandardPage] = useState(1);
+  const [unlockingUser, setUnlockingUser] = useState("");
+  const [adNotice, setAdNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [selectedUser, setSelectedUser] = useState<AdUser | null>(null);
   const [userDetails, setUserDetails] = useState<AdUserDetails | null>(null);
   const [userDetailsLoading, setUserDetailsLoading] = useState(false);
@@ -3122,8 +3123,6 @@ function AdDashboard({
   const [createUserError, setCreateUserError] = useState("");
   const [createUserOpen, setCreateUserOpen] = useState(false);
   const [addGroupOpen, setAddGroupOpen] = useState(false);
-  const [listGroupsOpen, setListGroupsOpen] = useState(false);
-  const [standardUsersOpen, setStandardUsersOpen] = useState(false);
   const [adOus, setAdOus] = useState<AdOu[]>([]);
   const [adDomains, setAdDomains] = useState<AdDomainOption[]>([]);
   const [adOusLoading, setAdOusLoading] = useState(false);
@@ -3235,27 +3234,25 @@ function AdDashboard({
     setAddGroupOpen(false);
   }
 
-  function openListGroupsModal() {
-    setListGroupsOpen(true);
+  function changeTab(tab: AdTab) {
+    setAdTab(tab);
+    setPage(1);
   }
 
-  function closeListGroupsModal() {
-    setListGroupsOpen(false);
-  }
-
-  function openStandardUsersModal() {
-    setStandardUsersOpen(true);
-    setStandardSearch("");
-    setStandardPage(1);
-  }
-
-  function closeStandardUsersModal() {
-    setStandardUsersOpen(false);
-  }
-
-  function openStandardUserDetails(user: AdUser) {
-    setStandardUsersOpen(false);
-    openUserDetails(user);
+  // Desbloquear direto na linha da lista (a tarefa mais comum do AD).
+  async function unlockFromList(user: AdUser) {
+    if (!window.confirm(`Desbloquear a conta ${user.samAccountName}? A senha continua a mesma.`)) return;
+    setUnlockingUser(user.samAccountName);
+    setAdNotice(null);
+    try {
+      await adRequest(`/api/ad/users/${encodeURIComponent(user.samAccountName)}/unlock`, { method: "POST" });
+      setAdNotice({ ok: true, text: `Conta ${user.samAccountName} desbloqueada.` });
+      await onRefreshAd();
+    } catch (error) {
+      setAdNotice({ ok: false, text: error instanceof Error ? error.message : "Não foi possível desbloquear a conta." });
+    } finally {
+      setUnlockingUser("");
+    }
   }
 
   async function openComputerDetails(computer: AdComputer) {
@@ -3322,7 +3319,7 @@ function AdDashboard({
     }
   }
 
-  const filteredUsers = filterItems(adDetails.users, userSearch, (user) => [
+  const filteredUsers = filterItems(adDetails.users, search, (user) => [
     user.cn,
     user.samAccountName,
     user.displayName,
@@ -3336,8 +3333,7 @@ function AdDashboard({
   const userStandardItems = activeUsersForStandard
     .map((user) => ({ user, missingFields: missingRequiredUserFields(user) }))
     .filter((item) => item.missingFields.length);
-  const standardUsersOk = Math.max(activeUsersForStandard.length - userStandardItems.length, 0);
-  const filteredStandardItems = filterItems(userStandardItems, standardSearch, (item) => [
+  const filteredStandardItems = filterItems(userStandardItems, search, (item) => [
     item.user.cn,
     item.user.samAccountName,
     item.user.displayName,
@@ -3348,13 +3344,13 @@ function AdDashboard({
     item.user.distinguishedName,
     item.missingFields.join(" "),
   ]);
-  const filteredComputers = filterItems(adDetails.computers, computerSearch, (computer) => [
+  const filteredComputers = filterItems(adDetails.computers, search, (computer) => [
     computer.cn,
     computer.dNSHostName,
     computer.operatingSystem,
     computer.distinguishedName,
   ]);
-  const filteredGroups = filterItems(adDetails.groups, groupSearch, (group) => [
+  const filteredGroups = filterItems(adDetails.groups, search, (group) => [
     group.cn,
     group.description,
     group.distinguishedName,
@@ -3367,88 +3363,59 @@ function AdDashboard({
     event.subjectUser,
   ]);
 
+  const tabs: { key: AdTab; label: string; count: number; alert?: boolean }[] = [
+    { key: "users", label: "Usuários", count: adDetails.users.length },
+    { key: "locked", label: "Bloqueados", count: adDetails.lockouts.length, alert: adDetails.lockouts.length > 0 },
+    { key: "standard", label: "Fora do padrão", count: userStandardItems.length },
+    { key: "computers", label: "Máquinas", count: adDetails.computers.length },
+    { key: "groups", label: "Grupos", count: adDetails.groups.length },
+  ];
+  const tabResults = adTab === "users" ? filteredUsers.length : adTab === "standard" ? filteredStandardItems.length : adTab === "computers" ? filteredComputers.length : filteredGroups.length;
+  const placeholders: Record<AdTab, string> = {
+    users: "Buscar nome, login, e-mail, setor ou OU",
+    locked: "",
+    standard: "Buscar usuário, setor ou campo faltando",
+    computers: "Buscar máquina, DNS, sistema ou OU",
+    groups: "Buscar grupo, descrição ou OU",
+  };
+
   return (
     <>
       {!adStatus.ok ? (
-        <section className="ad-alert">
+        <section className="ad-alert" role="alert">
           <AlertTriangle size={20} />
           <div>
-            <strong>AD nao esta retornando usuarios</strong>
+            <strong>O Active Directory não está respondendo</strong>
             <span>{adStatus.message}</span>
           </div>
         </section>
       ) : null}
 
-      <section className="kpi-grid" aria-label="Resumo Active Directory">
-        <MetricCard
-          icon={Users}
-          label="Usuarios ativos"
-          value={String(adSummary.users.total)}
-          detail={`${adSummary.users.enabled} habilitados`}
-          tone="good"
-        />
-        <MetricCard
-          icon={LockKeyhole}
-          label="Bloqueios hoje"
-          value={String(adSummary.users.locked)}
-          detail={adStatus.source === "ldap" ? "LDAP conectado" : "API em mock"}
-          tone="danger"
-        />
-        <MetricCard icon={UserCheck} label="Grupos AD" value={String(adSummary.groups.total)} detail={`${adDetails.groups.length} em destaque`} tone="calm" />
-        <MetricCard icon={Monitor} label="Maquinas dominio" value={String(adSummary.computers.total)} detail={`${adDetails.computers.length} em destaque`} tone="warn" />
-      </section>
-
-      <section className="dashboard-grid ad-dashboard-grid">
-        <article className="panel ad-ops-panel">
-          <PanelHeader icon={UserCheck} title="Provisionamento AD" meta="Criacao, grupos e auditoria" />
-          <div className="ad-ops-grid">
-            <div className="quick-actions" aria-label="Acoes de Active Directory">
-              <button type="button" onClick={openCreateUserModal}>
-                <Plus size={17} />
-                Criar usuario
+      <article className="panel ad-main-panel">
+        <header className="ad-main-head">
+          <div className="ui-tabs" role="tablist" aria-label="Áreas do Active Directory">
+            {tabs.map((tab) => (
+              <button key={tab.key} type="button" role="tab" aria-selected={adTab === tab.key} className={adTab === tab.key ? "active" : ""} onClick={() => changeTab(tab.key)}>
+                {tab.label}
+                <b className={`ui-tab-count${tab.alert ? "" : " zero"}`}>{tab.count}</b>
               </button>
-              <button type="button" onClick={openAddGroupModal}>
-                <Users size={17} />
-                Adicionar em grupo
-              </button>
-              <button type="button" onClick={openListGroupsModal}>
-                <Search size={17} />
-                Listar grupos
-              </button>
-            </div>
+            ))}
           </div>
-        </article>
+          <div className="ad-main-actions">
+            <button className="secondary-action" type="button" onClick={openAddGroupModal}>
+              <Users size={16} />
+              Adicionar em grupo
+            </button>
+            <button className="primary-action" type="button" onClick={openCreateUserModal}>
+              <Plus size={16} />
+              Criar usuário
+            </button>
+          </div>
+        </header>
 
-        <article className="panel ad-users-panel">
-          <PanelHeader
-            icon={Users}
-            title="Usuarios do AD"
-            meta={`${filteredUsers.length}/${adDetails.users.length} registros`}
-            action={
-              <div className="standard-header-actions">
-                <span className="standard-counter ok">{standardUsersOk} OK</span>
-                <button type="button" className="standard-counter warn" onClick={openStandardUsersModal}>
-                  {userStandardItems.length} ativos fora do padrao
-                </button>
-              </div>
-            }
-          />
-          <DirectoryTools
-            value={userSearch}
-            onChange={(value) => {
-              setUserSearch(value);
-              setUserPage(1);
-            }}
-            page={userPage}
-            total={filteredUsers.length}
-            onPageChange={setUserPage}
-            placeholder="Procurar usuario, e-mail, setor ou OU"
-          />
-          <AdUsersList users={paginate(filteredUsers, userPage)} onSelect={openUserDetails} />
-        </article>
+        {adNotice ? <div className={`action-feedback ${adNotice.ok ? "success" : "error"}`} role={adNotice.ok ? "status" : "alert"}>{adNotice.text}</div> : null}
 
-        <article className="panel ad-lockouts-panel">
-          <PanelHeader icon={KeyRound} title="Bloqueios de senha" meta="AD Security" />
+        {adTab === "locked" ? (
           <LockoutPanel
             adSummary={adSummary}
             lockouts={filterItems(adDetails.lockouts, lockoutSearch, (lockout) => [lockout.user, lockout.cn, lockout.department])}
@@ -3465,40 +3432,33 @@ function AdDashboard({
             onPageChange={setLockoutPage}
             onRefreshAd={onRefreshAd}
           />
-        </article>
-
-        <article className="panel ad-computers-panel">
-          <PanelHeader icon={Monitor} title="Maquinas do dominio" meta={`${filteredComputers.length}/${adDetails.computers.length} registros`} />
-          <DirectoryTools
-            value={computerSearch}
-            onChange={(value) => {
-              setComputerSearch(value);
-              setComputerPage(1);
-            }}
-            page={computerPage}
-            total={filteredComputers.length}
-            onPageChange={setComputerPage}
-            placeholder="Procurar maquina, DNS, SO ou OU"
-          />
-          <AdComputersList computers={paginate(filteredComputers, computerPage)} onSelect={openComputerDetails} />
-        </article>
-
-        <article className="panel ad-groups-panel">
-          <PanelHeader icon={Users} title="Grupos do AD" meta={`${adSummary.groups.total} grupos`} />
-          <DirectoryTools
-            value={groupSearch}
-            onChange={(value) => {
-              setGroupSearch(value);
-              setGroupPage(1);
-            }}
-            page={groupPage}
-            total={filteredGroups.length}
-            onPageChange={setGroupPage}
-            placeholder="Procurar grupo, descricao, membros ou OU"
-          />
-          <AdGroupsList groups={paginate(filteredGroups, groupPage)} />
-        </article>
-      </section>
+        ) : (
+          <>
+            <DirectoryTools
+              value={search}
+              onChange={(value) => {
+                setSearch(value);
+                setPage(1);
+              }}
+              page={page}
+              total={tabResults}
+              onPageChange={setPage}
+              placeholder={placeholders[adTab]}
+            />
+            {search.trim() && !tabResults ? (
+              <EmptyState title={`Nada encontrado para "${search.trim()}"`} detail="Confira a grafia ou limpe a busca para ver todos." />
+            ) : adTab === "users" ? (
+              <AdUsersList users={paginate(filteredUsers, page)} onSelect={openUserDetails} onUnlock={unlockFromList} unlocking={unlockingUser} />
+            ) : adTab === "standard" ? (
+              <UserStandardList items={paginate(filteredStandardItems, page)} onSelect={openUserDetails} />
+            ) : adTab === "computers" ? (
+              <AdComputersList computers={paginate(filteredComputers, page)} onSelect={openComputerDetails} />
+            ) : (
+              <AdGroupsList groups={paginate(filteredGroups, page)} />
+            )}
+          </>
+        )}
+      </article>
       {selectedUser ? (
         <UserDetailsModal
           user={selectedUser}
@@ -3545,29 +3505,31 @@ function AdDashboard({
           onRefreshAd={onRefreshAd}
         />
       ) : null}
-      {listGroupsOpen ? (
-        <GroupsDirectoryModal
-          groups={adDetails.groups}
-          onClose={closeListGroupsModal}
-        />
-      ) : null}
-      {standardUsersOpen ? (
-        <UserStandardModal
-          items={paginate(filteredStandardItems, standardPage)}
-          total={filteredStandardItems.length}
-          overallTotal={userStandardItems.length}
-          search={standardSearch}
-          page={standardPage}
-          onSearchChange={(value) => {
-            setStandardSearch(value);
-            setStandardPage(1);
-          }}
-          onPageChange={setStandardPage}
-          onSelect={openStandardUserDetails}
-          onClose={closeStandardUsersModal}
-        />
-      ) : null}
     </>
+  );
+}
+
+type AdTab = "users" | "locked" | "standard" | "computers" | "groups";
+
+// Usuarios ativos com campos obrigatorios faltando (aba "Fora do padrao").
+function UserStandardList({ items, onSelect }: { items: UserStandardItem[]; onSelect: (user: AdUser) => void }) {
+  if (!items.length) return <EmptyState title="Nenhum usuário fora do padrão" detail="Todos os usuários ativos têm os campos obrigatórios preenchidos." />;
+  return (
+    <div className="directory-list standard-list">
+      {items.map(({ user, missingFields }) => (
+        <button className="directory-row directory-button standard-row" key={user.distinguishedName || user.samAccountName} type="button" onClick={() => onSelect(user)}>
+          <div>
+            <strong>{user.cn || user.displayName || user.samAccountName}</strong>
+            <span>{user.samAccountName}</span>
+          </div>
+          <div>
+            <span>{user.department || "Sem departamento"}</span>
+            <small>Falta: {missingFields.join(", ")}</small>
+          </div>
+          <StatusPill label={`${missingFields.length} faltando`} />
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -3584,7 +3546,7 @@ function IntuneDashboard({
 }) {
   const [deviceSearch, setDeviceSearch] = useState("");
   const [devicePage, setDevicePage] = useState(1);
-  const [deviceFilter, setDeviceFilter] = useState<"all" | "risk" | "stale" | "windows" | "mobile">("all");
+  const [deviceFilter, setDeviceFilter] = useState<IntuneFilter>("all");
   const [selectedDevice, setSelectedDevice] = useState<IntuneDevice | null>(null);
   const [deviceDetails, setDeviceDetails] = useState<IntuneDevice | null>(null);
   const [deviceDetailsLoading, setDeviceDetailsLoading] = useState(false);
@@ -3638,34 +3600,37 @@ function IntuneDashboard({
     setDeviceDetailsLoading(false);
   }
 
+  const nonCompliantDevices = intuneDetails.devices.filter((device) => normalizeText(device.complianceState) === "noncompliant");
+  // Um clique filtra; clicar de novo no filtro ativo volta para "Todos".
+  const pickFilter = (filter: IntuneFilter) => {
+    setDeviceFilter(deviceFilter === filter ? "all" : filter);
+    setDevicePage(1);
+  };
+
   return (
     <>
       {!intuneStatus.ok ? (
-        <section className="ad-alert">
+        <section className="ad-alert" role="alert">
           <AlertTriangle size={20} />
           <div>
-            <strong>Intune nao esta retornando dados</strong>
+            <strong>O Intune não está respondendo</strong>
             <span>{intuneStatus.message}</span>
           </div>
         </section>
       ) : null}
 
-      <section className="kpi-grid" aria-label="Resumo Intune">
-        <MetricCard icon={Monitor} label="Dispositivos" value={String(intuneSummary.total)} detail={intuneStatus.source === "graph" ? "Microsoft Graph" : "Modo mock"} tone="calm" />
-        <MetricCard icon={CheckCircle2} label="Conformes" value={String(intuneSummary.compliant)} detail="Compliance OK" tone="good" />
-        <MetricCard icon={AlertTriangle} label="Nao conformes" value={String(intuneSummary.nonCompliant)} detail={`${intuneSummary.unknown} sem status claro`} tone="danger" />
-        <MetricCard icon={Clock3} label="Sem sync 7d" value={String(intuneSummary.staleSync)} detail="Ultima sincronizacao" tone="warn" />
+      {/* Uma faixa de filtros no lugar de KPIs + cartoes + painel lateral (os mesmos numeros apareciam 3 vezes). */}
+      <section className="intune-filter-board" aria-label="Filtrar dispositivos">
+        <IntuneFilterCard active={deviceFilter === "all"} count={intuneDetails.devices.length} icon={Monitor} label="Todos" tone="calm" onClick={() => pickFilter("all")} />
+        <IntuneFilterCard active={deviceFilter === "risk"} count={riskDevices.length} icon={AlertTriangle} label="Com risco" tone={riskDevices.length ? "danger" : "calm"} onClick={() => pickFilter("risk")} />
+        <IntuneFilterCard active={deviceFilter === "noncompliant"} count={nonCompliantDevices.length} icon={XCircle} label="Não conformes" tone={nonCompliantDevices.length ? "danger" : "calm"} onClick={() => pickFilter("noncompliant")} />
+        <IntuneFilterCard active={deviceFilter === "stale"} count={staleDevices.length} icon={Clock3} label="Sem sync há 7 dias" tone={staleDevices.length ? "warn" : "calm"} onClick={() => pickFilter("stale")} />
+        <IntuneFilterCard active={deviceFilter === "storage"} count={storageAlerts.length} icon={HardDrive} label="Pouco disco" tone={storageAlerts.length ? "warn" : "calm"} onClick={() => pickFilter("storage")} />
+        <IntuneFilterCard active={deviceFilter === "windows"} count={windowsDevices.length} icon={Monitor} label="Windows" tone="calm" onClick={() => pickFilter("windows")} />
+        <IntuneFilterCard active={deviceFilter === "mobile"} count={mobileDevices.length} icon={Wifi} label="Celulares" tone="calm" onClick={() => pickFilter("mobile")} />
       </section>
 
-      <section className="intune-filter-board" aria-label="Filtros Intune">
-        <IntuneFilterCard active={deviceFilter === "all"} count={intuneDetails.devices.length} icon={Monitor} label="Todos" tone="calm" onClick={() => { setDeviceFilter("all"); setDevicePage(1); }} />
-        <IntuneFilterCard active={deviceFilter === "risk"} count={riskDevices.length} icon={AlertTriangle} label="Risco" tone="danger" onClick={() => { setDeviceFilter("risk"); setDevicePage(1); }} />
-        <IntuneFilterCard active={deviceFilter === "stale"} count={staleDevices.length} icon={Clock3} label="Sem sync" tone="warn" onClick={() => { setDeviceFilter("stale"); setDevicePage(1); }} />
-        <IntuneFilterCard active={deviceFilter === "windows"} count={windowsDevices.length} icon={Monitor} label="Windows" tone="good" onClick={() => { setDeviceFilter("windows"); setDevicePage(1); }} />
-        <IntuneFilterCard active={deviceFilter === "mobile"} count={mobileDevices.length} icon={Wifi} label="Mobile" tone="calm" onClick={() => { setDeviceFilter("mobile"); setDevicePage(1); }} />
-      </section>
-
-      <section className="dashboard-grid intune-dashboard-grid">
+      <section className="intune-main">
         <article className="panel intune-devices-panel">
           <PanelHeader
             icon={ShieldCheck}
@@ -3689,27 +3654,11 @@ function IntuneDashboard({
             onPageChange={setDevicePage}
             placeholder="Procurar dispositivo, usuario, SO ou serial"
           />
-          <IntuneDevicesList devices={paginate(filteredDevices, devicePage)} onSelect={openDeviceDetails} />
-        </article>
-
-        <article className="panel intune-insights-panel">
-          <PanelHeader icon={CircleGauge} title="Operacao" meta="Riscos e inventario" />
-          <div className="compliance-stack">
-            <ComplianceBar label="Dispositivos conformes" current={intuneSummary.compliant} expected={Math.max(intuneSummary.total, 1)} status="OK" />
-            <ComplianceBar label="Nao conformes" current={intuneSummary.nonCompliant} expected={0} status="Corrigir" />
-            <ComplianceBar label="Sem sync em 7 dias" current={intuneSummary.staleSync} expected={0} status="Revisar" />
-            <ComplianceBar label="Pouco armazenamento" current={storageAlerts.length} expected={0} status="Limpar" />
-          </div>
-
-          <div className="intune-risk-list">
-            {riskDevices.slice(0, 6).map((device) => (
-              <button type="button" key={device.id || device.deviceName} onClick={() => openDeviceDetails(device)}>
-                <strong>{device.deviceName || "Sem nome"}</strong>
-                <span>{intuneDeviceRiskReasons(device).join(", ")}</span>
-              </button>
-            ))}
-            {!riskDevices.length ? <EmptyState title="Sem riscos criticos" detail="Nenhum dispositivo com alerta nesta coleta." /> : null}
-          </div>
+          {deviceSearch.trim() && !filteredDevices.length ? (
+            <EmptyState title={`Nada encontrado para "${deviceSearch.trim()}"`} detail="Confira a grafia ou limpe a busca." />
+          ) : (
+            <IntuneDevicesList devices={paginate(filteredDevices, devicePage)} onSelect={openDeviceDetails} />
+          )}
         </article>
       </section>
 
@@ -3750,7 +3699,9 @@ function Office365Dashboard({
     ? office365Details.users.filter((user) => user.assignedLicenses.length)
     : operationFilter === "unlicensed-users"
       ? office365Details.users.filter((user) => !user.assignedLicenses.length)
-      : office365Details.users;
+      : operationFilter === "disabled-licensed"
+        ? office365Details.users.filter((user) => !user.accountEnabled && user.assignedLicenses.length)
+        : office365Details.users;
   const licensesByOperation = operationFilter === "license-usage"
     ? office365Details.licenses.filter((license) => license.consumedUnits > 0)
     : operationFilter === "license-full"
@@ -3782,9 +3733,11 @@ function Office365Dashboard({
     group.assignedLicenses.join(" "),
   ]);
   const filteredItems = tab === "users" ? filteredUsers : tab === "licenses" ? filteredLicenses : filteredGroups;
-  const licensedUserPercent = office365Summary.users ? Math.round((office365Summary.licensedUsers / office365Summary.users) * 100) : 0;
-  const unlicensedUsersCount = Math.max(0, office365Summary.users - office365Summary.licensedUsers);
+  const unlicensedUsersCount = office365Details.users.filter((user) => !user.assignedLicenses.length).length;
+  // Conta desativada ainda com licenca = custo sem uso.
+  const disabledLicensedCount = office365Details.users.filter((user) => !user.accountEnabled && user.assignedLicenses.length).length;
   const fullLicensesCount = office365Details.licenses.filter((license) => license.enabledUnits > 0 && license.availableUnits === 0).length;
+  const licensedGroupsCount = office365Details.groups.filter((group) => group.assignedLicenses.length).length;
 
   function changeTab(nextTab: "users" | "licenses" | "groups", nextOperationFilter = "") {
     setTab(nextTab);
@@ -3793,8 +3746,9 @@ function Office365Dashboard({
     setOperationFilter(nextOperationFilter);
   }
 
+  // Clicar de novo no filtro ativo limpa o filtro.
   function applyOperationFilter(nextTab: "users" | "licenses" | "groups", nextOperationFilter: string) {
-    changeTab(nextTab, nextOperationFilter);
+    changeTab(nextTab, operationFilter === nextOperationFilter ? "" : nextOperationFilter);
   }
 
   function openLicenseModal(user: Office365User) {
@@ -3844,41 +3798,44 @@ function Office365Dashboard({
   return (
     <>
       {!office365Status.ok ? (
-        <section className="ad-alert">
+        <section className="ad-alert" role="alert">
           <AlertTriangle size={20} />
           <div>
-            <strong>Office 365 nao esta retornando dados</strong>
+            <strong>O Office 365 não está respondendo</strong>
             <span>{office365Status.message}</span>
           </div>
         </section>
       ) : null}
 
-      <section className="kpi-grid" aria-label="Resumo Office 365">
-        <MetricCard icon={Users} label="Usuarios" value={String(office365Summary.users)} detail={`${office365Summary.enabledUsers} ativos`} tone="calm" />
-        <MetricCard icon={ShieldCheck} label="Licenciados" value={String(office365Summary.licensedUsers)} detail={`${licensedUserPercent}% dos usuarios`} tone="good" />
-        <MetricCard icon={TableIcon} label="Licencas" value={String(office365Summary.licenses)} detail={`${office365Summary.availableLicenseUnits} disponiveis`} tone="warn" />
-        <MetricCard icon={Network} label="Grupos" value={String(office365Summary.groups)} detail={`${office365Summary.licensedGroups} com licenca`} tone="calm" />
+      {/* Os problemas viram filtros no topo (no lugar de KPIs + painel lateral que repetia a aba Licencas). */}
+      <section className="intune-filter-board office365-filter-board" aria-label="Filtrar por problema">
+        <IntuneFilterCard active={operationFilter === "unlicensed-users"} count={unlicensedUsersCount} icon={Users} label="Usuários sem licença" tone={unlicensedUsersCount ? "warn" : "calm"} onClick={() => applyOperationFilter("users", "unlicensed-users")} />
+        <IntuneFilterCard active={operationFilter === "disabled-licensed"} count={disabledLicensedCount} icon={UserX} label="Desativados com licença" tone={disabledLicensedCount ? "danger" : "calm"} onClick={() => applyOperationFilter("users", "disabled-licensed")} />
+        <IntuneFilterCard active={operationFilter === "license-full"} count={fullLicensesCount} icon={TableIcon} label="Licenças sem saldo" tone={fullLicensesCount ? "danger" : "calm"} onClick={() => applyOperationFilter("licenses", "license-full")} />
+        <IntuneFilterCard active={operationFilter === "licensed-groups"} count={licensedGroupsCount} icon={Network} label="Grupos com licença" tone="calm" onClick={() => applyOperationFilter("groups", "licensed-groups")} />
       </section>
 
-      <section className="dashboard-grid office365-dashboard-grid">
+      <section className="intune-main">
         <article className="panel office365-main-panel">
-          <PanelHeader
-            icon={TableIcon}
-            title="Centro Office 365"
-            meta={`${filteredItems.length}/${currentItems.length} registros`}
-            action={
+          <header className="ad-main-head">
+            <div className="ui-tabs" role="tablist" aria-label="Office 365">
+              {([
+                ["users", "Usuários", office365Details.users.length],
+                ["licenses", "Licenças", office365Details.licenses.length],
+                ["groups", "Grupos", office365Details.groups.length],
+              ] as ["users" | "licenses" | "groups", string, number][]).map(([key, label, count]) => (
+                <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? "active" : ""} onClick={() => changeTab(key)}>
+                  {label} <b className="ui-tab-count zero">{count}</b>
+                </button>
+              ))}
+            </div>
+            <div className="ad-main-actions">
               <button className="secondary-action" type="button" onClick={onRefreshOffice365}>
                 <RefreshCw size={15} />
                 Atualizar
               </button>
-            }
-          />
-
-          <div className="office365-tabs" role="tablist" aria-label="Office 365">
-            <button className={tab === "users" ? "active" : ""} type="button" onClick={() => changeTab("users")}>Usuarios</button>
-            <button className={tab === "licenses" ? "active" : ""} type="button" onClick={() => changeTab("licenses")}>Licencas</button>
-            <button className={tab === "groups" ? "active" : ""} type="button" onClick={() => changeTab("groups")}>Grupos</button>
-          </div>
+            </div>
+          </header>
 
           {operationFilter ? (
             <div className="office365-filter-chip">
@@ -3909,67 +3866,6 @@ function Office365Dashboard({
             <Office365GroupsList groups={paginate(filteredGroups, page)} />
           )}
         </article>
-
-        <article className="panel office365-side-panel">
-          <PanelHeader icon={CircleGauge} title="Operacao" meta="Licencas e identidade" />
-          <div className="office365-operation-stack">
-            <Office365OperationCard
-              active={operationFilter === "unlicensed-users"}
-              current={unlicensedUsersCount}
-              expected={office365Summary.users}
-              label="Usuarios sem licenca"
-              status="Revisar"
-              tone="warn"
-              onClick={() => applyOperationFilter("users", "unlicensed-users")}
-            />
-            <Office365OperationCard
-              active={operationFilter === "licensed-users"}
-              current={office365Summary.licensedUsers}
-              expected={office365Summary.users}
-              label="Usuarios licenciados"
-              status="Ver"
-              tone="good"
-              onClick={() => applyOperationFilter("users", "licensed-users")}
-            />
-            <Office365OperationCard
-              active={operationFilter === "license-full"}
-              current={fullLicensesCount}
-              expected={office365Summary.licenses}
-              label="Licencas sem saldo"
-              status="Revisar"
-              tone="danger"
-              onClick={() => applyOperationFilter("licenses", "license-full")}
-            />
-            <Office365OperationCard
-              active={operationFilter === "license-usage"}
-              current={office365Summary.consumedLicenseUnits}
-              expected={Math.max(office365Summary.enabledLicenseUnits, 1)}
-              label="Licencas usadas"
-              status="Uso"
-              tone="calm"
-              onClick={() => applyOperationFilter("licenses", "license-usage")}
-            />
-            <Office365OperationCard
-              active={operationFilter === "licensed-groups"}
-              current={office365Summary.licensedGroups}
-              expected={office365Summary.groups}
-              label="Grupos com licenca"
-              status="Grupos"
-              tone="calm"
-              onClick={() => applyOperationFilter("groups", "licensed-groups")}
-            />
-          </div>
-
-          <div className="office365-license-stack">
-            {office365Details.licenses.slice(0, 6).map((license) => (
-              <div className="office365-license-card" key={license.skuId || license.skuPartNumber}>
-                <strong>{formatSkuName(license.skuPartNumber)}</strong>
-                <span>{license.consumedUnits} usadas de {license.enabledUnits}</span>
-              </div>
-            ))}
-            {!office365Details.licenses.length ? <EmptyState title="Licencas nao carregadas" detail="O Graph nao retornou licencas nesta coleta." /> : null}
-          </div>
-        </article>
       </section>
 
       {licenseUser ? (
@@ -3986,39 +3882,6 @@ function Office365Dashboard({
         />
       ) : null}
     </>
-  );
-}
-
-function Office365OperationCard({
-  active,
-  label,
-  current,
-  expected,
-  status,
-  tone,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  current: number;
-  expected: number;
-  status: string;
-  tone: "good" | "warn" | "danger" | "calm";
-  onClick: () => void;
-}) {
-  const percent = expected > 0 ? Math.min(100, Math.round((current / expected) * 100)) : 0;
-
-  return (
-    <button className={`office365-operation-card ${tone} ${active ? "active" : ""}`} type="button" onClick={onClick}>
-      <div>
-        <strong>{label}</strong>
-        <span>{status}</span>
-      </div>
-      <div className="office365-operation-meter">
-        <span style={{ width: `${percent}%` }} />
-      </div>
-      <small>{current} de {expected}</small>
-    </button>
   );
 }
 
@@ -6086,60 +5949,6 @@ function AddUserToGroupModal({
   );
 }
 
-function GroupsDirectoryModal({ groups, onClose }: { groups: ApiAdGroup[]; onClose: () => void }) {
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const filteredGroups = filterItems(groups, search, (group) => [
-    group.cn,
-    group.description,
-    group.distinguishedName,
-    String(group.memberCount),
-  ]);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Listar grupos do AD">
-      <div className="user-modal groups-modal">
-        <header className="modal-header">
-          <div>
-            <p className="eyebrow">Grupos do AD</p>
-            <h2>Listar grupos</h2>
-            <span>{filteredGroups.length}/{groups.length} grupos encontrados</span>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose} title="Fechar" aria-label="Fechar lista de grupos">
-            <X size={18} />
-          </button>
-        </header>
-
-        <section className="modal-create-form">
-          <DirectoryTools
-            value={search}
-            onChange={(value) => {
-              setSearch(value);
-              setPage(1);
-            }}
-            page={page}
-            total={filteredGroups.length}
-            onPageChange={setPage}
-            placeholder="Procurar grupo, descricao, membros ou OU"
-          />
-          <AdGroupsList groups={paginate(filteredGroups, page)} />
-        </section>
-      </div>
-    </div>
-  );
-}
-
 function TvAdOverviewPanel({
   adSummary,
   adDetails,
@@ -6672,30 +6481,44 @@ function ApiLockoutRow({
   );
 }
 
-function AdUsersList({ users, onSelect }: { users: AdUser[]; onSelect: (user: AdUser) => void }) {
+// Linha do usuario; bloqueado ganha "Desbloquear" na propria linha (sem abrir a ficha).
+function AdUsersList({
+  users,
+  onSelect,
+  onUnlock,
+  unlocking = "",
+}: {
+  users: AdUser[];
+  onSelect: (user: AdUser) => void;
+  onUnlock?: (user: AdUser) => void;
+  unlocking?: string;
+}) {
   if (!users.length) {
-    return <EmptyState title="Usuarios nao carregados" detail="A API nao retornou usuarios nesta coleta." />;
+    return <EmptyState title="Nenhum usuário retornado pelo AD" detail="A última coleta do Active Directory não trouxe usuários." />;
   }
 
   return (
     <div className="directory-list">
       {users.map((user) => (
-        <button
-          className="directory-row directory-button"
-          key={user.distinguishedName || user.samAccountName}
-          onClick={() => onSelect(user)}
-          type="button"
-        >
-          <div>
-            <strong>{user.cn || user.samAccountName}</strong>
-            <span>{user.samAccountName}</span>
-          </div>
-          <div>
-            <span>{user.department || "Sem departamento"}</span>
-            <small>{user.mail || "Sem e-mail"}</small>
-          </div>
-          <StatusPill label={user.locked ? "Bloqueado" : user.enabled ? "Ativo" : "Desativado"} />
-        </button>
+        <div className="ad-user-line" key={user.distinguishedName || user.samAccountName}>
+          <button className="directory-row directory-button" onClick={() => onSelect(user)} type="button">
+            <div>
+              <strong>{user.cn || user.samAccountName}</strong>
+              <span>{user.samAccountName}</span>
+            </div>
+            <div>
+              <span>{user.department || "Sem departamento"}</span>
+              <small>{user.mail || "Sem e-mail"}</small>
+            </div>
+            <StatusPill label={user.locked ? "Bloqueado" : user.enabled ? "Ativo" : "Desativado"} />
+          </button>
+          {user.locked && onUnlock ? (
+            <button className="primary-action compact-action" type="button" onClick={() => onUnlock(user)} disabled={Boolean(unlocking)}>
+              <Unlock size={14} />
+              {unlocking === user.samAccountName ? "Desbloqueando" : "Desbloquear"}
+            </button>
+          ) : null}
+        </div>
       ))}
     </div>
   );
@@ -6743,7 +6566,8 @@ function IntuneDevicesList({ devices, onSelect }: { devices: IntuneDevice[]; onS
         <button className={`intune-table-row ${intuneDeviceRiskReasons(device).length ? "risk" : ""}`} key={device.id || device.deviceName} type="button" onClick={() => onSelect(device)} role="row">
           <div>
             <strong>{device.deviceName || "Sem nome"}</strong>
-            <span>{formatIntuneOs(device)}</span>
+            {/* O motivo do risco aparece na linha (antes so a cor da linha indicava). */}
+            {intuneDeviceRiskReasons(device).length ? <span className="intune-risk-reason">{intuneDeviceRiskReasons(device).join(" · ")}</span> : <span>{formatIntuneOs(device)}</span>}
           </div>
           <div>
             <strong>{device.userDisplayName || device.userPrincipalName || "Sem usuario"}</strong>
@@ -7960,92 +7784,6 @@ function IntuneDeviceModal({
               <DetailItem label="Livre" value={`${formatBytes(device.freeStorageSpaceInBytes)} (${intuneFreeStoragePercent(device)}%)`} />
             </div>
           </section>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function UserStandardModal({
-  items,
-  total,
-  overallTotal,
-  search,
-  page,
-  onSearchChange,
-  onPageChange,
-  onSelect,
-  onClose,
-}: {
-  items: UserStandardItem[];
-  total: number;
-  overallTotal: number;
-  search: string;
-  page: number;
-  onSearchChange: (value: string) => void;
-  onPageChange: (page: number) => void;
-  onSelect: (user: AdUser) => void;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <section className="user-modal standard-modal" role="dialog" aria-modal="true" aria-labelledby="standard-users-title">
-        <header className="modal-header">
-          <div>
-            <span>VERIFICACAO DE CADASTRO</span>
-            <h2 id="standard-users-title">Usuarios fora do padrao</h2>
-            <span>{overallTotal} usuarios ativos com campos obrigatorios pendentes</span>
-          </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Fechar">
-            <X size={20} />
-          </button>
-        </header>
-
-        <div className="standard-modal-body">
-          <DirectoryTools
-            value={search}
-            onChange={onSearchChange}
-            page={page}
-            total={total}
-            onPageChange={onPageChange}
-            placeholder="Procurar usuario, setor, e-mail ou campo faltante"
-          />
-
-          {items.length ? (
-            <div className="directory-list standard-list">
-              {items.map(({ user, missingFields }) => (
-                <button
-                  className="directory-row directory-button standard-row"
-                  key={user.distinguishedName || user.samAccountName}
-                  type="button"
-                  onClick={() => onSelect(user)}
-                >
-                  <div>
-                    <strong>{user.cn || user.displayName || user.samAccountName}</strong>
-                    <span>{user.samAccountName}</span>
-                  </div>
-                  <div>
-                    <span>{user.department || "Sem departamento"}</span>
-                    <small>{missingFields.join(", ")}</small>
-                  </div>
-                  <StatusPill label={`${missingFields.length} faltando`} />
-                </button>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="Nenhum usuario encontrado" detail="Nao ha pendencias para este filtro." />
-          )}
         </div>
       </section>
     </div>
@@ -9483,7 +9221,7 @@ function DirectoryTools({
           {safePage}/{pageCount}
         </span>
         <button type="button" onClick={() => onPageChange(Math.min(pageCount, safePage + 1))} disabled={safePage >= pageCount}>
-          Proxima
+          Próxima
         </button>
       </div>
     </div>
@@ -9642,9 +9380,11 @@ function intuneFreeStoragePercent(device: IntuneDevice) {
   return Math.max(0, Math.round((device.freeStorageSpaceInBytes / device.totalStorageSpaceInBytes) * 100));
 }
 
+// Ameaca de verdade so com severidade informada ou maquina comprometida ("secured" = protegido pelo
+// Defender; antes contava como ameaca e marcava quase todos os aparelhos como "em risco").
 function intuneThreatIsActive(device: IntuneDevice) {
   const threat = normalizeText(device.partnerReportedThreatState);
-  return Boolean(threat && !["unknown", "none", "clear", "activated"].includes(threat));
+  return ["lowseverity", "mediumseverity", "highseverity", "compromised"].includes(threat);
 }
 
 function intuneDeviceRiskReasons(device: IntuneDevice) {
@@ -9658,8 +9398,12 @@ function intuneDeviceRiskReasons(device: IntuneDevice) {
   return reasons;
 }
 
-function intuneDeviceMatchesFilter(device: IntuneDevice, filter: "all" | "risk" | "stale" | "windows" | "mobile") {
+type IntuneFilter = "all" | "risk" | "noncompliant" | "stale" | "storage" | "windows" | "mobile";
+
+function intuneDeviceMatchesFilter(device: IntuneDevice, filter: IntuneFilter) {
   if (filter === "risk") return intuneDeviceRiskReasons(device).length > 0;
+  if (filter === "noncompliant") return normalizeText(device.complianceState) === "noncompliant";
+  if (filter === "storage") return intuneFreeStoragePercent(device) <= 15;
   if (filter === "stale") return intuneDeviceIsStale(device);
   if (filter === "windows") return intuneDeviceIsWindows(device);
   if (filter === "mobile") return !intuneDeviceIsWindows(device);
@@ -9741,6 +9485,7 @@ function office365OperationLabel(value: string) {
   if (value === "license-full") return "Revisando licencas sem saldo";
   if (value === "license-usage") return "Visualizando licencas em uso";
   if (value === "licensed-groups") return "Visualizando grupos com licenca";
+  if (value === "disabled-licensed") return "Contas desativadas que ainda ocupam licença";
   return "Filtro ativo";
 }
 

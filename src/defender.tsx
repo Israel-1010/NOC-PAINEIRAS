@@ -97,7 +97,7 @@ const CLASSIFICATION: Record<string, string> = {
   falsePositive: "Falso positivo",
 };
 const DETERMINATION: Record<string, string> = {
-  unknown: "—",
+  unknown: "Não definida",
   malware: "Malware",
   phishing: "Phishing",
   compromisedAccount: "Conta comprometida",
@@ -107,12 +107,42 @@ const DETERMINATION: Record<string, string> = {
   apt: "Ataque direcionado (APT)",
   securityTesting: "Teste de segurança",
   securityPersonnel: "Equipe de segurança",
-  confirmedActivity: "Atividade confirmada pelo usuário",
+  confirmedUserActivity: "Atividade confirmada pelo usuário",
   lineOfBusinessApplication: "Aplicativo da empresa",
   notMalicious: "Não malicioso",
   notEnoughDataToValidate: "Dados insuficientes",
   other: "Outro",
 };
+// Determinacoes validas para cada classificacao (o Defender recusa combinacoes como "Falso positivo" + "Malware").
+const DETERMINATION_BY_CLASSIFICATION: Record<string, string[]> = {
+  unknown: ["unknown"],
+  truePositive: ["unknown", "multiStagedAttack", "maliciousUserActivity", "compromisedAccount", "malware", "phishing", "unwantedSoftware", "apt", "other"],
+  informationalExpectedActivity: ["unknown", "securityTesting", "securityPersonnel", "lineOfBusinessApplication", "confirmedUserActivity", "other"],
+  falsePositive: ["unknown", "notMalicious", "notEnoughDataToValidate", "other"],
+};
+
+// Login de quem esta usando o portal (para o filtro "Meus" e para comparar com o responsavel do incidente).
+function sessionLogin() {
+  try {
+    const raw = window.localStorage.getItem("rede-clube-session");
+    return raw ? ((JSON.parse(raw) as { user?: { login?: string } }).user?.login || "").toLowerCase() : "";
+  } catch {
+    return "";
+  }
+}
+const isMine = (assignedTo: string | null | undefined, login: string) => Boolean(login && assignedTo && assignedTo.toLowerCase().split("@")[0] === login);
+
+// Linha de tabela que abre com clique e tambem com Enter/Espaco (teclado).
+const rowOpen = (open: () => void) => ({
+  tabIndex: 0,
+  onClick: open,
+  onKeyDown: (event: React.KeyboardEvent) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      open();
+    }
+  },
+});
 const QUARANTINE_TYPES: Record<string, string> = {
   Spam: "Spam",
   HighConfSpam: "Spam (alta confiança)",
@@ -148,18 +178,37 @@ const daysOpen = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(
 
 type Tab = "incidents" | "machines" | "quarantine";
 
+// Contador de cada aba: onde ha trabalho, sem precisar abrir a aba.
+type TabCounts = Partial<Record<Tab, { value: number; label: string }>>;
+
 export function DefenderDashboard() {
   const [tab, setTab] = useState<Tab>("incidents");
   const [caps, setCaps] = useState<Capabilities | null>(null);
   const [capsError, setCapsError] = useState("");
+  const [counts, setCounts] = useState<TabCounts>({});
+  const report = useCallback((key: Tab, value: number, label: string) => setCounts((current) => ({ ...current, [key]: { value, label } })), []);
 
   useEffect(() => {
     api<Capabilities>("/api/defender/capabilities").then(setCaps).catch((error) => setCapsError(error instanceof Error ? error.message : String(error)));
   }, []);
 
+  // Contadores das outras abas em segundo plano (falha silenciosa: a aba mostra o erro quando aberta).
+  useEffect(() => {
+    if (caps?.machines) {
+      api<{ machines: Machine[] }>("/api/defender/machines")
+        .then(({ machines }) => report("machines", machines.filter((machine) => machine.onboarding === "Onboarded" && machine.risk === "High").length, "risco alto"))
+        .catch(() => undefined);
+    }
+    if (caps?.quarantine) {
+      api<{ messages: QuarantineMessage[] }>("/api/defender/quarantine?days=7&released=false")
+        .then(({ messages }) => report("quarantine", messages.length, "presos"))
+        .catch(() => undefined);
+    }
+  }, [caps?.machines, caps?.quarantine, report]);
+
   return (
     <div className="ct-page df-page">
-      <div className="ct-filters df-tabs" role="tablist" aria-label="Áreas do Defender">
+      <div className="ui-tabs" role="tablist" aria-label="Áreas do Defender">
         {([
           ["incidents", "Incidentes", ShieldAlert],
           ["machines", "Máquinas", Laptop],
@@ -167,13 +216,20 @@ export function DefenderDashboard() {
         ] as [Tab, string, typeof ShieldAlert][]).map(([key, label, Icon]) => (
           <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>
             <Icon size={16} /> {label}
+            {counts[key] ? <b className={counts[key]!.value ? "ui-tab-count" : "ui-tab-count zero"} title={`${counts[key]!.value} ${counts[key]!.label}`}>{counts[key]!.value}</b> : null}
           </button>
         ))}
       </div>
-      {capsError ? <div className="pm-error" role="alert"><AlertTriangle size={16} /><span>{capsError}</span></div> : null}
-      {tab === "incidents" ? <IncidentsTab canEdit={Boolean(caps?.incidents)} /> : null}
-      {tab === "machines" ? <MachinesTab caps={caps} /> : null}
-      {tab === "quarantine" ? <QuarantineTab enabled={caps ? caps.quarantine : null} /> : null}
+      {capsError ? (
+        <div className="pm-error" role="alert">
+          <AlertTriangle size={16} />
+          <span>Não foi possível verificar as permissões do Defender: {capsError}</span>
+          <button type="button" className="ct-secondary" onClick={() => window.location.reload()}>Tentar novamente</button>
+        </div>
+      ) : null}
+      {tab === "incidents" ? <IncidentsTab canEdit={Boolean(caps?.incidents)} capsKnown={Boolean(caps)} onCount={(value) => report("incidents", value, "abertos sem responsável")} /> : null}
+      {tab === "machines" ? (capsError ? null : <MachinesTab caps={caps} />) : null}
+      {tab === "quarantine" ? (capsError ? null : <QuarantineTab enabled={caps ? caps.quarantine : null} />) : null}
     </div>
   );
 }
@@ -190,12 +246,16 @@ function Missing({ title, children }: { title: string; children: React.ReactNode
 /* ---------- Incidentes ---------- */
 type IncidentFilter = "open" | "active" | "inProgress" | "resolved" | "all";
 
-function IncidentsTab({ canEdit }: { canEdit: boolean }) {
+type WhoFilter = "all" | "unassigned" | "mine";
+
+function IncidentsTab({ canEdit, capsKnown, onCount }: { canEdit: boolean; capsKnown: boolean; onCount: (value: number) => void }) {
   const [filter, setFilter] = useState<IncidentFilter>("open");
+  const [who, setWho] = useState<WhoFilter>("all");
   const [term, setTerm] = useState("");
   const [incidents, setIncidents] = useState<Incident[] | null>(null);
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+  const login = useMemo(sessionLogin, []);
 
   const load = useCallback(async () => {
     setError("");
@@ -214,13 +274,26 @@ function IncidentsTab({ canEdit }: { canEdit: boolean }) {
   const rows = useMemo(() => {
     const needle = term.trim().toLowerCase();
     return (incidents || [])
+      .filter((incident) => who === "all" || (who === "unassigned" ? !incident.assignedTo : isMine(incident.assignedTo, login)))
       .filter((incident) => !needle || `${incident.displayName} ${defenderName(incident.displayName)} ${incident.assignedTo || ""} ${incident.id}`.toLowerCase().includes(needle))
       .sort((a, b) => (SEVERITY[a.severity]?.rank ?? 4) - (SEVERITY[b.severity]?.rank ?? 4) || b.createdDateTime.localeCompare(a.createdDateTime));
-  }, [incidents, term]);
+  }, [incidents, term, who, login]);
 
   const open = (incidents || []).filter((incident) => incident.status !== "resolved");
   const serious = open.filter((incident) => incident.severity === "high" || incident.severity === "medium");
   const unassigned = open.filter((incident) => !incident.assignedTo);
+  const mine = open.filter((incident) => isMine(incident.assignedTo, login));
+
+  useEffect(() => {
+    if (filter === "open" && incidents) onCount(unassigned.length);
+  }, [filter, incidents, unassigned.length, onCount]);
+
+  // KPI que filtra a lista ao clicar (e volta a mostrar todos no segundo clique).
+  const kpiButton = (key: WhoFilter) => ({
+    type: "button" as const,
+    "aria-pressed": who === key,
+    onClick: () => setWho(who === key ? "all" : key),
+  });
 
   return (
     <>
@@ -228,14 +301,19 @@ function IncidentsTab({ canEdit }: { canEdit: boolean }) {
       {filter === "open" && incidents ? (
         <section className="ct-kpis">
           <div className={`ct-kpi${serious.length ? " tone-warning" : ""}`}><span>Incidentes abertos</span><strong>{open.length}</strong><small>{serious.length} médios ou altos</small></div>
-          <div className={`ct-kpi${unassigned.length ? " tone-warning" : ""}`}><span>Sem responsável</span><strong>{unassigned.length}</strong><small>ninguém analisando</small></div>
-          <div className="ct-kpi"><span>Em andamento</span><strong>{open.filter((incident) => incident.status === "inProgress").length}</strong><small>com alguém tratando</small></div>
+          <button className={`ct-kpi df-kpi-btn${unassigned.length ? " tone-warning" : ""}${who === "unassigned" ? " active" : ""}`} {...kpiButton("unassigned")}>
+            <span>Sem responsável</span><strong>{unassigned.length}</strong><small>{who === "unassigned" ? "filtrando a lista · clique para ver todos" : "clique para ver só estes"}</small>
+          </button>
+          <button className={`ct-kpi df-kpi-btn${who === "mine" ? " active" : ""}`} {...kpiButton("mine")}>
+            <span>Meus</span><strong>{mine.length}</strong><small>{who === "mine" ? "filtrando a lista · clique para ver todos" : "atribuídos a você"}</small>
+          </button>
           <div className="ct-kpi"><span>Mais antigo aberto</span><strong>{open.length ? `${Math.max(...open.map((incident) => daysOpen(incident.createdDateTime)))} dias` : "—"}</strong><small>desde a criação</small></div>
         </section>
       ) : null}
       <section className="ct-table-card">
         <div className="ct-toolbar">
-          <div className="ct-filters" role="tablist" aria-label="Filtrar incidentes">
+          {/* Filtro (segmentado), visualmente diferente das abas do Defender acima. */}
+          <div className="ct-filters" role="group" aria-label="Filtrar incidentes por status">
             {([
               ["open", "Abertos"],
               ["active", "Novos"],
@@ -243,7 +321,16 @@ function IncidentsTab({ canEdit }: { canEdit: boolean }) {
               ["resolved", "Resolvidos"],
               ["all", "Todos"],
             ] as [IncidentFilter, string][]).map(([key, label]) => (
-              <button key={key} type="button" role="tab" aria-selected={filter === key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>{label}</button>
+              <button key={key} type="button" aria-pressed={filter === key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>{label}</button>
+            ))}
+          </div>
+          <div className="ct-filters" role="group" aria-label="Filtrar por responsável">
+            {([
+              ["all", "Todos"],
+              ["unassigned", "Sem responsável"],
+              ["mine", "Meus"],
+            ] as [WhoFilter, string][]).map(([key, label]) => (
+              <button key={key} type="button" aria-pressed={who === key} className={who === key ? "active" : ""} onClick={() => setWho(key)}>{label}</button>
             ))}
           </div>
           <label className="pm-search">
@@ -266,7 +353,7 @@ function IncidentsTab({ canEdit }: { canEdit: boolean }) {
             </thead>
             <tbody>
               {rows.map((incident) => (
-                <tr key={incident.id} onClick={() => setOpenId(incident.id)}>
+                <tr key={incident.id} {...rowOpen(() => setOpenId(incident.id))} aria-label={`Abrir incidente ${defenderName(incident.displayName)}`}>
                   <td><span className={`ct-pill tone-${SEVERITY[incident.severity]?.tone || "muted"}`}>{SEVERITY[incident.severity]?.label || incident.severity}</span></td>
                   <td>
                     <strong className="ct-title">{defenderName(incident.displayName)}</strong>
@@ -284,12 +371,12 @@ function IncidentsTab({ canEdit }: { canEdit: boolean }) {
           </table>
         </div>
       </section>
-      {openId ? <IncidentModal id={openId} canEdit={canEdit} onClose={() => setOpenId(null)} onChanged={load} /> : null}
+      {openId ? <IncidentModal id={openId} canEdit={canEdit} capsKnown={capsKnown} onClose={() => setOpenId(null)} onChanged={load} /> : null}
     </>
   );
 }
 
-function IncidentModal({ id, canEdit, onClose, onChanged }: { id: string; canEdit: boolean; onClose: () => void; onChanged: () => void }) {
+function IncidentModal({ id, canEdit, capsKnown, onClose, onChanged }: { id: string; canEdit: boolean; capsKnown: boolean; onClose: () => void; onChanged: () => void }) {
   const [incident, setIncident] = useState<(Incident & { alerts: IncidentAlert[] }) | null>(null);
   const [form, setForm] = useState({ status: "", classification: "", determination: "", comment: "" });
   const [busy, setBusy] = useState("");
@@ -314,9 +401,14 @@ function IncidentModal({ id, canEdit, onClose, onChanged }: { id: string; canEdi
       if (form.classification !== (incident.classification || "unknown")) body.classification = form.classification;
       if (form.determination !== (incident.determination || "unknown")) body.determination = form.determination;
       if (form.comment.trim()) body.comment = form.comment.trim();
+      // Resolver sem dizer o que era deixa o historico sem resposta: exige a classificacao.
+      if (form.status === "resolved" && form.classification === "unknown") {
+        setMessage("Para resolver, escolha a classificação (ameaça real, atividade esperada ou falso positivo).");
+        return;
+      }
     }
     if (!Object.keys(body).length) {
-      setMessage("Nada para salvar.");
+      setMessage("Nenhuma alteração para salvar.");
       return;
     }
     setBusy(label);
@@ -332,25 +424,42 @@ function IncidentModal({ id, canEdit, onClose, onChanged }: { id: string; canEdi
     }
   }
 
+  // Fechar com algo digitado ou alterado pergunta antes (clique fora, Esc ou X).
+  const dirty = Boolean(
+    incident &&
+      (form.comment.trim() || form.status !== incident.status || form.classification !== (incident.classification || "unknown") || form.determination !== (incident.determination || "unknown")),
+  );
+  const requestClose = useCallback(() => {
+    if (dirty && !window.confirm("Descartar as alterações e o comentário ainda não salvos?")) return;
+    onClose();
+  }, [dirty, onClose]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") requestClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [requestClose]);
+
+  const determinations = DETERMINATION_BY_CLASSIFICATION[form.classification] || Object.keys(DETERMINATION);
+
   return (
     <>
-      <div className="ct-backdrop" onClick={onClose} />
-      <div className="ct-modal df-modal" role="dialog" aria-modal="true" aria-label="Incidente do Defender">
+      <div className="ct-backdrop" onClick={requestClose} />
+      <div className="ct-modal df-modal df-incident" role="dialog" aria-modal="true" aria-label="Incidente do Defender">
         <header>
-          <h3>{incident ? defenderName(incident.displayName) : "Incidente"} <small className="ct-muted">#{id}</small></h3>
-          <button type="button" className="pm-icon-btn" aria-label="Fechar" onClick={onClose}><X size={18} /></button>
+          <h3>
+            {incident ? <span className={`ct-pill tone-${SEVERITY[incident.severity]?.tone || "muted"}`}>{SEVERITY[incident.severity]?.label || incident.severity}</span> : null}
+            {incident ? defenderName(incident.displayName) : "Incidente"} <small className="ct-muted">#{id}{incident ? ` · ${STATUS[incident.status] || incident.status} · aberto ${fmtDateTime(incident.createdDateTime)}` : ""}</small>
+          </h3>
+          <button type="button" className="pm-icon-btn" aria-label="Fechar" onClick={requestClose}><X size={18} /></button>
         </header>
         {!incident ? (
           <p className="df-pad">{message || "Carregando..."}</p>
         ) : (
+          <div className="df-incident-body">
           <div className="df-body">
-            <div className="df-meta">
-              <span className={`ct-pill tone-${SEVERITY[incident.severity]?.tone || "muted"}`}>{SEVERITY[incident.severity]?.label || incident.severity}</span>
-              <span>{STATUS[incident.status] || incident.status}</span>
-              <span>Aberto em {fmtDateTime(incident.createdDateTime)}</span>
-              <span>Responsável: <b>{incident.assignedTo || "ninguém"}</b></span>
-              {incident.incidentWebUrl ? <a className="ct-link" href={incident.incidentWebUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Abrir no Defender</a> : null}
-            </div>
             <p className="ct-muted df-original">{incident.displayName}</p>
 
             <h4>Alertas e evidências ({incident.alerts.length})</h4>
@@ -361,7 +470,7 @@ function IncidentModal({ id, canEdit, onClose, onChanged }: { id: string; canEdi
                     <span className={`ct-pill tone-${SEVERITY[alert.severity]?.tone || "muted"}`}>{SEVERITY[alert.severity]?.label || alert.severity}</span>
                     <strong>{defenderName(alert.title)}</strong>
                     <small className="ct-muted">{fmtDateTime(alert.createdDateTime)} · {STATUS[alert.status] || alert.status}</small>
-                    {alert.alertWebUrl ? <a className="ct-link" href={alert.alertWebUrl} target="_blank" rel="noreferrer"><ExternalLink size={13} /></a> : null}
+                    {alert.alertWebUrl ? <a className="ct-link" href={alert.alertWebUrl} target="_blank" rel="noreferrer" aria-label="Abrir este alerta no portal do Defender (nova aba)" title="Abrir no Defender"><ExternalLink size={13} /></a> : null}
                   </div>
                   {alert.description ? <p className="df-desc">{alert.description.replace(/-V\d+(\.\d+)*$/, "").trim()}</p> : null}
                   {alert.evidence.length ? (
@@ -371,7 +480,7 @@ function IncidentModal({ id, canEdit, onClose, onChanged }: { id: string; canEdi
                         .slice(0, 12)
                         .map((evidence, index) => (
                           <span key={index} className={`df-ev${evidence.verdict === "malicious" ? " bad" : evidence.verdict === "suspicious" ? " warn" : ""}`} title={`${evidence.type} · ${evidence.verdict || ""}${evidence.remediation ? ` · ${evidence.remediation}` : ""}`}>
-                            {[evidence.device && `💻 ${evidence.device}`, evidence.user && `👤 ${evidence.user}`, evidence.file && `📄 ${evidence.file}`, evidence.ip && `🌐 ${evidence.ip}`, evidence.url && `🔗 ${evidence.url}`, evidence.subject && `✉️ ${evidence.subject}`, evidence.sender && `de ${evidence.sender}`, evidence.recipient && `para ${evidence.recipient}`]
+                            {[evidence.device && `máquina ${evidence.device}`, evidence.user && `usuário ${evidence.user}`, evidence.file && `arquivo ${evidence.file}`, evidence.ip && `IP ${evidence.ip}`, evidence.url && `link ${evidence.url}`, evidence.subject && `e-mail "${evidence.subject}"`, evidence.sender && `de ${evidence.sender}`, evidence.recipient && `para ${evidence.recipient}`]
                               .filter(Boolean)
                               .join(" · ")}
                           </span>
@@ -393,12 +502,20 @@ function IncidentModal({ id, canEdit, onClose, onChanged }: { id: string; canEdi
               </>
             ) : null}
 
+          </div>
+
+          {/* Triagem sempre visivel ao lado (antes ficava no fim, depois de todos os alertas). */}
+          <aside className="df-triage" aria-label="Triagem do incidente">
+            <h4>Triagem</h4>
+            <p className="df-triage-who">Responsável: <b>{incident.assignedTo || "ninguém"}</b></p>
             {canEdit ? (
-              <form className="ct-form df-actions" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-                <div className="wide df-quick">
-                  <button type="button" className="ct-secondary" disabled={Boolean(busy)} onClick={() => save({ assignTo: "me", status: incident.status === "active" ? "inProgress" : undefined }, "me")}>
-                    <UserCheck size={15} /> {busy === "me" ? "Atribuindo..." : "Assumir (atribuir a mim)"}
-                  </button>
+              <form className="df-triage-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+                <div className="df-quick">
+                  {!incident.assignedTo || !isMine(incident.assignedTo, sessionLogin()) ? (
+                    <button type="button" className="ct-primary" disabled={Boolean(busy)} onClick={() => save({ assignTo: "me", status: incident.status === "active" ? "inProgress" : undefined }, "me")}>
+                      <UserCheck size={15} /> {busy === "me" ? "Atribuindo..." : "Assumir"}
+                    </button>
+                  ) : null}
                   {incident.assignedTo ? (
                     <button type="button" className="ct-secondary" disabled={Boolean(busy)} onClick={() => save({ assignTo: "" }, "unassign")}>Remover responsável</button>
                   ) : null}
@@ -417,26 +534,26 @@ function IncidentModal({ id, canEdit, onClose, onChanged }: { id: string; canEdi
                     {Object.entries(CLASSIFICATION).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </label>
-                <label className="wide">
+                <label>
                   <span>Determinação</span>
-                  <select value={form.determination} onChange={(event) => setForm({ ...form, determination: event.target.value })}>
-                    {Object.entries(DETERMINATION).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  <select value={form.determination} disabled={form.classification === "unknown"} onChange={(event) => setForm({ ...form, determination: event.target.value })}>
+                    {determinations.map((value) => <option key={value} value={value}>{DETERMINATION[value] || value}</option>)}
                   </select>
+                  {form.classification === "unknown" ? <small className="ct-muted">Escolha a classificação primeiro.</small> : null}
                 </label>
-                <label className="wide">
-                  <span>Comentário (fica no histórico do incidente no Defender)</span>
-                  <textarea rows={3} maxLength={1000} value={form.comment} placeholder="O que foi verificado, o que foi feito..." onChange={(event) => setForm({ ...form, comment: event.target.value })} />
+                <label>
+                  <span>Comentário (fica no histórico do Defender)</span>
+                  <textarea rows={4} maxLength={1000} value={form.comment} placeholder="O que foi verificado, o que foi feito..." onChange={(event) => setForm({ ...form, comment: event.target.value })} />
                 </label>
-                {message ? <p className={`wide ct-message${message.startsWith("Salvo") ? " ok" : ""}`}>{message}</p> : null}
-                <footer className="wide">
-                  <small className="ct-muted">Fica registrado com o seu nome no Defender e na auditoria do portal.</small>
-                  <span />
-                  <button type="submit" className="ct-primary" disabled={Boolean(busy)}>{busy === "save" ? "Salvando..." : "Salvar no Defender"}</button>
-                </footer>
+                {message ? <p className={`ct-message${message.startsWith("Salvo") ? " ok" : message.startsWith("Nenhuma") ? " neutral" : ""}`} role={message.startsWith("Salvo") ? "status" : "alert"}>{message}</p> : null}
+                <button type="submit" className="ct-primary" disabled={Boolean(busy) || !dirty}>{busy === "save" ? "Salvando..." : "Salvar no Defender"}</button>
+                <small className="ct-muted">Fica registrado com o seu nome no Defender e na auditoria do portal.</small>
               </form>
             ) : (
-              <p className="ct-muted df-pad">Somente leitura: o app ainda não tem SecurityIncident.ReadWrite.All.</p>
+              <p className="ct-muted">{capsKnown ? "Somente leitura: o app do portal ainda não tem a permissão SecurityIncident.ReadWrite.All." : "Verificando permissões..."}</p>
             )}
+            {incident.incidentWebUrl ? <a className="ct-link" href={incident.incidentWebUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Abrir no Defender</a> : null}
+          </aside>
           </div>
         )}
       </div>
@@ -525,7 +642,7 @@ function MachinesTab({ caps }: { caps: Capabilities | null }) {
               {rows.slice(0, 400).map((machine) => {
                 const action = lastAction(machine.id);
                 return (
-                  <tr key={machine.id} onClick={() => setSelected(machine)}>
+                  <tr key={machine.id} {...rowOpen(() => setSelected(machine))} aria-label={`Abrir máquina ${machine.name}`}>
                     <td><strong className="ct-title">{machine.name}</strong><small className="ct-cat">{[machine.user, machine.os, machine.ip].filter(Boolean).join(" · ")}</small></td>
                     <td><span className={`ct-pill tone-${machine.risk === "High" ? "critical" : machine.risk === "Medium" ? "warning" : "muted"}`}>{LEVELS[machine.risk] || machine.risk || "—"}</span></td>
                     <td>{LEVELS[machine.exposure] || machine.exposure || "—"}</td>
@@ -546,22 +663,37 @@ function MachinesTab({ caps }: { caps: Capabilities | null }) {
   );
 }
 
-const MACHINE_BUTTONS: { action: string; option?: string; label: string; cap: keyof Capabilities["machineActions"]; danger?: boolean; icon: typeof Lock; help: string }[] = [
-  { action: "scan", option: "Quick", label: "Antivírus rápido", cap: "scan", icon: ScanSearch, help: "Verificação rápida do Defender Antivírus." },
-  { action: "scan", option: "Full", label: "Antivírus completo", cap: "scan", icon: ScanSearch, help: "Verificação completa (demora e pesa na máquina)." },
-  { action: "isolate", option: "Full", label: "Isolar da rede", cap: "isolate", danger: true, icon: Lock, help: "Corta toda a rede da máquina, exceto o Defender. O usuário fica sem internet e sem rede." },
-  { action: "isolate", option: "Selective", label: "Isolar (manter Teams/Outlook)", cap: "isolate", danger: true, icon: Lock, help: "Isola, mas mantém Outlook, Teams e Skype funcionando." },
-  { action: "unisolate", label: "Liberar isolamento", cap: "isolate", icon: Unlock, help: "Devolve a rede para a máquina." },
-  { action: "restrict", label: "Restringir apps", cap: "restrict", danger: true, icon: Lock, help: "Só roda programas assinados pela Microsoft." },
-  { action: "unrestrict", label: "Liberar apps", cap: "restrict", icon: Unlock, help: "Remove a restrição de programas." },
-  { action: "collect", label: "Coletar pacote de investigação", cap: "collect", icon: Laptop, help: "Junta logs e artefatos da máquina para análise." },
+// group: investigar (sem efeito para o usuario), conter (corta algo) ou reverter (desfaz a contencao).
+const MACHINE_BUTTONS: { action: string; option?: string; label: string; cap: keyof Capabilities["machineActions"]; group: "investigar" | "conter" | "reverter"; danger?: boolean; icon: typeof Lock; help: string }[] = [
+  { action: "scan", option: "Quick", label: "Antivírus rápido", cap: "scan", group: "investigar", icon: ScanSearch, help: "Verificação rápida do Defender Antivírus." },
+  { action: "scan", option: "Full", label: "Antivírus completo", cap: "scan", group: "investigar", icon: ScanSearch, help: "Verificação completa (demora e pesa na máquina)." },
+  { action: "collect", label: "Coletar pacote de investigação", cap: "collect", group: "investigar", icon: Laptop, help: "Junta logs e artefatos da máquina para análise." },
+  { action: "isolate", option: "Full", label: "Isolar da rede", cap: "isolate", group: "conter", danger: true, icon: Lock, help: "Corta toda a rede da máquina, exceto o Defender. O usuário fica sem internet e sem rede." },
+  { action: "isolate", option: "Selective", label: "Isolar (manter Teams/Outlook)", cap: "isolate", group: "conter", danger: true, icon: Lock, help: "Isola, mas mantém Outlook, Teams e Skype funcionando." },
+  { action: "restrict", label: "Restringir apps", cap: "restrict", group: "conter", danger: true, icon: Lock, help: "Só roda programas assinados pela Microsoft." },
+  { action: "unisolate", label: "Liberar isolamento", cap: "isolate", group: "reverter", icon: Unlock, help: "Devolve a rede para a máquina." },
+  { action: "unrestrict", label: "Liberar apps", cap: "restrict", group: "reverter", icon: Unlock, help: "Remove a restrição de programas." },
 ];
+const MACHINE_GROUPS: { key: "investigar" | "conter" | "reverter"; title: string }[] = [
+  { key: "investigar", title: "Investigar" },
+  { key: "conter", title: "Conter" },
+  { key: "reverter", title: "Reverter" },
+];
+
+// Estado atual pela ultima acao de cada par (isolar/liberar, restringir/liberar); falha ou cancelada nao conta.
+function containment(actions: MachineAction[], on: string, off: string) {
+  const last = actions.find((action) => (action.type === on || action.type === off) && !["Failed", "Cancelled", "TimeOut"].includes(action.status));
+  return last && last.type === on ? last : null;
+}
 
 function MachineModal({ machine, caps, actions, onClose, onDone }: { machine: Machine; caps: Capabilities; actions: MachineAction[]; onClose: () => void; onDone: () => void }) {
   const [choice, setChoice] = useState<(typeof MACHINE_BUTTONS)[number] | null>(null);
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  // Historico vem do mais novo para o mais antigo.
+  const isolated = containment(actions, "Isolate", "Unisolate");
+  const restricted = containment(actions, "RestrictCodeExecution", "UnrestrictCodeExecution");
 
   async function run() {
     if (!choice) return;
@@ -598,30 +730,56 @@ function MachineModal({ machine, caps, actions, onClose, onDone }: { machine: Ma
             <span>IP {machine.ip || "—"}</span>
             <span>visto {fmtDateTime(machine.lastSeen)}</span>
           </div>
-          <h4>Ações</h4>
-          <div className="df-machine-actions">
-            {MACHINE_BUTTONS.map((button) => {
-              const allowed = caps.machineActions[button.cap];
-              const Icon = button.icon;
-              return (
-                <button
-                  key={`${button.action}-${button.option || ""}`}
-                  type="button"
-                  className={`df-action${button.danger ? " danger" : ""}${choice === button ? " active" : ""}`}
-                  disabled={!allowed || busy}
-                  title={allowed ? button.help : `Falta a permissão do app para esta ação.`}
-                  onClick={() => setChoice(button)}
-                >
-                  <Icon size={16} /> {button.label}
-                </button>
-              );
-            })}
-          </div>
+          {isolated || restricted ? (
+            <p className="df-state">
+              <Lock size={16} />
+              {[isolated ? `Isolada da rede desde ${fmtDateTime(isolated.created)}` : "", restricted ? `Apps restritos desde ${fmtDateTime(restricted.created)}` : ""].filter(Boolean).join(" · ")}
+              {isolated?.status === "Pending" || isolated?.status === "InProgress" || restricted?.status === "Pending" || restricted?.status === "InProgress" ? " (em execução)" : ""}
+            </p>
+          ) : null}
+          {MACHINE_GROUPS.map((group) => {
+            // So mostra o que faz sentido no estado atual: isolada -> Liberar; nao isolada -> Isolar.
+            const buttons = MACHINE_BUTTONS.filter((button) => button.group === group.key).filter((button) => {
+              if (button.action === "isolate") return !isolated;
+              if (button.action === "unisolate") return Boolean(isolated);
+              if (button.action === "restrict") return !restricted;
+              if (button.action === "unrestrict") return Boolean(restricted);
+              return true;
+            });
+            if (!buttons.length) return null;
+            return (
+              <div key={group.key} className={`df-action-group df-group-${group.key}`}>
+                <h4>{group.title}</h4>
+                <div className="df-machine-actions">
+                  {buttons.map((button) => {
+                    const allowed = caps.machineActions[button.cap];
+                    const Icon = button.icon;
+                    return (
+                      <button
+                        key={`${button.action}-${button.option || ""}`}
+                        type="button"
+                        className={`df-action${button.danger ? " danger" : ""}${choice === button ? " active" : ""}`}
+                        disabled={!allowed || busy}
+                        title={button.help}
+                        onClick={() => setChoice(button)}
+                      >
+                        <Icon size={16} />
+                        <span className="df-action-label">
+                          {button.label}
+                          {!allowed ? <small>sem permissão no app</small> : null}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
           {choice ? (
             <div className="ct-form df-actions">
               <p className="wide ct-muted">{choice.help}</p>
               <label className="wide">
-                <span>Motivo (obrigatório, fica registrado no Defender)</span>
+                <span>Motivo (obrigatório, mínimo 5 caracteres; fica registrado no Defender)</span>
                 <textarea rows={2} maxLength={500} value={comment} autoFocus onChange={(event) => setComment(event.target.value)} placeholder="Ex.: incidente #2761, comunicação com C&C" />
               </label>
               <footer className="wide">
