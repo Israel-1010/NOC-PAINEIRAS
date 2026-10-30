@@ -15461,6 +15461,38 @@ p.win10-effects {
   overflow: hidden;
 }
 
+/* Na TV: aparelho compacto (o nivel mais baixo deixa a escala maior) e nome mais forte. */
+.ut-tv .ut-node {
+  gap: 1px;
+  width: 128px;
+  padding: 0;
+}
+
+.ut-tv .ut-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.ut-tv .ut-node strong {
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: -0.15px;
+}
+
+.ut-tv .ut-node small {
+  display: none;
+}
+
+.ut-tv .ut-node:not(.state-online) small {
+  display: block;
+}
+
+.ut-tv .ut-chip {
+  padding: 0 5px;
+  font-size: 11px;
+}
+
 .noc-root .ut-line {
   stroke: #4f8df5;
 }

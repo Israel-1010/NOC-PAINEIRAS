@@ -64,10 +64,11 @@ const isProblem = (node: TopoNode, edge?: TopoEdge) => node.state !== "online" |
 
 /* ---------- Layout da arvore ---------- */
 // Cada filho vira uma coluna; quando os filhos nao cabem na largura, quebram em linhas presas a um "trilho" a esquerda.
-const COL = 138;
-const NODE_H = 92;
-const GAP = 64;
-const RAIL = 22;
+// Na TV os niveis sao mais baixos (sem a linha de portas): a altura e o que limita a escala la.
+type Dims = { col: number; nodeH: number; gap: number; rail: number };
+const PAGE_DIMS: Dims = { col: 138, nodeH: 92, gap: 64, rail: 22 };
+const TV_DIMS: Dims = { col: 132, nodeH: 64, gap: 46, rail: 18 };
+const COL = PAGE_DIMS.col;
 
 type Placed = { id: string; cx: number; y: number };
 type Line = { x1: number; y1: number; x2: number; y2: number; kind: "ok" | "slow" | "down" };
@@ -75,7 +76,8 @@ type Chip = { cx: number; y: number; text: string; kind: "ok" | "slow" | "down" 
 type Block = { width: number; height: number; place: (x0: number, y0: number, out: Out) => number };
 type Out = { nodes: Placed[]; lines: Line[]; chips: Chip[]; dots: { x: number; y: number }[] };
 
-function buildLayout(roots: string[], children: Map<string, TopoEdge[]>, nodes: Map<string, TopoNode>, avail: number) {
+function buildLayout(roots: string[], children: Map<string, TopoEdge[]>, nodes: Map<string, TopoNode>, avail: number, dims: Dims = PAGE_DIMS) {
+  const { col: COL, nodeH: NODE_H, gap: GAP, rail: RAIL } = dims;
   const seen = new Set<string>();
   const edgeKind = (edge: TopoEdge): Line["kind"] => (edge.lastKnown || nodes.get(edge.to)?.state === "offline" ? "down" : isSlow(edge) ? "slow" : "ok");
 
@@ -125,7 +127,7 @@ function buildLayout(roots: string[], children: Map<string, TopoEdge[]>, nodes: 
             const was = edge.maxSeenMbps && edge.speedMbps && edge.speedMbps < edge.maxSeenMbps ? ` (era ${speedLabel(edge.maxSeenMbps)})` : "";
             out.chips.push({
               cx,
-              y: rowY - GAP / 2 + 6,
+              y: rowY - GAP / 2 + 4,
               // Porta no aparelho de cima ⇄ porta no de baixo ("–" quando a UniFi nao informa).
               text: edge.wireless ? "sem fio" : `${edge.parentPort ?? "–"} ⇄ ${edge.localPort ?? "–"}${speed ? ` · ${speed}${was}` : ""}`,
               kind,
@@ -142,7 +144,7 @@ function buildLayout(roots: string[], children: Map<string, TopoEdge[]>, nodes: 
         // O pai fica centralizado sobre a primeira linha de filhos.
         const cx = wrapped ? x0 + offset + rowWidths[0] / 2 : (Math.min(...firstCenters) + Math.max(...firstCenters)) / 2;
         out.nodes.push({ id, cx, y: y0 });
-        out.lines.push({ x1: cx, y1: y0 + NODE_H - 6, x2: cx, y2: busYs[0], kind: "ok" });
+        out.lines.push({ x1: cx, y1: y0 + NODE_H - 2, x2: cx, y2: busYs[0], kind: "ok" });
         out.dots.push({ x: cx, y: busYs[0] });
         if (wrapped) {
           // Trilho: liga o barramento da 1a linha aos das linhas seguintes.
@@ -271,9 +273,9 @@ export function TopologyFit({ headers }: { headers: Record<string, string> }) {
   const graph = useMemo(() => buildGraph(data), [data]);
   const fit = useMemo(() => {
     let best: { layout: Layout; scale: number } | null = null;
-    for (const factor of [1, 1.25, 1.5, 1.8, 2.2, 2.7, 3.3, 4]) {
-      const layout = buildLayout(graph.roots, graph.children, graph.nodes, size.width * factor);
-      const scale = Math.min(size.width / layout.width, size.height / layout.height, 1.8);
+    for (const factor of [0.6, 0.75, 0.9, 1, 1.15, 1.3, 1.5, 1.8, 2.2, 2.7, 3.3, 4]) {
+      const layout = buildLayout(graph.roots, graph.children, graph.nodes, size.width * factor, TV_DIMS);
+      const scale = Math.min(size.width / layout.width, size.height / layout.height, 2);
       if (!best || scale > best.scale) best = { layout, scale };
     }
     return best!;
@@ -284,6 +286,7 @@ export function TopologyFit({ headers }: { headers: Record<string, string> }) {
 
   return (
     <div className="noc-page ut-tv">
+      {/* Na TV so o que pede atencao ganha a segunda linha (fora ha X, sem resposta). */}
       <p className="ut-tv-head">
         <span>{devices.filter((node) => node.type === "switch").length} switches · {devices.filter((node) => node.type === "ap").length} APs</span>
         {problems.length ? <b className="tone-critical">{problems.length} com problema: {problems.slice(0, 4).map((node) => node.name).join(", ")}{problems.length > 4 ? "…" : ""}</b> : <b className="tone-good">tudo online</b>}
