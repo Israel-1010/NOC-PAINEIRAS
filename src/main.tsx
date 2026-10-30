@@ -27,13 +27,11 @@ import {
   PanelLeftOpen,
   Plus,
   RefreshCw,
-  RadioTower,
   Router,
   Save,
   Search,
   Server,
   Settings,
-  Shield,
   ShieldAlert,
   ShieldCheck,
   Signal,
@@ -48,7 +46,6 @@ import {
   Smartphone,
   Stethoscope,
   ChevronRight,
-  RotateCcw,
   Tv,
   UserCheck,
   Users,
@@ -66,6 +63,7 @@ import { NocWall } from "./noc";
 import { ContractsDashboard } from "./contracts";
 import { DefenderDashboard } from "./defender";
 import { InventoryDashboard } from "./inventory";
+import { UnifiTopology } from "./unifiTopology";
 
 // O 3D (three.js) so e baixado quando alguem abre a tela.
 const InfraView = React.lazy(() => import("./infra/InfraView"));
@@ -563,51 +561,6 @@ type IpDetails = {
   links: IpInventoryLink[];
 };
 
-type TopologyNodeType = "core" | "switch" | "firewall" | "fiber" | "server" | "internet";
-
-type TopologyNode = {
-  id: string;
-  name: string;
-  type: TopologyNodeType;
-  ip: string;
-  vendor: string;
-  network: string;
-  imageUrl: string;
-  x: number;
-  y: number;
-};
-
-type TopologyLink = {
-  id: string;
-  from: string;
-  to: string;
-  label: string;
-  medium: "fibra" | "utp" | "wan" | "trunk";
-};
-
-type TopologyNetwork = {
-  id: string;
-  name: string;
-  cidr: string;
-  vlan: string;
-  gateway: string;
-  notes: string;
-};
-
-type TopologyState = {
-  networks: TopologyNetwork[];
-  nodes: TopologyNode[];
-  links: TopologyLink[];
-};
-
-type TopologyPingResult = {
-  ip: string;
-  ok: boolean;
-  latencyMs: number | null;
-  checkedAt: string;
-  message: string;
-};
-
 type AdUserDetails = {
   source: string;
   profile: {
@@ -1079,26 +1032,6 @@ const fallbackIpDetails: IpDetails = {
   links: [],
 };
 
-const fallbackTopology: TopologyState = {
-  networks: [
-    { id: "net-mgmt", name: "Gerencia UniFi", cidr: "192.168.9.0/24", vlan: "9", gateway: "192.168.9.1", notes: "Rede inicial para catracas/trielo e switches UniFi." },
-    { id: "net-core", name: "Core / Servidores", cidr: "10.200.1.0/24", vlan: "1", gateway: "10.200.1.1", notes: "Backbone principal." },
-  ],
-  nodes: [
-    { id: "node-internet", name: "Internet", type: "internet", ip: "", vendor: "ISP", network: "WAN", imageUrl: "", x: 50, y: 12 },
-    { id: "node-fortinet", name: "Fortinet", type: "firewall", ip: "10.200.1.1", vendor: "Fortinet", network: "Core / Servidores", imageUrl: "", x: 50, y: 30 },
-    { id: "node-core", name: "Core", type: "core", ip: "10.200.1.2", vendor: "Core", network: "Core / Servidores", imageUrl: "", x: 50, y: 50 },
-    { id: "node-unifi", name: "UniFi Switch", type: "switch", ip: "192.168.9.2", vendor: "UniFi", network: "Gerencia UniFi", imageUrl: "", x: 28, y: 70 },
-    { id: "node-fiber", name: "Fibra CFTV", type: "fiber", ip: "", vendor: "Fibra", network: "Backbone", imageUrl: "", x: 72, y: 70 },
-  ],
-  links: [
-    { id: "link-internet-fw", from: "node-internet", to: "node-fortinet", label: "WAN", medium: "wan" },
-    { id: "link-fw-core", from: "node-fortinet", to: "node-core", label: "LAN", medium: "trunk" },
-    { id: "link-core-unifi", from: "node-core", to: "node-unifi", label: "Trunk UniFi", medium: "utp" },
-    { id: "link-core-fiber", from: "node-core", to: "node-fiber", label: "Fibra", medium: "fibra" },
-  ],
-};
-
 // Itens por pagina nas listas do portal (AD, Intune, Office 365, bloqueios).
 const pageSize = 20;
 
@@ -1208,7 +1141,7 @@ function viewEyebrow(view: View) {
   if (view === "noc") return "Central de monitoramento";
   if (view === "access") return "Administração do portal";
   if (view === "diagnostics") return "Administração do portal";
-  if (view === "topology") return "Mapa e monitoramento";
+  if (view === "topology") return "Switches e APs da UniFi · ao vivo";
   return "Administração de identidade";
 }
 
@@ -1347,11 +1280,6 @@ function App() {
   const [milvusAssetsSummary, setMilvusAssetsSummary] = useState<MilvusAssetsSummary>(fallbackMilvusAssetsSummary);
   const [ipSummary, setIpSummary] = useState<IpSummary>(fallbackIpSummary);
   const [ipDetails, setIpDetails] = useState<IpDetails>(fallbackIpDetails);
-  const [topology, setTopology] = useState<TopologyState>(fallbackTopology);
-  const [topologyLoaded, setTopologyLoaded] = useState(false);
-  const [topologySaveStatus, setTopologySaveStatus] = useState("Aguardando arquivo");
-  const skipNextTopologySaveRef = useRef(false);
-  const topologySaveTimerRef = useRef<number | null>(null);
 
   const clearSession = useCallback(() => {
     removeSession();
@@ -1371,9 +1299,6 @@ function App() {
     setTicketsDetails(fallbackTicketsDetails);
     setIpSummary(fallbackIpSummary);
     setIpDetails(fallbackIpDetails);
-    setTopology(fallbackTopology);
-    setTopologyLoaded(false);
-    setTopologySaveStatus("Aguardando arquivo");
   }, []);
 
   const [myOpenTasks, setMyOpenTasks] = useState(0);
@@ -1529,33 +1454,6 @@ function App() {
     } catch {
       setIpSummary(fallbackIpSummary);
       setIpDetails(fallbackIpDetails);
-    }
-  }, [clearSession, session]);
-
-  const loadTopology = useCallback(async () => {
-    if (!session) return;
-
-    try {
-      const response = await authFetch("/api/topology");
-
-      if (response.status === 401) {
-        clearSession();
-        return;
-      }
-
-      const payload = await parseApiPayload<{ topology?: TopologyState; message?: string }>(response, {});
-
-      if (!response.ok || !payload.topology) {
-        throw new Error(payload.message || "Nao foi possivel carregar a topologia.");
-      }
-
-      skipNextTopologySaveRef.current = true;
-      setTopology(payload.topology);
-      setTopologyLoaded(true);
-      setTopologySaveStatus("Carregado do arquivo");
-    } catch (error) {
-      setTopologyLoaded(false);
-      setTopologySaveStatus(error instanceof Error ? error.message : "Erro ao carregar arquivo");
     }
   }, [clearSession, session]);
 
@@ -1841,14 +1739,6 @@ function App() {
   }, [loadIps, session, canLoad]);
 
   useEffect(() => {
-    if (!session || !canLoad("topology")) {
-      return;
-    }
-
-    loadTopology();
-  }, [loadTopology, session, canLoad]);
-
-  useEffect(() => {
     window.addEventListener(AUTH_EXPIRED_EVENT, clearSession);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, clearSession);
   }, [clearSession]);
@@ -1860,48 +1750,6 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
   }, [sidebarCollapsed]);
-
-  useEffect(() => {
-    if (!session || !topologyLoaded) {
-      return undefined;
-    }
-
-    if (skipNextTopologySaveRef.current) {
-      skipNextTopologySaveRef.current = false;
-      return undefined;
-    }
-
-    setTopologySaveStatus("Salvando no arquivo...");
-
-    if (topologySaveTimerRef.current) {
-      window.clearTimeout(topologySaveTimerRef.current);
-    }
-
-    topologySaveTimerRef.current = window.setTimeout(async () => {
-      try {
-        const response = await authFetch("/api/topology", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topology }),
-        });
-        const payload = await parseApiPayload<{ message?: string }>(response, {});
-
-        if (!response.ok) {
-          throw new Error(payload.message || "Nao foi possivel salvar a topologia.");
-        }
-
-        setTopologySaveStatus("Salvo no arquivo");
-      } catch (error) {
-        setTopologySaveStatus(error instanceof Error ? error.message : "Erro ao salvar arquivo");
-      }
-    }, 250);
-
-    return () => {
-      if (topologySaveTimerRef.current) {
-        window.clearTimeout(topologySaveTimerRef.current);
-      }
-    };
-  }, [session, topology, topologyLoaded]);
 
   if (!session) {
     return <LoginPage onLogin={handleLogin} />;
@@ -2071,7 +1919,7 @@ function App() {
             onNavigate={setActiveView}
           />
         ) : activeView === "topology" ? (
-          <TopologyDashboard topology={topology} onChange={setTopology} ipDetails={ipDetails} onRefreshIps={loadIps} saveStatus={topologySaveStatus} />
+          <UnifiTopology />
         ) : activeView === "intune" ? (
           <IntuneDashboard key={`intune-${searchNonce}`} intuneStatus={intuneStatus} intuneSummary={intuneSummary} intuneDetails={intuneDetails} onRefreshIntune={loadIntune} isAdmin={Boolean(access?.isAdmin)} />
         ) : activeView === "office365" ? (
@@ -2631,585 +2479,6 @@ function parseLinkSpeedMbps(value: string) {
   if (normalized.includes("GB") || normalized.includes("G")) return amount * 1000;
   if (normalized.includes("KB") || normalized.includes("K")) return amount / 1000;
   return amount;
-}
-
-function TopologyDashboard({
-  topology,
-  onChange,
-  ipDetails,
-  onRefreshIps,
-  saveStatus,
-}: {
-  topology: TopologyState;
-  onChange: React.Dispatch<React.SetStateAction<TopologyState>>;
-  ipDetails: IpDetails;
-  onRefreshIps: () => Promise<void>;
-  saveStatus: string;
-}) {
-  const mapRef = useRef<HTMLDivElement | null>(null);
-  const [networkForm, setNetworkForm] = useState<TopologyNetwork>(emptyTopologyNetwork());
-  const [nodeForm, setNodeForm] = useState<TopologyNode>(emptyTopologyNode());
-  const [activePanel, setActivePanel] = useState<"network" | "node" | "editNode" | "inventory" | "monitor" | null>(null);
-  const [linkMode, setLinkMode] = useState(false);
-  const [linkMedium, setLinkMedium] = useState<TopologyLink["medium"]>("fibra");
-  const [selectedNodeId, setSelectedNodeId] = useState("");
-  const [draggingNodeId, setDraggingNodeId] = useState("");
-  const [pingResults, setPingResults] = useState<Record<string, TopologyPingResult>>({});
-  const [pingLoading, setPingLoading] = useState(false);
-  const [pingError, setPingError] = useState("");
-  // Padrao e so ver: arrastar e editar exigem entrar em "Editar mapa" (antes um arraste ja salvava sem querer).
-  const [editMode, setEditMode] = useState(false);
-  const [infoNodeId, setInfoNodeId] = useState("");
-  // Desfazer: guarda o mapa antes de cada alteracao (ate 30 passos).
-  const historyRef = useRef<TopologyState[]>([]);
-  const [historyCount, setHistoryCount] = useState(0);
-  const dragStateRef = useRef<{ id: string; x: number; y: number; moved: boolean }>({ id: "", x: 0, y: 0, moved: false });
-  const ipByAddress = new Map(ipDetails.items.map((item) => [item.ip, item]));
-
-  function remember() {
-    historyRef.current = [...historyRef.current.slice(-29), topology];
-    setHistoryCount(historyRef.current.length);
-  }
-
-  function change(update: (current: TopologyState) => TopologyState) {
-    remember();
-    onChange(update);
-  }
-
-  function undo() {
-    const previous = historyRef.current.pop();
-    setHistoryCount(historyRef.current.length);
-    if (previous) onChange(() => previous);
-  }
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (!editMode) return;
-      if (event.key === "Escape" && linkMode) {
-        setLinkMode(false);
-        setSelectedNodeId("");
-      }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) {
-        event.preventDefault();
-        undo();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
-  const monitoredNodes = topology.nodes.filter((node) => node.ip);
-  const onlineNodes = monitoredNodes.filter((node) => topologyNodeStatus(node, ipByAddress, pingResults).tone === "online").length;
-  const downNodes = monitoredNodes.filter((node) => topologyNodeStatus(node, ipByAddress, pingResults).tone === "offline");
-  const infoNode = topology.nodes.find((node) => node.id === infoNodeId) || null;
-  const infoStatus = infoNode ? topologyNodeStatus(infoNode, ipByAddress, pingResults) : null;
-  const infoPing = infoNode?.ip ? pingResults[infoNode.ip] : undefined;
-  const ipSignature = monitoredNodes.map((node) => node.ip).sort().join("|");
-
-  async function refreshTopologyPing() {
-    const ips = monitoredNodes.map((node) => node.ip).filter(Boolean);
-    if (!ips.length) return;
-
-    setPingLoading(true);
-    setPingError("");
-
-    try {
-      const payload = await adRequest<{ items: TopologyPingResult[] }>("/api/topology/ping", {
-        method: "POST",
-        body: { ips },
-      });
-      setPingResults(Object.fromEntries((payload.items || []).map((item) => [item.ip, item])));
-      await onRefreshIps();
-    } catch (error) {
-      setPingError(error instanceof Error ? error.message : "Nao foi possivel executar ping.");
-    } finally {
-      setPingLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    refreshTopologyPing();
-    const interval = window.setInterval(refreshTopologyPing, 10000);
-    return () => window.clearInterval(interval);
-  }, [ipSignature]);
-
-  function addNetwork(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!networkForm.name.trim() || !networkForm.cidr.trim()) return;
-
-    change((current) => ({
-      ...current,
-      networks: [...current.networks, { ...networkForm, id: makeTopologyId("net") }],
-    }));
-    setNetworkForm(emptyTopologyNetwork());
-    setActivePanel(null);
-  }
-
-  function addNode(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!nodeForm.name.trim()) return;
-
-    change((current) => ({
-      ...current,
-      nodes: [...current.nodes, { ...nodeForm, id: makeTopologyId("node") }],
-    }));
-    setNodeForm(emptyTopologyNode());
-    setActivePanel(null);
-  }
-
-  function updateNode(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!nodeForm.id || !nodeForm.name.trim()) return;
-
-    change((current) => ({
-      ...current,
-      nodes: current.nodes.map((node) => node.id === nodeForm.id ? { ...nodeForm } : node),
-    }));
-    setNodeForm(emptyTopologyNode());
-    setActivePanel(null);
-  }
-
-  function openNodeEditor(node: TopologyNode) {
-    setNodeForm({ ...node });
-    setActivePanel("editNode");
-  }
-
-  // Remover pede confirmacao e pode ser desfeito (o mapa salva sozinho logo em seguida).
-  function removeNetwork(id: string) {
-    const network = topology.networks.find((entry) => entry.id === id);
-    if (!window.confirm(`Remover a rede "${network?.name || id}" do mapa? Dá para desfazer com "Desfazer" (Ctrl+Z).`)) return;
-    change((current) => ({
-      ...current,
-      networks: current.networks.filter((entry) => entry.id !== id),
-    }));
-  }
-
-  function removeNode(id: string) {
-    const node = topology.nodes.find((entry) => entry.id === id);
-    const linkCount = topology.links.filter((link) => link.from === id || link.to === id).length;
-    if (!window.confirm(`Remover "${node?.name || id}"${linkCount ? ` e as ${linkCount} ligações dele` : ""}? Dá para desfazer com "Desfazer" (Ctrl+Z).`)) return false;
-    change((current) => ({
-      ...current,
-      nodes: current.nodes.filter((entry) => entry.id !== id),
-      links: current.links.filter((link) => link.from !== id && link.to !== id),
-    }));
-    return true;
-  }
-
-  function removeLink(id: string) {
-    if (!window.confirm("Remover esta ligação do mapa? Dá para desfazer com \"Desfazer\" (Ctrl+Z).")) return;
-    change((current) => ({
-      ...current,
-      links: current.links.filter((link) => link.id !== id),
-    }));
-  }
-
-  function updateNodePosition(nodeId: string, clientX: number, clientY: number) {
-    const rect = mapRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const x = Math.max(4, Math.min(96, ((clientX - rect.left) / rect.width) * 100));
-    const y = Math.max(5, Math.min(95, ((clientY - rect.top) / rect.height) * 100));
-
-    onChange((current) => ({
-      ...current,
-      nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 } : node),
-    }));
-  }
-
-  function handleNodeClick(node: TopologyNode) {
-    // Modo ver: clique mostra o cartao do equipamento (IP, ping, rede), sem editar nada.
-    if (!editMode) {
-      setInfoNodeId(node.id);
-      setActivePanel(null);
-      return;
-    }
-    if (!linkMode) {
-      if (!dragStateRef.current.moved) {
-        openNodeEditor(node);
-      }
-      return;
-    }
-
-    if (!selectedNodeId) {
-      setSelectedNodeId(node.id);
-      return;
-    }
-
-    if (selectedNodeId === node.id) {
-      setSelectedNodeId("");
-      return;
-    }
-
-    const fromNode = topology.nodes.find((item) => item.id === selectedNodeId);
-    const label = linkMedium === "fibra" ? "Fibra" : linkMedium === "wan" ? "WAN" : linkMedium === "utp" ? "Cabo de rede" : "Trunk";
-
-    change((current) => ({
-      ...current,
-      links: [
-        ...current.links,
-        {
-          id: makeTopologyId("link"),
-          from: selectedNodeId,
-          to: node.id,
-          label: fromNode ? `${label}: ${fromNode.name} / ${node.name}` : label,
-          medium: linkMedium,
-        },
-      ],
-    }));
-    setSelectedNodeId("");
-  }
-
-  function handleNodePointerDown(event: React.PointerEvent<HTMLButtonElement>, node: TopologyNode) {
-    if (linkMode || !editMode) return;
-    setDraggingNodeId(node.id);
-    dragStateRef.current = { id: node.id, x: event.clientX, y: event.clientY, moved: false };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function handleNodePointerMove(event: React.PointerEvent<HTMLButtonElement>, node: TopologyNode) {
-    if (draggingNodeId !== node.id || linkMode || !editMode) return;
-    const dragState = dragStateRef.current;
-    if (!dragState.moved && (Math.abs(event.clientX - dragState.x) > 4 || Math.abs(event.clientY - dragState.y) > 4)) {
-      // Um arraste inteiro vira um passo do "Desfazer".
-      remember();
-      dragStateRef.current = { ...dragState, moved: true };
-    }
-    if (dragStateRef.current.moved) updateNodePosition(node.id, event.clientX, event.clientY);
-  }
-
-  function handleNodePointerUp(event: React.PointerEvent<HTMLButtonElement>) {
-    if (draggingNodeId) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    setDraggingNodeId("");
-  }
-
-  return (
-    <section className="topology-page topology-canvas-page">
-      <div className="topology-toolbar">
-        <div className="topology-toolbar-title">
-          <p className="eyebrow">Mapa e monitoramento</p>
-          <h1>Topologia</h1>
-        </div>
-        <div className="topology-toolbar-actions">
-          {editMode ? (
-            <div className="topology-toolbar-group">
-              <button className="primary-action" type="button" onClick={() => {
-                setNodeForm(emptyTopologyNode());
-                setActivePanel("node");
-              }}>
-                <Plus size={16} />
-                Equipamento
-              </button>
-              <button className="secondary-action" type="button" onClick={() => setActivePanel("network")}>
-                <Network size={16} />
-                Rede
-              </button>
-              <button className={linkMode ? "primary-action" : "secondary-action"} type="button" aria-pressed={linkMode} onClick={() => {
-                setLinkMode((value) => !value);
-                setSelectedNodeId("");
-              }}>
-                <Zap size={16} />
-                Nova ligação
-              </button>
-              <select className="topology-medium-select" aria-label="Tipo de cabo da ligação" value={linkMedium} onChange={(event) => setLinkMedium(event.target.value as TopologyLink["medium"])} disabled={!linkMode}>
-                <option value="fibra">Fibra</option>
-                <option value="utp">Cabo de rede</option>
-                <option value="trunk">Trunk</option>
-                <option value="wan">WAN</option>
-              </select>
-              <button className="secondary-action" type="button" onClick={undo} disabled={!historyCount} title="Desfazer a última alteração (Ctrl+Z)">
-                <RotateCcw size={16} />
-                Desfazer{historyCount ? ` (${historyCount})` : ""}
-              </button>
-              <button className="primary-action" type="button" onClick={() => {
-                setEditMode(false);
-                setLinkMode(false);
-                setSelectedNodeId("");
-                setActivePanel(null);
-              }}>
-                <CheckCircle2 size={16} />
-                Concluir edição
-              </button>
-            </div>
-          ) : (
-            <div className="topology-toolbar-group">
-              <button className="secondary-action" type="button" onClick={() => {
-                setEditMode(true);
-                setInfoNodeId("");
-              }}>
-                <Settings size={16} />
-                Editar mapa
-              </button>
-            </div>
-          )}
-          <div className="topology-toolbar-group">
-            <span className="topology-live-pill">{onlineNodes}/{monitoredNodes.length} online</span>
-            <span className="topology-save-pill" role="status">{saveStatus.replace(/ no arquivo| do arquivo/, "")}</span>
-            {pingError ? <span className="topology-error-pill">{pingError}</span> : null}
-            <button className="secondary-action" type="button" onClick={refreshTopologyPing} disabled={pingLoading}>
-              <RefreshCw size={16} />
-              {pingLoading ? "Testando ping..." : "Ping agora"}
-            </button>
-            <button className="secondary-action" type="button" onClick={() => setActivePanel("monitor")}>
-              <Activity size={16} />
-              Monitor
-            </button>
-            <button className="secondary-action" type="button" onClick={() => setActivePanel("inventory")}>
-              <Server size={16} />
-              Inventário
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className={`topology-map topology-map-full ${linkMode ? "link-mode" : ""} ${editMode ? "is-editing" : "is-viewing"}`} ref={mapRef} aria-label="Mapa visual da topologia">
-        <svg className="topology-links" viewBox="0 0 100 100" preserveAspectRatio="none">
-          {topology.links.map((link) => {
-            const from = topology.nodes.find((node) => node.id === link.from);
-            const to = topology.nodes.find((node) => node.id === link.to);
-            if (!from || !to) return null;
-            const linkStatus = topologyLinkStatus(from, to, ipByAddress, pingResults);
-            return <line key={link.id} className={`topology-line ${link.medium} ${linkStatus}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
-          })}
-          {topology.links.map((link) => {
-            const from = topology.nodes.find((node) => node.id === link.from);
-            const to = topology.nodes.find((node) => node.id === link.to);
-            if (!from || !to) return null;
-            const linkStatus = topologyLinkStatus(from, to, ipByAddress, pingResults);
-            if (linkStatus !== "online") return null;
-
-            return (
-              <circle className="topology-flow-dot online" key={`${link.id}-flow`} r="0.72">
-                <animateMotion dur={link.medium === "fibra" ? "1.8s" : "2.4s"} path={`M ${from.x} ${from.y} L ${to.x} ${to.y}`} repeatCount="indefinite" />
-              </circle>
-            );
-          })}
-        </svg>
-
-        {topology.links.map((link) => {
-          const from = topology.nodes.find((node) => node.id === link.from);
-          const to = topology.nodes.find((node) => node.id === link.to);
-          if (!from || !to) return null;
-          return (
-            <span className={`topology-link-label ${link.medium}`} key={`${link.id}-label`} style={{ left: `${(from.x + to.x) / 2}%`, top: `${(from.y + to.y) / 2}%` }}>
-              {{ utp: "Cabo", fibra: "Fibra", trunk: "Trunk", wan: "WAN" }[link.medium] || link.medium}
-            </span>
-          );
-        })}
-
-        {topology.nodes.map((node) => {
-          const status = topologyNodeStatus(node, ipByAddress, pingResults);
-          const Icon = topologyNodeIcon(node.type);
-          const isSelected = selectedNodeId === node.id;
-          return (
-            <button
-              className={`topology-node ${status.tone} ${isSelected ? "selected" : ""}`}
-              key={node.id}
-              style={{ left: `${node.x}%`, top: `${node.y}%` }}
-              type="button"
-              title={`${node.name} - ${status.label}`}
-              onClick={() => handleNodeClick(node)}
-              onPointerDown={(event) => handleNodePointerDown(event, node)}
-              onPointerMove={(event) => handleNodePointerMove(event, node)}
-              onPointerUp={handleNodePointerUp}
-            >
-              {node.imageUrl ? (
-                <span className="topology-node-media">
-                  <img alt="" className="topology-node-image" draggable={false} src={node.imageUrl} />
-                </span>
-              ) : <Icon size={20} />}
-              <strong>{node.name}</strong>
-              <span>{node.ip || node.vendor}</span>
-              <small>{status.label}</small>
-            </button>
-          );
-        })}
-
-        <div className="topology-canvas-hint">
-          {!editMode
-            ? "Clique num equipamento para ver IP e ping. Para mover ou editar, use \"Editar mapa\"."
-            : linkMode
-              ? selectedNodeId
-                ? "Clique no equipamento de destino para criar a ligação. Esc cancela."
-                : "Clique no equipamento de origem. Esc cancela."
-              : "Arraste para organizar; clique para editar. Cada alteração é salva sozinha e pode ser desfeita."}
-        </div>
-
-        {/* O que esta fora do ar, sempre a vista (antes so no painel Monitor). */}
-        {!editMode && downNodes.length ? (
-          <aside className="topology-down-list" aria-label="Equipamentos fora do ar">
-            <strong><XCircle size={16} /> Fora do ar ({downNodes.length})</strong>
-            <ul>
-              {downNodes.slice(0, 8).map((node) => (
-                <li key={node.id}>
-                  <button type="button" onClick={() => setInfoNodeId(node.id)}>
-                    <span>{node.name}</span>
-                    <small>{node.ip}</small>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {downNodes.length > 8 ? <small>+ {downNodes.length - 8} fora do ar</small> : null}
-          </aside>
-        ) : null}
-
-        {infoNode ? (
-          <aside className="topology-info-card" aria-label={`Equipamento ${infoNode.name}`}>
-            <header>
-              <strong>{infoNode.name}</strong>
-              <button className="icon-button" type="button" onClick={() => setInfoNodeId("")} aria-label="Fechar">
-                <X size={16} />
-              </button>
-            </header>
-            <StatusPill label={infoStatus?.tone === "online" ? "Online" : infoStatus?.tone === "offline" ? "Offline" : infoStatus?.label || "Sem dados"} />
-            <dl>
-              <dt>IP</dt>
-              <dd>{infoNode.ip || "—"}</dd>
-              <dt>Ping</dt>
-              <dd>{infoPing?.latencyMs !== null && infoPing?.latencyMs !== undefined ? `${infoPing.latencyMs} ms` : infoStatus?.label || "—"}</dd>
-              <dt>Fabricante</dt>
-              <dd>{infoNode.vendor || "—"}</dd>
-              <dt>Rede</dt>
-              <dd>{infoNode.network || "—"}</dd>
-            </dl>
-            <button className="secondary-action" type="button" onClick={() => {
-              setEditMode(true);
-              setInfoNodeId("");
-              openNodeEditor(infoNode);
-            }}>
-              <Settings size={14} />
-              Editar
-            </button>
-          </aside>
-        ) : null}
-      </div>
-
-      {activePanel ? (
-        <div className="topology-drawer">
-          <header className="modal-header">
-            <div>
-              <p className="eyebrow">Topologia</p>
-              <h2>{activePanel === "node" ? "Adicionar equipamento" : activePanel === "editNode" ? "Editar equipamento" : activePanel === "network" ? "Adicionar rede" : activePanel === "monitor" ? "Monitoramento de IP" : "Inventario"}</h2>
-            </div>
-            <button className="icon-button" type="button" onClick={() => setActivePanel(null)} aria-label="Fechar painel">
-              <X size={18} />
-            </button>
-          </header>
-
-          {activePanel === "network" ? (
-            <form className="topology-form" onSubmit={addNetwork}>
-              <label>
-                <span>Nome da rede</span>
-                <input value={networkForm.name} onChange={(event) => setNetworkForm({ ...networkForm, name: event.target.value })} placeholder="Ex: Catracas Trielo" />
-              </label>
-              <label>
-                <span>Rede / CIDR</span>
-                <input value={networkForm.cidr} onChange={(event) => setNetworkForm({ ...networkForm, cidr: event.target.value })} placeholder="192.168.9.0/24" />
-              </label>
-              <div className="topology-form-grid">
-                <label>
-                  <span>VLAN</span>
-                  <input value={networkForm.vlan} onChange={(event) => setNetworkForm({ ...networkForm, vlan: event.target.value })} placeholder="9" />
-                </label>
-                <label>
-                  <span>Gateway</span>
-                  <input value={networkForm.gateway} onChange={(event) => setNetworkForm({ ...networkForm, gateway: event.target.value })} placeholder="192.168.9.1" />
-                </label>
-              </div>
-              <label>
-                <span>Observacoes</span>
-                <textarea value={networkForm.notes} onChange={(event) => setNetworkForm({ ...networkForm, notes: event.target.value })} placeholder="Detalhes da rede" />
-              </label>
-              <button className="primary-action" type="submit">
-                <Plus size={16} />
-                Adicionar rede
-              </button>
-            </form>
-          ) : null}
-
-          {activePanel === "node" || activePanel === "editNode" ? (
-            <form className="topology-form" onSubmit={activePanel === "editNode" ? updateNode : addNode}>
-              <label>
-                <span>Nome do equipamento</span>
-                <input value={nodeForm.name} onChange={(event) => setNodeForm({ ...nodeForm, name: event.target.value })} placeholder="Ex: Switch Catracas" />
-              </label>
-              <div className="topology-form-grid">
-                <label>
-                  <span>Tipo</span>
-                  <select value={nodeForm.type} onChange={(event) => setNodeForm({ ...nodeForm, type: event.target.value as TopologyNodeType })}>
-                    <option value="switch">Switch</option>
-                    <option value="core">Core</option>
-                    <option value="firewall">Firewall</option>
-                    <option value="fiber">Fibra</option>
-                    <option value="server">Servidor</option>
-                    <option value="internet">Internet</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Fabricante</span>
-                  <input value={nodeForm.vendor} onChange={(event) => setNodeForm({ ...nodeForm, vendor: event.target.value })} placeholder="UniFi, Fortinet..." />
-                </label>
-              </div>
-              <label>
-                <span>IP de gerenciamento</span>
-                <input value={nodeForm.ip} onChange={(event) => setNodeForm({ ...nodeForm, ip: event.target.value })} placeholder="10.200.1.10" />
-              </label>
-              <label>
-                <span>Imagem do equipamento</span>
-                <input value={nodeForm.imageUrl} onChange={(event) => setNodeForm({ ...nodeForm, imageUrl: event.target.value })} placeholder="URL da imagem ou logo" />
-              </label>
-              <label>
-                <span>Rede</span>
-                <select value={nodeForm.network} onChange={(event) => setNodeForm({ ...nodeForm, network: event.target.value })}>
-                  <option value="">Selecionar rede</option>
-                  {topology.networks.map((network) => (
-                    <option key={network.id} value={network.name}>{network.name}</option>
-                  ))}
-                </select>
-              </label>
-              <button className="primary-action" type="submit">
-                <Save size={16} />
-                {activePanel === "editNode" ? "Salvar equipamento" : "Adicionar equipamento"}
-              </button>
-              {activePanel === "editNode" ? (
-                <button className="danger-action" type="button" onClick={() => {
-                  if (!removeNode(nodeForm.id)) return;
-                  setActivePanel(null);
-                  setNodeForm(emptyTopologyNode());
-                }}>
-                  <Trash2 size={16} />
-                  Remover equipamento
-                </button>
-              ) : null}
-            </form>
-          ) : null}
-
-          {activePanel === "monitor" ? (
-            <div className="topology-monitor-list">
-              {topology.nodes.filter((node) => node.ip).map((node) => {
-                const status = topologyNodeStatus(node, ipByAddress, pingResults);
-                const ping = pingResults[node.ip];
-                return (
-                  <div className={`topology-monitor-row ${status.tone}`} key={node.id}>
-                    <div>
-                      <strong>{node.name}</strong>
-                      <span>{node.ip} - {node.vendor}</span>
-                    </div>
-                    <small>{ping?.latencyMs !== null && ping?.latencyMs !== undefined ? `${ping.latencyMs} ms` : status.label}</small>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-
-          {activePanel === "inventory" ? (
-            <TopologyInventory topology={topology} onRemoveNetwork={removeNetwork} onRemoveNode={removeNode} onRemoveLink={removeLink} />
-          ) : null}
-        </div>
-      ) : null}
-    </section>
-  );
 }
 
 function AdDashboard({
@@ -8700,152 +7969,6 @@ function ouPathFromDn(dn: string | undefined) {
 
 function parentDnFromDn(dn: string | undefined) {
   return (dn || "").split(",").slice(1).join(",");
-}
-
-function makeTopologyId(prefix: string) {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function emptyTopologyNetwork(): TopologyNetwork {
-  return {
-    id: "",
-    name: "",
-    cidr: "",
-    vlan: "",
-    gateway: "",
-    notes: "",
-  };
-}
-
-function emptyTopologyNode(): TopologyNode {
-  return {
-    id: "",
-    name: "",
-    type: "switch",
-    ip: "",
-    vendor: "UniFi",
-    network: "",
-    imageUrl: "",
-    x: 50,
-    y: 50,
-  };
-}
-
-function topologyNodeIcon(type: TopologyNodeType) {
-  if (type === "firewall") return Shield;
-  if (type === "core") return Router;
-  if (type === "fiber") return RadioTower;
-  if (type === "server") return Server;
-  if (type === "internet") return Zap;
-  return Wifi;
-}
-
-function topologyNodeStatus(node: TopologyNode, ipByAddress: Map<string, IpInventoryItem>, pingResults: Record<string, TopologyPingResult> = {}) {
-  if (!node.ip) {
-    return { tone: "idle" as const, label: "Sem IP configurado" };
-  }
-
-  const ping = pingResults[node.ip];
-  if (ping) {
-    return {
-      tone: ping.ok ? ("online" as const) : ("offline" as const),
-      label: ping.ok ? (ping.latencyMs !== null ? `${ping.latencyMs} ms` : "Ping OK") : "Sem ping",
-    };
-  }
-
-  const inventoryItem = ipByAddress.get(node.ip);
-  if (!inventoryItem) {
-    return { tone: "unknown" as const, label: "IP fora do inventario" };
-  }
-
-  // IP "Livre" no inventario e divergencia de cadastro, nao queda: atencao, nao vermelho.
-  if (inventoryItem.status === "Livre") {
-    return { tone: "warn" as const, label: "IP marcado como livre no inventário" };
-  }
-
-  if (inventoryItem.status === "Reservado") {
-    return { tone: "warn" as const, label: "IP reservado" };
-  }
-
-  return { tone: "online" as const, label: inventoryItem.name || "IP em uso" };
-}
-
-function topologyLinkStatus(
-  from: TopologyNode,
-  to: TopologyNode,
-  ipByAddress: Map<string, IpInventoryItem>,
-  pingResults: Record<string, TopologyPingResult> = {},
-) {
-  const fromStatus = topologyNodeStatus(from, ipByAddress, pingResults).tone;
-  const toStatus = topologyNodeStatus(to, ipByAddress, pingResults).tone;
-
-  if (fromStatus === "idle" || toStatus === "idle") return "idle";
-  if (fromStatus === "offline" || toStatus === "offline") return "offline";
-  if (fromStatus === "warn" || toStatus === "warn" || fromStatus === "unknown" || toStatus === "unknown") return "warn";
-  return "online";
-}
-
-function TopologyInventory({
-  topology,
-  onRemoveNetwork,
-  onRemoveNode,
-  onRemoveLink,
-}: {
-  topology: TopologyState;
-  onRemoveNetwork: (id: string) => void;
-  onRemoveNode: (id: string) => void;
-  onRemoveLink: (id: string) => void;
-}) {
-  return (
-    <div className="topology-inventory-grid">
-      <section>
-        <h3>Redes</h3>
-        {topology.networks.map((network) => (
-          <div className="topology-inventory-row" key={network.id}>
-            <div>
-              <strong>{network.name}</strong>
-              <span>{network.cidr} - VLAN {network.vlan || "-"}</span>
-            </div>
-            <button type="button" onClick={() => onRemoveNetwork(network.id)} title="Remover rede" aria-label="Remover rede">
-              <Trash2 size={15} />
-            </button>
-          </div>
-        ))}
-      </section>
-      <section>
-        <h3>Equipamentos</h3>
-        {topology.nodes.map((node) => (
-          <div className="topology-inventory-row" key={node.id}>
-            <div>
-              <strong>{node.name}</strong>
-              <span>{node.vendor} - {node.ip || "sem IP"}</span>
-            </div>
-            <button type="button" onClick={() => onRemoveNode(node.id)} title="Remover equipamento" aria-label="Remover equipamento">
-              <Trash2 size={15} />
-            </button>
-          </div>
-        ))}
-      </section>
-      <section>
-        <h3>Ligacoes</h3>
-        {topology.links.map((link) => {
-          const from = topology.nodes.find((node) => node.id === link.from)?.name || "Origem";
-          const to = topology.nodes.find((node) => node.id === link.to)?.name || "Destino";
-          return (
-            <div className="topology-inventory-row" key={link.id}>
-              <div>
-                <strong>{from} / {to}</strong>
-                <span>{link.label || link.medium}</span>
-              </div>
-              <button type="button" onClick={() => onRemoveLink(link.id)} title="Remover ligacao" aria-label="Remover ligacao">
-                <Trash2 size={15} />
-              </button>
-            </div>
-          );
-        })}
-      </section>
-    </div>
-  );
 }
 
 function requiredUserValue(user: AdUser, field: keyof EditableUserProfile) {

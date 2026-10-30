@@ -1826,322 +1826,6 @@ h1 {
   align-items: start;
 }
 
-.topology-page {
-  display: grid;
-  gap: 14px;
-}
-
-.workspace-topology {
-  height: 100vh;
-  overflow: hidden;
-  padding: 12px;
-}
-
-.workspace-topology .topbar {
-  display: none;
-}
-
-.topology-canvas-page {
-  position: relative;
-  grid-template-rows: auto minmax(0, 1fr);
-  height: calc(100vh - 24px);
-  min-height: 620px;
-  gap: 12px;
-}
-
-.topology-toolbar {
-  display: grid;
-  grid-template-columns: minmax(180px, 0.3fr) minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
-  min-height: 66px;
-  padding: 10px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 12px 26px rgba(2, 29, 73, 0.06);
-}
-
-.topology-toolbar-title h1 {
-  color: #080f1d;
-  font-size: 25px;
-  line-height: 1.05;
-}
-
-.topology-toolbar-title .eyebrow {
-  margin-bottom: 4px;
-}
-
-.topology-toolbar-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  min-width: 0;
-}
-
-.topology-toolbar-group {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  min-width: 0;
-}
-
-.topology-medium-select {
-  min-height: 40px;
-  min-width: 132px;
-  padding: 0 12px;
-  color: var(--heading);
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-}
-
-.topology-live-pill,
-.topology-save-pill,
-.topology-error-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 700;
-  border-radius: 999px;
-}
-
-.topology-live-pill {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
-}
-
-.topology-save-pill {
-  color: #4d5565;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-}
-
-.topology-error-pill {
-  color: var(--danger-ink);
-  background: var(--danger-soft);
-}
-
-.topology-kpis {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.topology-layout {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 14px;
-  align-items: start;
-}
-
-.topology-map-panel {
-  grid-column: span 8;
-}
-
-.topology-monitor-panel {
-  grid-column: span 4;
-}
-
-.topology-form-panel {
-  grid-column: span 4;
-}
-
-.topology-inventory-panel {
-  grid-column: 1 / -1;
-}
-
-.topology-map {
-  position: relative;
-  min-height: 460px;
-  overflow: hidden;
-  background:
-    linear-gradient(rgba(224, 23, 131, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(224, 23, 131, 0.05) 1px, transparent 1px),
-    var(--surface-2);
-  background-size: 28px 28px;
-  border: 1px solid #dce2ed;
-  border-radius: 8px;
-}
-
-.topology-map-full {
-  min-height: 0;
-  height: 100%;
-  cursor: grab;
-  box-shadow: inset 0 0 0 1px rgba(2, 29, 73, 0.03);
-}
-
-.topology-map-full.link-mode {
-  cursor: crosshair;
-}
-
-.topology-links {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.topology-line {
-  stroke: #727d94;
-  stroke-width: 0.45;
-  stroke-linecap: round;
-  opacity: 0.8;
-}
-
-.topology-line.fibra {
-  stroke: var(--info);
-  stroke-dasharray: 2 1.5;
-}
-
-.topology-line.wan {
-  stroke: var(--warning);
-}
-
-.topology-line.trunk {
-  stroke: var(--accent);
-  stroke-width: 0.75;
-}
-
-.topology-line.idle {
-  stroke: var(--muted-3);
-  opacity: 0.5;
-}
-
-.topology-line.warn {
-  stroke: var(--warning);
-}
-
-.topology-line.offline {
-  stroke: var(--danger);
-  animation: topologyCableAlarm 0.9s ease-in-out infinite;
-}
-
-.topology-flow-dot {
-  fill: var(--accent);
-  opacity: 0.95;
-  pointer-events: none;
-}
-
-.topology-link-label {
-  position: absolute;
-  z-index: 2;
-  padding: 3px 8px;
-  transform: translate(-50%, -50%);
-  color: #132343;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.topology-node {
-  position: absolute;
-  display: grid;
-  min-width: 154px;
-  min-height: 118px;
-  padding: 12px;
-  transform: translate(-50%, -50%);
-  color: var(--heading);
-  background: var(--surface);
-  border: 1px solid #dae0ec;
-  border-top: 4px solid var(--accent);
-  border-radius: 8px;
-  box-shadow: 0 16px 32px rgba(2, 29, 73, 0.09);
-  touch-action: none;
-  user-select: none;
-  z-index: 3;
-}
-
-.topology-node svg {
-  color: var(--brand-ink);
-}
-
-.topology-node-media {
-  display: grid;
-  width: 100%;
-  height: 46px;
-  place-items: center;
-  margin-bottom: 2px;
-}
-
-.topology-node-image {
-  width: 94px;
-  height: 44px;
-  object-fit: contain;
-  user-select: none;
-  pointer-events: none;
-}
-
-.topology-node.offline {
-  border-top-color: var(--danger);
-  background: var(--danger-soft);
-  animation: topologyDeviceAlarm 0.9s ease-in-out infinite;
-}
-
-.topology-node.idle {
-  border-top-color: var(--muted-3);
-  background: var(--surface);
-}
-
-.topology-node.warn,
-.topology-node.unknown {
-  border-top-color: var(--warning);
-  background: var(--warning-soft);
-}
-
-.topology-node.selected {
-  outline: 3px solid rgba(224, 23, 131, 0.28);
-  box-shadow: 0 0 0 6px rgba(224, 23, 131, 0.12), 0 16px 32px rgba(2, 29, 73, 0.09);
-}
-
-.topology-node strong,
-.topology-node span,
-.topology-node small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.topology-node strong {
-  margin-top: 7px;
-  font-size: 14px;
-}
-
-.topology-node span {
-  color: var(--muted-2);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.topology-node small {
-  margin-top: 3px;
-  color: var(--brand-ink);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.topology-node.offline small {
-  color: var(--danger-ink);
-}
-
-.topology-node.idle small {
-  color: var(--muted);
-}
-
-.topology-node.warn small,
-.topology-node.unknown small {
-  color: var(--warning-ink);
-}
-
 @keyframes topologyCableAlarm {
   0%,
   100% {
@@ -2164,162 +1848,6 @@ h1 {
   50% {
     box-shadow: 0 0 0 5px rgba(208, 43, 63, 0.18), 0 18px 38px rgba(208, 43, 63, 0.22);
   }
-}
-
-.topology-canvas-hint {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  z-index: 4;
-  padding: 8px 12px;
-  color: #4d5565;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.topology-drawer {
-  position: absolute;
-  top: 84px;
-  right: 16px;
-  z-index: 20;
-  width: min(460px, calc(100% - 32px));
-  max-height: calc(100% - 104px);
-  overflow: auto;
-  padding: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 24px 60px rgba(2, 29, 73, 0.18);
-}
-
-.topology-drawer .topology-inventory-grid {
-  grid-template-columns: 1fr;
-}
-
-.topology-refresh {
-  width: 100%;
-  margin-bottom: 10px;
-}
-
-.topology-monitor-list,
-.topology-form,
-.topology-inventory-grid {
-  display: grid;
-  gap: 10px;
-}
-
-.topology-monitor-row,
-.topology-inventory-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-height: 52px;
-  padding: 10px;
-  background: var(--surface-2);
-  border: 1px solid #e1e6ef;
-  border-left: 4px solid var(--accent);
-  border-radius: 8px;
-}
-
-.topology-monitor-row.offline {
-  border-left-color: var(--danger);
-}
-
-.topology-monitor-row.warn,
-.topology-monitor-row.unknown {
-  border-left-color: var(--warning);
-}
-
-.topology-monitor-row strong,
-.topology-monitor-row span,
-.topology-monitor-row small,
-.topology-inventory-row strong,
-.topology-inventory-row span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.topology-monitor-row strong,
-.topology-inventory-row strong {
-  color: var(--heading);
-  font-size: 13px;
-}
-
-.topology-monitor-row span,
-.topology-monitor-row small,
-.topology-inventory-row span {
-  color: var(--muted-2);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.topology-form input,
-.topology-form select,
-.topology-form textarea {
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
-  color: var(--heading);
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-}
-
-.topology-form label,
-.topology-form label span {
-  display: block;
-}
-
-.topology-form label span {
-  margin-bottom: 6px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.topology-form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.topology-form textarea {
-  min-height: 74px;
-  padding-top: 10px;
-  resize: vertical;
-}
-
-.topology-position-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.topology-inventory-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.topology-inventory-grid h3 {
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-
-.topology-inventory-row button {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  color: var(--danger);
-  background: var(--danger-soft);
-  border: 1px solid var(--danger-border);
-  border-radius: 8px;
 }
 
 .ad-users-panel,
@@ -5793,12 +5321,6 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .topology-kpis,
-  .topology-layout,
-  .topology-inventory-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .tv-attention-panel,
   .tv-links-panel,
   .tv-ad-panel,
@@ -5864,20 +5386,6 @@ h1 {
 
   .topbar-actions {
     width: 100%;
-  }
-
-  .topology-toolbar {
-    grid-template-columns: 1fr;
-  }
-
-  .topology-toolbar-actions {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .topology-toolbar-group {
-    justify-content: flex-start;
-    flex-wrap: wrap;
   }
 
   .search-box {
@@ -5961,33 +5469,6 @@ h1 {
 
   .workspace {
     padding: 16px;
-  }
-
-  .workspace-topology {
-    height: auto;
-    min-height: 100vh;
-    overflow: visible;
-    padding: 10px;
-  }
-
-  .topology-canvas-page {
-    height: auto;
-    min-height: calc(100vh - 20px);
-  }
-
-  .topology-map-full {
-    min-height: 620px;
-  }
-
-  .topology-drawer {
-    position: fixed;
-    inset: 86px 10px 10px;
-    width: auto;
-    max-height: none;
-  }
-
-  .topology-form-grid {
-    grid-template-columns: 1fr;
   }
 
   .kpi-grid,
@@ -14641,7 +14122,6 @@ thead .ac-person-col {
   color: var(--danger-ink);
 }
 
-
 /* ---------- AD: uma tabela com abas e uma busca ---------- */
 .ad-main-panel {
   display: grid;
@@ -15057,117 +14537,6 @@ thead .ac-person-col {
 }
 
 /* ---------- Topologia: modo ver/editar, fora do ar e cartao do equipamento ---------- */
-.topology-map.is-viewing .topology-node {
-  cursor: pointer;
-}
-
-.topology-map.is-editing {
-  outline: 2px dashed var(--accent);
-  outline-offset: -2px;
-}
-
-.topology-map.is-editing .topology-node {
-  cursor: grab;
-}
-
-.topology-down-list,
-.topology-info-card {
-  position: absolute;
-  z-index: 5;
-  display: grid;
-  gap: 8px;
-  max-width: 280px;
-  padding: 12px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 12px 30px rgba(2, 29, 73, 0.15);
-}
-
-.topology-down-list {
-  top: 14px;
-  right: 14px;
-  border-left: 4px solid var(--danger);
-}
-
-.topology-down-list > strong {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--danger-ink);
-}
-
-.topology-down-list ul {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.topology-down-list button {
-  display: flex;
-  width: 100%;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 4px 6px;
-  color: var(--heading);
-  font: inherit;
-  text-align: left;
-  background: none;
-  border: 0;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.topology-down-list button:hover {
-  background: var(--surface-2);
-}
-
-.topology-down-list small {
-  color: var(--muted);
-}
-
-.topology-info-card {
-  right: 14px;
-  bottom: 14px;
-  min-width: 240px;
-}
-
-.topology-info-card header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.topology-info-card header strong {
-  color: var(--heading);
-}
-
-.topology-info-card .icon-button {
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
-}
-
-.topology-info-card dl {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 12px;
-  margin: 0;
-  font-size: 13px;
-}
-
-.topology-info-card dt {
-  color: var(--muted);
-}
-
-.topology-info-card dd {
-  margin: 0;
-  color: var(--heading);
-  font-weight: 600;
-}
 
 /* ---------- Intune: Windows 10 -> 11 ---------- */
 .win10-panel {
@@ -15719,6 +15088,337 @@ p.win10-effects {
   background: none;
   border: 0;
   cursor: pointer;
+}
+
+/* ---------- Topologia UniFi (arvore como a da controladora) ---------- */
+.ut-page {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ut-bar {
+  display: grid;
+  gap: 10px;
+}
+
+.ut-stats,
+.ut-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: 13px;
+}
+
+.ut-tools .pm-search {
+  flex: 1 1 280px;
+}
+
+.ut-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success-ink);
+  font-weight: 700;
+}
+
+.ut-live i {
+  width: 8px;
+  height: 8px;
+  background: var(--success);
+  border-radius: 50%;
+}
+
+.ut-live.stale {
+  color: var(--warning-ink);
+}
+
+.ut-live.stale i {
+  background: var(--warning);
+}
+
+.ut-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--danger-ink);
+  font-weight: 700;
+}
+
+.ut-ok {
+  color: var(--success-ink);
+}
+
+.ut-source {
+  padding: 3px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.ut-source.down {
+  color: var(--danger-ink);
+  border-color: var(--danger-border);
+}
+
+.ut-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ut-zoom-value {
+  min-width: 52px;
+  padding: 6px 4px;
+  color: var(--heading);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.ut-canvas-wrap {
+  min-height: 420px;
+  max-height: calc(100vh - 250px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.ut-canvas {
+  position: relative;
+  padding: 16px;
+}
+
+.ut-stage {
+  position: relative;
+  transform-origin: 0 0;
+}
+
+.ut-lines {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+.ut-line {
+  stroke: var(--info);
+  stroke-width: 1.5;
+}
+
+.ut-line.slow {
+  stroke: var(--warning);
+  stroke-dasharray: 5 4;
+}
+
+.ut-line.down {
+  stroke: var(--danger);
+  stroke-dasharray: 5 4;
+}
+
+.ut-dot {
+  fill: var(--info);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+/* Caixinha da ligacao: porta no pai ⇄ porta no filho · velocidade */
+.ut-chip {
+  position: absolute;
+  z-index: 1;
+  padding: 1px 6px;
+  color: var(--info-ink);
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--surface);
+  border: 1px solid var(--info-border);
+  border-radius: 6px;
+  transform: translateX(-50%);
+  font-variant-numeric: tabular-nums;
+}
+
+.ut-chip.slow {
+  color: var(--warning-ink);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+
+.ut-chip.down {
+  color: var(--danger-ink);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.ut-node {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 2px;
+  width: 126px;
+  padding: 4px 2px;
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.ut-node:hover,
+.ut-node.selected {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.ut-node.selected {
+  border-color: var(--accent);
+}
+
+.ut-node.match {
+  border-color: var(--info);
+  box-shadow: 0 0 0 3px var(--info-soft);
+}
+
+.ut-node.dim {
+  opacity: 0.25;
+}
+
+.ut-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--brand-ink);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+}
+
+.ut-node.ap .ut-icon {
+  border-radius: 50%;
+}
+
+.ut-node.gateway .ut-icon {
+  color: var(--on-brand);
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.ut-node strong {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--heading);
+  font-size: 11.5px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ut-node small {
+  color: var(--muted-2);
+  font-size: 10.5px;
+}
+
+.ut-node.state-offline strong,
+.ut-node.state-offline small {
+  color: var(--danger-ink);
+}
+
+.ut-node.state-offline .ut-icon {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+.ut-node.state-warning .ut-icon,
+.ut-node.state-updating .ut-icon,
+.ut-node.state-pending .ut-icon {
+  color: var(--warning-ink);
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+}
+
+/* Gaveta do aparelho: sem fundo escuro, a arvore continua visivel. */
+.ut-drawer {
+  width: min(460px, 100vw);
+}
+
+.ut-uplink,
+.ut-path {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ut-path {
+  color: var(--muted);
+}
+
+.ut-link {
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.ut-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.ut-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ut-facts dd {
+  margin: 0;
+  color: var(--heading);
+  font-weight: 700;
+}
+
+.ut-ports {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.ut-ports th,
+.ut-ports td {
+  padding: 5px 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ut-ports th {
+  color: var(--muted);
+}
+
+.ut-ports td:nth-child(2),
+.ut-ports td:nth-child(3) {
+  white-space: nowrap;
+}
+
+.ut-ports tr.off td {
+  color: var(--muted-3);
 }
 
 /* Impressao (relatorio do inventario): so o conteudo, sem menu nem botoes. */

@@ -227,6 +227,7 @@ function reload() {
   resolved = resolveConfig();
   controllers = resolved.controllers.map((cfg) => new Controller(cfg));
   cache = null;
+  topologyByController.clear();
 }
 
 export function isUnifiConfigured() {
@@ -356,7 +357,21 @@ type RawDevice = {
   "system-stats"?: { cpu?: string | number; mem?: string | number };
   port_table?: RawPort[];
   radio_table_stats?: RawRadio[];
-  uplink?: { type?: string; speed?: number; uplink_device_name?: string; uplink_remote_port?: number; "tx_bytes-r"?: number; "rx_bytes-r"?: number };
+  uplink?: {
+    type?: string;
+    speed?: number;
+    max_speed?: number;
+    full_duplex?: boolean;
+    uplink_mac?: string;
+    uplink_device_name?: string;
+    uplink_remote_port?: number;
+    port_idx?: number;
+    "tx_bytes-r"?: number;
+    "rx_bytes-r"?: number;
+  };
+  // Ultima ligacao conhecida (aparelho fora do ar mantem o lugar na topologia).
+  last_uplink?: { uplink_mac?: string; uplink_remote_port?: number; port_idx?: number };
+  last_seen?: number;
 };
 
 type RawClient = { is_wired?: boolean; is_guest?: boolean; ap_mac?: string; essid?: string; radio?: string; satisfaction?: number };
@@ -593,7 +608,136 @@ async function loadController(controller: Controller): Promise<ControllerData> {
     }
   }
   data.satisfaction = satisfactionCount ? Math.round(satisfactionSum / satisfactionCount) : null;
+  rememberTopology(controller, loaded.flatMap(({ site, devices }) => devices.map((device) => ({ site: site.desc || site.name, device }))));
   return data;
+}
+
+/* ---------- Topologia (arvore de ligacoes, como a tela da controladora) ---------- */
+// Sai do mesmo stat/device do resumo acima: nenhuma chamada a mais na controladora.
+
+export type UnifiTopologyNode = {
+  id: string;
+  name: string;
+  type: "switch" | "ap" | "gateway" | "other";
+  model: string;
+  state: "online" | "offline" | "updating" | "warning" | "pending";
+  ip: string;
+  controller: string;
+  site: string;
+  clients: number;
+  portsUp: number;
+  portsTotal: number;
+  poeWatts: number;
+  txBps: number | null;
+  rxBps: number | null;
+  lastSeen: string;
+  version: string;
+  ports: { idx: number; name: string; up: boolean; speed: number; poeWatts: number }[];
+  external: boolean;
+};
+export type UnifiTopologyEdge = {
+  from: string;
+  to: string;
+  parentPort: number | null;
+  localPort: number | null;
+  speedMbps: number | null;
+  maxSeenMbps: number | null;
+  fullDuplex: boolean | null;
+  wireless: boolean;
+  lastKnown: boolean;
+};
+
+const topologyByController = new Map<string, { name: string; at: string; nodes: UnifiTopologyNode[]; edges: UnifiTopologyEdge[] }>();
+// Maior velocidade ja vista em cada ligacao (enquanto o portal esta no ar): mostra "1G (era 10G)".
+const maxSeenSpeed = new Map<string, number>();
+
+// Codigos de estado da UniFi: 1 conectado, 0 desconectado, 4/5 atualizando, 6 sem heartbeat; o resto e adocao.
+function topologyState(state?: number): UnifiTopologyNode["state"] {
+  if (state === 1) return "online";
+  if (state === 0) return "offline";
+  if (state === 4 || state === 5) return "updating";
+  if (state === 6) return "warning";
+  return "pending";
+}
+
+function rememberTopology(controller: Controller, devices: { site: string; device: RawDevice }[]) {
+  const nodes: UnifiTopologyNode[] = [];
+  const edges: UnifiTopologyEdge[] = [];
+  for (const { site, device } of devices) {
+    const mac = String(device.mac || "").toLowerCase();
+    if (!mac) continue;
+    const ports = (device.port_table || []).filter((port) => port.enable !== false);
+    nodes.push({
+      id: mac,
+      name: device.name || mac,
+      type: device.type === "usw" ? "switch" : device.type === "uap" ? "ap" : /^u(gw|dm|xg)/.test(device.type || "") ? "gateway" : "other",
+      model: device.model || "",
+      state: topologyState(device.state),
+      ip: device.ip || "",
+      controller: controller.cfg.name,
+      site,
+      clients: device.num_sta || 0,
+      portsUp: ports.filter((port) => port.up).length,
+      portsTotal: ports.length,
+      poeWatts: Math.round(ports.reduce((sum, port) => sum + (num(port.poe_power) || 0), 0) * 10) / 10,
+      txBps: bps(device["tx_bytes-r"] ?? device.uplink?.["rx_bytes-r"]),
+      rxBps: bps(device["rx_bytes-r"] ?? device.uplink?.["tx_bytes-r"]),
+      lastSeen: device.last_seen ? new Date(device.last_seen * 1000).toISOString() : "",
+      version: device.version || "",
+      ports: ports.map((port) => ({ idx: port.port_idx, name: port.name || "", up: Boolean(port.up), speed: port.speed || 0, poeWatts: num(port.poe_power) || 0 })),
+      external: false,
+    });
+    const live = device.uplink?.uplink_mac ? device.uplink : null;
+    const last = !live && device.last_uplink?.uplink_mac ? device.last_uplink : null;
+    const parent = String(live?.uplink_mac || last?.uplink_mac || "").toLowerCase();
+    if (!parent) continue;
+    const speed = live?.speed || null;
+    const key = `${parent}>${mac}`;
+    if (speed) maxSeenSpeed.set(key, Math.max(maxSeenSpeed.get(key) || 0, speed));
+    edges.push({
+      from: parent,
+      to: mac,
+      parentPort: (live || last)?.uplink_remote_port ?? null,
+      localPort: (live || last)?.port_idx ?? null,
+      speedMbps: speed,
+      maxSeenMbps: maxSeenSpeed.get(key) || null,
+      fullDuplex: live?.full_duplex ?? null,
+      wireless: /wireless|mesh/i.test(live?.type || ""),
+      lastKnown: Boolean(last),
+    });
+  }
+  topologyByController.set(controller.cfg.id, { name: controller.cfg.name, at: new Date().toISOString(), nodes, edges });
+}
+
+export async function getUnifiTopology() {
+  // Mesma leitura (e o mesmo cache de 15 s) do resumo; com a controladora fora, fica a ultima arvore boa.
+  const overview = await getUnifiOverview().catch(() => null);
+  const nodes = new Map<string, UnifiTopologyNode>();
+  const edges: UnifiTopologyEdge[] = [];
+  for (const entry of topologyByController.values()) {
+    for (const node of entry.nodes) nodes.set(node.id, node);
+    edges.push(...entry.edges);
+  }
+  // Pai fora da UniFi (ex.: o firewall): vira um no "externo" no topo.
+  for (const edge of edges) {
+    if (nodes.has(edge.from)) continue;
+    nodes.set(edge.from, { id: edge.from, name: "Gateway / firewall", type: "gateway", model: "fora da UniFi", state: "online", ip: "", controller: "", site: "", clients: 0, portsUp: 0, portsTotal: 0, poeWatts: 0, txBps: null, rxBps: null, lastSeen: "", version: "", ports: [], external: true });
+  }
+  const views = overview?.controllers || [];
+  return {
+    generatedAt: new Date().toISOString(),
+    sources: views.map((view) => ({
+      id: view.id,
+      name: view.name,
+      via: view.via,
+      ok: view.ok,
+      message: view.message,
+      at: topologyByController.get(view.id)?.at || "",
+      hasTopology: topologyByController.has(view.id),
+    })),
+    nodes: Array.from(nodes.values()),
+    edges,
+  };
 }
 
 /* ---------- Controladoras lidas pelo Zabbix ---------- */

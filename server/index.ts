@@ -127,7 +127,7 @@ import {
   updateIncident,
 } from "./defenderActions";
 import { allowTvKey, createTvKey, listTvKeys, revokeTvKey } from "./tvKeys";
-import { getUnifiSettings, saveUnifiSettings, testUnifi } from "./unifiClient";
+import { getUnifiSettings, getUnifiTopology, saveUnifiSettings, testUnifi } from "./unifiClient";
 import { createDevice, deleteDevice, listDevices, updateDevice } from "./devices";
 import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
 import { addAttachment, createContract, deleteContract, listContracts, readAttachment, removeAttachment, updateContract } from "./contractStore";
@@ -576,6 +576,9 @@ app.get("/api/topology", asyncRoute(async () => ({
   ok: true,
   topology: await getTopology(),
 })));
+
+// Arvore de ligacoes das controladoras UniFi (quem esta ligado em quem, porta e velocidade).
+app.get("/api/topology/unifi", asyncRoute(() => getUnifiTopology()));
 
 app.put("/api/topology", asyncRoute(async (req) => ({
   ok: true,
