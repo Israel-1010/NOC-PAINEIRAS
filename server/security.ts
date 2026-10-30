@@ -133,7 +133,7 @@ export function auditMutations(req: express.Request, res: express.Response, next
       status: res.statusCode,
       body: req.originalUrl.startsWith("/api/topology")
         ? "[topologia]"
-        : /\/images(\/|$|\?)/.test(req.originalUrl)
+        : /\/(images|files)(\/|$|\?)/.test(req.originalUrl)
           ? { imagem: String((req.body as { name?: unknown })?.name || "[imagem]"), tipo: String((req.body as { mimeType?: unknown })?.mimeType || "") }
           : redact(req.body),
     });

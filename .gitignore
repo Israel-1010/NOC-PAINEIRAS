@@ -3,7 +3,6 @@ dist
 .env
 .env.local
 npm-debug.log*
-data/*.json
 *.xlsx
-data/*.log
-data/*.tmp
+# Dados do portal (acessos, auditoria, contratos e anexos, inventario): ficam no volume, nunca no git.
+data/
