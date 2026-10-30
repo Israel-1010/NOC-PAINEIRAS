@@ -3323,6 +3323,8 @@ function Windows10Panel({ overview, error, isAdmin, onReload }: { overview: Wind
               <span>Para confirmar, digite o nome da máquina: <b>{action.item.deviceName}</b></span>
               <input value={confirmName} onChange={(event) => setConfirmName(event.target.value)} autoComplete="off" />
             </label>
+            {/* Erro dentro da janela: o aviso do painel fica atras dela e nao aparece. */}
+            {notice && !notice.ok ? <div className="form-error" role="alert">{notice.text}</div> : null}
             <div className="modal-footer-actions">
               <button className="secondary-action" type="button" onClick={closeAction}>Cancelar</button>
               <button

@@ -343,8 +343,9 @@ async function freshContext(id: string) {
   if (!overview.target?.groupId) throw new HttpError("Não há política de atualização para o Windows 11 atribuída a um grupo no Intune.", 503);
   if (overview.target.dynamic) throw new HttpError(`O grupo "${overview.target.groupName}" é dinâmico ou vem do AD: o NOC não consegue mudar os membros dele.`, 503);
   if (!overview.capabilities.groupWrite) throw new HttpError("Falta a permissão GroupMember.ReadWrite.All no app do portal (Entra ID → Registros de aplicativo → Permissões de API).", 403);
-  const devices = await requestAll<ManagedDevice>(`/deviceManagement/managedDevices?$filter=id eq '${id.replace(/'/g, "''")}'&$select=id,azureADDeviceId`);
-  return { overview, item, devices, groupId: overview.target.groupId, groupName: overview.target.groupName };
+  // Leitura direta: o Intune recusa (400) filtrar managedDevices por id.
+  const device = await request<ManagedDevice>("GET", `/deviceManagement/managedDevices/${encodeURIComponent(id)}?$select=id,azureADDeviceId`);
+  return { overview, item, devices: [device], groupId: overview.target.groupId, groupName: overview.target.groupName };
 }
 
 function checkReason(body: Record<string, unknown>, item: WindowsItem) {
