@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
   ClipboardCopy,
   Download,
   Eraser,
@@ -18,6 +19,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
+import { SurveyTab } from "./inventorySurvey";
 
 // Menu "Inventario de maquinas": uma linha por maquina cruzando AD, Entra, Intune, Defender e Milvus.
 // O cruzamento e as regras ficam no servidor (server/inventory.ts); aqui so filtra, mostra e exporta.
@@ -26,7 +28,7 @@ type SourceId = "ad" | "entra" | "intune" | "defender" | "milvus";
 type Source = { id: SourceId; label: string; state: "ok" | "down" | "off"; count: number; error: string; partial: boolean };
 type Kind = "estacao" | "servidor" | "mac" | "movel" | "outro";
 type WorkTab = "seguranca" | "limpeza" | "cadastro";
-type Tab = WorkTab | "todas" | "ignoradas" | "relatorio";
+type Tab = WorkTab | "levantamento" | "todas" | "ignoradas" | "relatorio";
 type Tone = "bad" | "warn" | "info" | "neutral";
 type CatalogItem = { code: string; tab: WorkTab; tone: Tone; label: string; needs: SourceId[]; action: string; suspended: boolean };
 type Exception = { key: string; code: string; reason: string; note: string; by: string; at: string; until: string | null };
@@ -119,7 +121,8 @@ const rowOpen = (open: () => void) => ({
 
 const activeIssues = (machine: Machine) => machine.issues.filter((issue) => !issue.ignored);
 
-export function InventoryDashboard({ onOpen }: { onOpen: (view: "ad" | "intune", term: string, tab?: string) => void }) {
+export function InventoryDashboard({ isAdmin, onOpen }: { isAdmin: boolean; onOpen: (view: "ad" | "intune", term: string, tab?: string) => void }) {
+  const [surveyCount, setSurveyCount] = useState<number | undefined>(undefined);
   const [data, setData] = useState<Inventory | null>(null);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -283,7 +286,7 @@ export function InventoryDashboard({ onOpen }: { onOpen: (view: "ad" | "intune",
           <button type="button" className="ct-secondary" onClick={() => load(true)} disabled={refreshing}>
             <RefreshCw size={15} className={refreshing ? "dg-spin" : ""} /> {refreshing ? "Lendo..." : "Atualizar"}
           </button>
-          {tab !== "relatorio" ? (
+          {tab !== "relatorio" && tab !== "levantamento" ? (
             <button type="button" className="ct-secondary" onClick={exportCsv} disabled={!rows.length}>
               <Download size={15} /> Exportar CSV
             </button>
@@ -306,11 +309,12 @@ export function InventoryDashboard({ onOpen }: { onOpen: (view: "ad" | "intune",
           ["seguranca", "Segurança", ShieldAlert],
           ["limpeza", "Limpeza", Eraser],
           ["cadastro", "Cadastro", Tags],
+          ["levantamento", "Levantamento", ClipboardCheck],
           ["todas", "Todas", List],
           ["ignoradas", "Ignoradas", EyeOff],
           ["relatorio", "Relatório", FileText],
         ] as [Tab, string, typeof ShieldAlert][]).map(([key, label, Icon]) => {
-          const count = key === "todas" ? data.machines.length : tabCounts[key];
+          const count = key === "todas" ? data.machines.length : key === "levantamento" ? surveyCount : tabCounts[key];
           return (
             <button
               key={key}
@@ -332,6 +336,8 @@ export function InventoryDashboard({ onOpen }: { onOpen: (view: "ad" | "intune",
 
       {tab === "relatorio" ? (
         <InventoryReport data={data} catalog={catalog} counts={counts} />
+      ) : tab === "levantamento" ? (
+        <SurveyTab isAdmin={isAdmin} onOpenMachine={setOpenKey} onCount={setSurveyCount} />
       ) : (
         <>
           {tab === "seguranca" && bitlockerPolicyMissing ? (

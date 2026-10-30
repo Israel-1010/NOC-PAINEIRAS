@@ -132,6 +132,7 @@ import { createDevice, deleteDevice, listDevices, updateDevice } from "./devices
 import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
 import { addAttachment, createContract, deleteContract, listContracts, readAttachment, removeAttachment, updateContract } from "./contractStore";
 import { addInventoryException, getInventory, removeInventoryException } from "./inventory";
+import { getSurvey, importSurveySheet } from "./inventorySurvey";
 import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
 import {
   addItemNote,
@@ -657,6 +658,9 @@ app.use("/api/inventory", requireAuth, requireViews(["inventory"]));
 app.get("/api/inventory", asyncRoute((req) => getInventory(req.query.refresh === "1")));
 app.post("/api/inventory/exceptions", asyncRoute((req) => addInventoryException(req.body || {}, req.res?.locals.user)));
 app.delete("/api/inventory/exceptions", asyncRoute((req) => removeInventoryException(String(req.query.machine || ""), String(req.query.code || ""))));
+// Levantamento: planilha de campo x AD x Intune, por tag. So o gestor importa a planilha.
+app.get("/api/inventory/survey", asyncRoute(() => getSurvey()));
+app.post("/api/inventory/survey/sheet", asyncRoute((req) => importSurveySheet(req.body || {}, req.res?.locals.user)));
 
 app.use("/api/contracts", requireAuth, requireViews(["contracts"]));
 app.get("/api/contracts", asyncRoute(async () => listContracts()));

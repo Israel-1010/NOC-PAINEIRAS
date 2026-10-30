@@ -15600,6 +15600,127 @@ p.win10-effects {
   }
 }
 
+/* Levantamento (planilha de campo x AD x Intune) */
+.inv-survey-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+
+.inv-survey-head p {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.inv-import {
+  gap: 12px;
+}
+
+.inv-import-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inv-import-head h3 {
+  margin: 0;
+}
+
+.inv-file,
+.inv-import-row label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.inv-import-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.inv-import select,
+.inv-file input {
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+
+.inv-file input {
+  padding: 6px 10px;
+}
+
+.inv-map {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.inv-map th,
+.inv-map td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.inv-map thead th {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inv-map tbody th {
+  width: 220px;
+  color: var(--heading);
+  font-weight: 600;
+}
+
+.inv-map select {
+  width: 100%;
+  max-width: 280px;
+}
+
+.inv-preview {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 12px 10px 28px;
+  font-size: 13px;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+
+.inv-warnings small {
+  display: block;
+  color: var(--warning-ink);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ct-table tbody tr.inv-row-static {
+  cursor: default;
+}
+
+.inv-collapse {
+  padding: 0;
+  color: var(--heading);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
 /* Impressao (relatorio do inventario): so o conteudo, sem menu nem botoes. */
 @media print {
   .sidebar,

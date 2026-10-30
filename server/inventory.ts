@@ -49,6 +49,7 @@ type DefenderInfo = { id: string; name: string; os: string; health: string; risk
 type MilvusInfo = { name: string; kind: string; os: string; user: string; ip: string; serial: string; model: string; lastSeen: string };
 type Exception = { key: string; code: IssueCode; reason: string; note: string; by: string; at: string; until: string | null };
 
+export type InventoryMachine = Machine;
 type Machine = {
   key: string;
   name: string;
@@ -356,12 +357,12 @@ function addIssues(machines: Machine[], sources: Awaited<ReturnType<typeof loadS
 }
 
 /* ---------- Excecoes ("ignorar com motivo") ---------- */
-const dataDir = path.resolve(process.cwd(), "data");
+export const dataDir = path.resolve(process.cwd(), "data");
 const exceptionsPath = path.join(dataDir, "inventory-exceptions.json");
 const historyPath = path.join(dataDir, "inventory-history.json");
 let writeQueue: Promise<unknown> = Promise.resolve();
 
-function readJson<T>(file: string, fallback: T): T {
+export function readJson<T>(file: string, fallback: T): T {
   try {
     return JSON.parse(fsSync.readFileSync(file, "utf8")) as T;
   } catch {
@@ -369,7 +370,7 @@ function readJson<T>(file: string, fallback: T): T {
   }
 }
 
-function writeJson(file: string, value: unknown) {
+export function writeJson(file: string, value: unknown) {
   const run = writeQueue.then(async () => {
     await fs.mkdir(dataDir, { recursive: true });
     const temp = `${file}.${process.pid}.tmp`;

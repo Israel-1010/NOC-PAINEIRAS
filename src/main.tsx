@@ -2052,7 +2052,7 @@ function App() {
         ) : activeView === "defender" ? (
           <DefenderDashboard />
         ) : activeView === "inventory" ? (
-          <InventoryDashboard onOpen={(view, term, tab) => openFiltered({ view, tab, term })} />
+          <InventoryDashboard isAdmin={Boolean(access?.isAdmin)} onOpen={(view, term, tab) => openFiltered({ view, tab, term })} />
         ) : activeView === "infra3d" ? (
           <React.Suspense fallback={<div className="view-loading">Carregando a infraestrutura 3D...</div>}>
             <InfraView />
