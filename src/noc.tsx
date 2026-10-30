@@ -1249,21 +1249,21 @@ function InternetPage({ data }: { data: NocData }) {
         {fw ? (
           <section className="noc-card">
             <h3><Zap size={20} /> Túneis VPN <small>{fw.tunnels.length - net.tunnelsDown.length}/{fw.tunnels.length} ativos</small></h3>
-            {net.tunnelsDown.length ? (
+            {/* Todos os tuneis, caidos primeiro (o servidor ja ordena); o que nao cabe vira "+N". */}
+            {fw.tunnels.length ? (
               <ul className="noc-tunnels">
-                {net.tunnelsDown.slice(0, 6).map((tunnel) => (
-                  <li key={tunnel.name} className="tone-critical">
-                    <XCircle size={16} />
+                {fw.tunnels.slice(0, 9).map((tunnel) => (
+                  <li key={tunnel.name} className={tunnel.up ? "tone-good" : "tone-critical"}>
+                    {tunnel.up ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
                     <strong>{tunnel.name}</strong>
-                    <span>Caído</span>
+                    <span>{tunnel.up ? (tunnel.total > 1 ? `${tunnel.up}/${tunnel.total} fases` : "Ativo") : "Caído"}</span>
                   </li>
                 ))}
-                {net.tunnelsDown.length > 6 ? <li className="noc-more">+ {net.tunnelsDown.length - 6} caídos</li> : null}
+                {fw.tunnels.length > 9 ? <li className="noc-more">+ {fw.tunnels.length - 9} túneis</li> : null}
               </ul>
             ) : (
-              <p className="noc-secalerts-ok"><CheckCircle2 size={20} /> Todos os {fw.tunnels.length} túneis ativos.</p>
+              <p className="noc-empty">Nenhum túnel VPN configurado no FortiGate.</p>
             )}
-            {net.tunnelsDown.length && fw.tunnels.length > net.tunnelsDown.length ? <small className="noc-faz-foot">{fw.tunnels.length - net.tunnelsDown.length} túneis ativos (não listados)</small> : null}
           </section>
         ) : null}
         <section className="noc-card noc-vpn-now">
