@@ -143,8 +143,9 @@ export type WindowsItem = {
 
 type Target = { profileId: string; profileName: string; version: string; groupId: string; groupName: string; dynamic: boolean; excludeGroupIds: string[] };
 
-export async function windowsCapabilities() {
-  const roles = await msRoles();
+// fresh: token novo, para enxergar permissao recem-concedida sem reiniciar o portal.
+export async function windowsCapabilities(fresh = false) {
+  const roles = await msRoles(undefined, fresh);
   const groupWrite = roles.some((role) => role === "GroupMember.ReadWrite.All" || role === "Group.ReadWrite.All");
   const sync = roles.includes("DeviceManagementManagedDevices.PrivilegedOperations.All");
   const missing = [
@@ -204,8 +205,10 @@ const excludedNames = () =>
 
 const daysSince = (iso: string) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 864e5) : 999);
 
-async function load() {
+async function load(fresh = false) {
   const warnings: string[] = [];
+  // Primeiro as permissoes (com "fresh", troca o token guardado antes das outras leituras).
+  const capabilities = await windowsCapabilities(fresh);
   const devices = await requestAll<ManagedDevice>(
     "/deviceManagement/managedDevices?$filter=operatingSystem eq 'Windows'&$select=id,deviceName,osVersion,model,manufacturer,userDisplayName,lastSyncDateTime,azureADDeviceId,freeStorageSpaceInBytes&$top=500",
   );
@@ -294,7 +297,7 @@ async function load() {
     totals,
     items,
     warnings,
-    capabilities: await windowsCapabilities(),
+    capabilities,
   };
 }
 
@@ -306,7 +309,7 @@ export function getWindowsOverview(refresh = false) {
     throw new HttpError("Intune não configurado no servidor (INTUNE_* ou SHAREPOINT_*).", 503);
   }
   if (!refresh && cache && Date.now() - cache.at < 10 * 60 * 1000) return cache.value;
-  const value = load();
+  const value = load(refresh);
   cache = { at: Date.now(), value };
   value.catch(() => {
     cache = null;

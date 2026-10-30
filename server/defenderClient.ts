@@ -13,9 +13,10 @@ export function isDefenderConfigured() {
 // Um token por recurso (Graph, API do Defender for Endpoint, Exchange Online).
 const tokens = new Map<string, { value: string; expiresAt: number }>();
 
-export async function msToken(scope = "https://graph.microsoft.com/.default") {
+// force: pede um token novo (o guardado nao traz permissao concedida depois que ele foi emitido).
+export async function msToken(scope = "https://graph.microsoft.com/.default", force = false) {
   const cached = tokens.get(scope);
-  if (cached && cached.expiresAt > Date.now() + 60000) return cached.value;
+  if (!force && cached && cached.expiresAt > Date.now() + 60000) return cached.value;
   const response = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(intuneConfig.tenantId!)}/oauth2/v2.0/token`, {
     method: "POST",
     signal: AbortSignal.timeout(20000),
@@ -34,9 +35,9 @@ export async function msToken(scope = "https://graph.microsoft.com/.default") {
 }
 
 // Permissoes (roles) que o token do recurso traz: usado para dizer o que falta configurar.
-export async function msRoles(scope?: string) {
+export async function msRoles(scope?: string, force = false) {
   try {
-    const value = await msToken(scope);
+    const value = await msToken(scope, force);
     return (JSON.parse(Buffer.from(value.split(".")[1], "base64url").toString()) as { roles?: string[] }).roles || [];
   } catch {
     return [];
