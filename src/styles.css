@@ -14972,3 +14972,199 @@ thead .ac-person-col {
     display: none;
   }
 }
+
+/* ---------- Gaveta lateral (cadastro/edicao sem tirar a lista da tela) ---------- */
+.side-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(2, 29, 73, 0.35);
+}
+
+.side-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(520px, 100vw);
+  padding: 20px 22px;
+  overflow-y: auto;
+  background: var(--surface);
+  box-shadow: -20px 0 60px rgba(2, 29, 73, 0.25);
+}
+
+.side-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.side-drawer-head h2 {
+  margin: 2px 0 0;
+  color: var(--heading);
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.side-drawer .snmp-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.side-drawer-danger {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.wifi-db-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wifi-db-state.bad {
+  color: var(--danger-ink);
+}
+
+.wifi-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.wifi-panel .wifi-form {
+  display: grid;
+  gap: 10px;
+}
+
+.wifi-panel .wifi-list,
+.side-drawer .wifi-form {
+  display: grid;
+  gap: 10px;
+}
+
+.snmp-device-meta .status-pill {
+  min-height: 24px;
+}
+
+/* ---------- Topologia: modo ver/editar, fora do ar e cartao do equipamento ---------- */
+.topology-map.is-viewing .topology-node {
+  cursor: pointer;
+}
+
+.topology-map.is-editing {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.topology-map.is-editing .topology-node {
+  cursor: grab;
+}
+
+.topology-down-list,
+.topology-info-card {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: 8px;
+  max-width: 280px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(2, 29, 73, 0.15);
+}
+
+.topology-down-list {
+  top: 14px;
+  right: 14px;
+  border-left: 4px solid var(--danger);
+}
+
+.topology-down-list > strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger-ink);
+}
+
+.topology-down-list ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.topology-down-list button {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 6px;
+  color: var(--heading);
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.topology-down-list button:hover {
+  background: var(--surface-2);
+}
+
+.topology-down-list small {
+  color: var(--muted);
+}
+
+.topology-info-card {
+  right: 14px;
+  bottom: 14px;
+  min-width: 240px;
+}
+
+.topology-info-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.topology-info-card header strong {
+  color: var(--heading);
+}
+
+.topology-info-card .icon-button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+}
+
+.topology-info-card dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.topology-info-card dt {
+  color: var(--muted);
+}
+
+.topology-info-card dd {
+  margin: 0;
+  color: var(--heading);
+  font-weight: 600;
+}

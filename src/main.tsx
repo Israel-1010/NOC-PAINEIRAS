@@ -47,6 +47,7 @@ import {
   Smartphone,
   Stethoscope,
   ChevronRight,
+  RotateCcw,
   Tv,
   UserCheck,
   Users,
@@ -2216,6 +2217,18 @@ function LoginPage({ onLogin }: { onLogin: (session: AuthSession) => void }) {
   );
 }
 
+// Fecha gaveta/modal com Esc enquanto estiver aberto.
+function useEscape(active: boolean, onEscape: () => void) {
+  useEffect(() => {
+    if (!active) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onEscape();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, onEscape]);
+}
+
 // Aba do AD a abrir quando o Inicio leva direto para os bloqueados.
 const AD_TAB_KEY = "rede-clube-ad-tab";
 
@@ -2632,10 +2645,52 @@ function TopologyDashboard({
   const [pingResults, setPingResults] = useState<Record<string, TopologyPingResult>>({});
   const [pingLoading, setPingLoading] = useState(false);
   const [pingError, setPingError] = useState("");
+  // Padrao e so ver: arrastar e editar exigem entrar em "Editar mapa" (antes um arraste ja salvava sem querer).
+  const [editMode, setEditMode] = useState(false);
+  const [infoNodeId, setInfoNodeId] = useState("");
+  // Desfazer: guarda o mapa antes de cada alteracao (ate 30 passos).
+  const historyRef = useRef<TopologyState[]>([]);
+  const [historyCount, setHistoryCount] = useState(0);
   const dragStateRef = useRef<{ id: string; x: number; y: number; moved: boolean }>({ id: "", x: 0, y: 0, moved: false });
   const ipByAddress = new Map(ipDetails.items.map((item) => [item.ip, item]));
+
+  function remember() {
+    historyRef.current = [...historyRef.current.slice(-29), topology];
+    setHistoryCount(historyRef.current.length);
+  }
+
+  function change(update: (current: TopologyState) => TopologyState) {
+    remember();
+    onChange(update);
+  }
+
+  function undo() {
+    const previous = historyRef.current.pop();
+    setHistoryCount(historyRef.current.length);
+    if (previous) onChange(() => previous);
+  }
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!editMode) return;
+      if (event.key === "Escape" && linkMode) {
+        setLinkMode(false);
+        setSelectedNodeId("");
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) {
+        event.preventDefault();
+        undo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   const monitoredNodes = topology.nodes.filter((node) => node.ip);
   const onlineNodes = monitoredNodes.filter((node) => topologyNodeStatus(node, ipByAddress, pingResults).tone === "online").length;
+  const downNodes = monitoredNodes.filter((node) => topologyNodeStatus(node, ipByAddress, pingResults).tone === "offline");
+  const infoNode = topology.nodes.find((node) => node.id === infoNodeId) || null;
+  const infoStatus = infoNode ? topologyNodeStatus(infoNode, ipByAddress, pingResults) : null;
+  const infoPing = infoNode?.ip ? pingResults[infoNode.ip] : undefined;
   const ipSignature = monitoredNodes.map((node) => node.ip).sort().join("|");
 
   async function refreshTopologyPing() {
@@ -2669,7 +2724,7 @@ function TopologyDashboard({
     event.preventDefault();
     if (!networkForm.name.trim() || !networkForm.cidr.trim()) return;
 
-    onChange((current) => ({
+    change((current) => ({
       ...current,
       networks: [...current.networks, { ...networkForm, id: makeTopologyId("net") }],
     }));
@@ -2681,7 +2736,7 @@ function TopologyDashboard({
     event.preventDefault();
     if (!nodeForm.name.trim()) return;
 
-    onChange((current) => ({
+    change((current) => ({
       ...current,
       nodes: [...current.nodes, { ...nodeForm, id: makeTopologyId("node") }],
     }));
@@ -2693,7 +2748,7 @@ function TopologyDashboard({
     event.preventDefault();
     if (!nodeForm.id || !nodeForm.name.trim()) return;
 
-    onChange((current) => ({
+    change((current) => ({
       ...current,
       nodes: current.nodes.map((node) => node.id === nodeForm.id ? { ...nodeForm } : node),
     }));
@@ -2706,23 +2761,31 @@ function TopologyDashboard({
     setActivePanel("editNode");
   }
 
+  // Remover pede confirmacao e pode ser desfeito (o mapa salva sozinho logo em seguida).
   function removeNetwork(id: string) {
-    onChange((current) => ({
+    const network = topology.networks.find((entry) => entry.id === id);
+    if (!window.confirm(`Remover a rede "${network?.name || id}" do mapa? Dá para desfazer com "Desfazer" (Ctrl+Z).`)) return;
+    change((current) => ({
       ...current,
-      networks: current.networks.filter((network) => network.id !== id),
+      networks: current.networks.filter((entry) => entry.id !== id),
     }));
   }
 
   function removeNode(id: string) {
-    onChange((current) => ({
+    const node = topology.nodes.find((entry) => entry.id === id);
+    const linkCount = topology.links.filter((link) => link.from === id || link.to === id).length;
+    if (!window.confirm(`Remover "${node?.name || id}"${linkCount ? ` e as ${linkCount} ligações dele` : ""}? Dá para desfazer com "Desfazer" (Ctrl+Z).`)) return false;
+    change((current) => ({
       ...current,
-      nodes: current.nodes.filter((node) => node.id !== id),
+      nodes: current.nodes.filter((entry) => entry.id !== id),
       links: current.links.filter((link) => link.from !== id && link.to !== id),
     }));
+    return true;
   }
 
   function removeLink(id: string) {
-    onChange((current) => ({
+    if (!window.confirm("Remover esta ligação do mapa? Dá para desfazer com \"Desfazer\" (Ctrl+Z).")) return;
+    change((current) => ({
       ...current,
       links: current.links.filter((link) => link.id !== id),
     }));
@@ -2742,6 +2805,12 @@ function TopologyDashboard({
   }
 
   function handleNodeClick(node: TopologyNode) {
+    // Modo ver: clique mostra o cartao do equipamento (IP, ping, rede), sem editar nada.
+    if (!editMode) {
+      setInfoNodeId(node.id);
+      setActivePanel(null);
+      return;
+    }
     if (!linkMode) {
       if (!dragStateRef.current.moved) {
         openNodeEditor(node);
@@ -2762,7 +2831,7 @@ function TopologyDashboard({
     const fromNode = topology.nodes.find((item) => item.id === selectedNodeId);
     const label = linkMedium === "fibra" ? "Fibra" : linkMedium === "wan" ? "WAN" : linkMedium === "utp" ? "Cabo de rede" : "Trunk";
 
-    onChange((current) => ({
+    change((current) => ({
       ...current,
       links: [
         ...current.links,
@@ -2779,19 +2848,21 @@ function TopologyDashboard({
   }
 
   function handleNodePointerDown(event: React.PointerEvent<HTMLButtonElement>, node: TopologyNode) {
-    if (linkMode) return;
+    if (linkMode || !editMode) return;
     setDraggingNodeId(node.id);
     dragStateRef.current = { id: node.id, x: event.clientX, y: event.clientY, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
   function handleNodePointerMove(event: React.PointerEvent<HTMLButtonElement>, node: TopologyNode) {
-    if (draggingNodeId !== node.id || linkMode) return;
+    if (draggingNodeId !== node.id || linkMode || !editMode) return;
     const dragState = dragStateRef.current;
-    if (Math.abs(event.clientX - dragState.x) > 4 || Math.abs(event.clientY - dragState.y) > 4) {
+    if (!dragState.moved && (Math.abs(event.clientX - dragState.x) > 4 || Math.abs(event.clientY - dragState.y) > 4)) {
+      // Um arraste inteiro vira um passo do "Desfazer".
+      remember();
       dragStateRef.current = { ...dragState, moved: true };
     }
-    updateNodePosition(node.id, event.clientX, event.clientY);
+    if (dragStateRef.current.moved) updateNodePosition(node.id, event.clientX, event.clientY);
   }
 
   function handleNodePointerUp(event: React.PointerEvent<HTMLButtonElement>) {
@@ -2809,39 +2880,64 @@ function TopologyDashboard({
           <h1>Topologia</h1>
         </div>
         <div className="topology-toolbar-actions">
-          <div className="topology-toolbar-group">
-            <button className="primary-action" type="button" onClick={() => {
-              setNodeForm(emptyTopologyNode());
-              setActivePanel("node");
-            }}>
-              <Plus size={16} />
-              Equipamento
-            </button>
-            <button className="secondary-action" type="button" onClick={() => setActivePanel("network")}>
-              <Network size={16} />
-              Rede
-            </button>
-            <button className={linkMode ? "primary-action" : "secondary-action"} type="button" onClick={() => {
-              setLinkMode((value) => !value);
-              setSelectedNodeId("");
-            }}>
-              <Zap size={16} />
-              Ligar
-            </button>
-            <select className="topology-medium-select" value={linkMedium} onChange={(event) => setLinkMedium(event.target.value as TopologyLink["medium"])} disabled={!linkMode}>
-              <option value="fibra">Fibra</option>
-              <option value="utp">Cabo de rede</option>
-              <option value="trunk">Trunk</option>
-              <option value="wan">WAN</option>
-            </select>
-          </div>
+          {editMode ? (
+            <div className="topology-toolbar-group">
+              <button className="primary-action" type="button" onClick={() => {
+                setNodeForm(emptyTopologyNode());
+                setActivePanel("node");
+              }}>
+                <Plus size={16} />
+                Equipamento
+              </button>
+              <button className="secondary-action" type="button" onClick={() => setActivePanel("network")}>
+                <Network size={16} />
+                Rede
+              </button>
+              <button className={linkMode ? "primary-action" : "secondary-action"} type="button" aria-pressed={linkMode} onClick={() => {
+                setLinkMode((value) => !value);
+                setSelectedNodeId("");
+              }}>
+                <Zap size={16} />
+                Nova ligação
+              </button>
+              <select className="topology-medium-select" aria-label="Tipo de cabo da ligação" value={linkMedium} onChange={(event) => setLinkMedium(event.target.value as TopologyLink["medium"])} disabled={!linkMode}>
+                <option value="fibra">Fibra</option>
+                <option value="utp">Cabo de rede</option>
+                <option value="trunk">Trunk</option>
+                <option value="wan">WAN</option>
+              </select>
+              <button className="secondary-action" type="button" onClick={undo} disabled={!historyCount} title="Desfazer a última alteração (Ctrl+Z)">
+                <RotateCcw size={16} />
+                Desfazer{historyCount ? ` (${historyCount})` : ""}
+              </button>
+              <button className="primary-action" type="button" onClick={() => {
+                setEditMode(false);
+                setLinkMode(false);
+                setSelectedNodeId("");
+                setActivePanel(null);
+              }}>
+                <CheckCircle2 size={16} />
+                Concluir edição
+              </button>
+            </div>
+          ) : (
+            <div className="topology-toolbar-group">
+              <button className="secondary-action" type="button" onClick={() => {
+                setEditMode(true);
+                setInfoNodeId("");
+              }}>
+                <Settings size={16} />
+                Editar mapa
+              </button>
+            </div>
+          )}
           <div className="topology-toolbar-group">
             <span className="topology-live-pill">{onlineNodes}/{monitoredNodes.length} online</span>
-            <span className="topology-save-pill">{saveStatus}</span>
+            <span className="topology-save-pill" role="status">{saveStatus.replace(/ no arquivo| do arquivo/, "")}</span>
             {pingError ? <span className="topology-error-pill">{pingError}</span> : null}
             <button className="secondary-action" type="button" onClick={refreshTopologyPing} disabled={pingLoading}>
               <RefreshCw size={16} />
-              {pingLoading ? "Pingando" : "Ping agora"}
+              {pingLoading ? "Testando ping..." : "Ping agora"}
             </button>
             <button className="secondary-action" type="button" onClick={() => setActivePanel("monitor")}>
               <Activity size={16} />
@@ -2849,13 +2945,13 @@ function TopologyDashboard({
             </button>
             <button className="secondary-action" type="button" onClick={() => setActivePanel("inventory")}>
               <Server size={16} />
-              Inventario
+              Inventário
             </button>
           </div>
         </div>
       </div>
 
-      <div className={`topology-map topology-map-full ${linkMode ? "link-mode" : ""}`} ref={mapRef} aria-label="Mapa visual da topologia">
+      <div className={`topology-map topology-map-full ${linkMode ? "link-mode" : ""} ${editMode ? "is-editing" : "is-viewing"}`} ref={mapRef} aria-label="Mapa visual da topologia">
         <svg className="topology-links" viewBox="0 0 100 100" preserveAspectRatio="none">
           {topology.links.map((link) => {
             const from = topology.nodes.find((node) => node.id === link.from);
@@ -2885,7 +2981,7 @@ function TopologyDashboard({
           if (!from || !to) return null;
           return (
             <span className={`topology-link-label ${link.medium}`} key={`${link.id}-label`} style={{ left: `${(from.x + to.x) / 2}%`, top: `${(from.y + to.y) / 2}%` }}>
-              {link.medium === "utp" ? "Cabo" : link.medium}
+              {{ utp: "Cabo", fibra: "Fibra", trunk: "Trunk", wan: "WAN" }[link.medium] || link.medium}
             </span>
           );
         })}
@@ -2919,8 +3015,62 @@ function TopologyDashboard({
         })}
 
         <div className="topology-canvas-hint">
-          {linkMode ? (selectedNodeId ? "Clique no destino para concluir a ligacao." : "Clique no equipamento de origem.") : "Arraste para organizar. Clique no equipamento para editar nome, tipo e IP."}
+          {!editMode
+            ? "Clique num equipamento para ver IP e ping. Para mover ou editar, use \"Editar mapa\"."
+            : linkMode
+              ? selectedNodeId
+                ? "Clique no equipamento de destino para criar a ligação. Esc cancela."
+                : "Clique no equipamento de origem. Esc cancela."
+              : "Arraste para organizar; clique para editar. Cada alteração é salva sozinha e pode ser desfeita."}
         </div>
+
+        {/* O que esta fora do ar, sempre a vista (antes so no painel Monitor). */}
+        {!editMode && downNodes.length ? (
+          <aside className="topology-down-list" aria-label="Equipamentos fora do ar">
+            <strong><XCircle size={16} /> Fora do ar ({downNodes.length})</strong>
+            <ul>
+              {downNodes.slice(0, 8).map((node) => (
+                <li key={node.id}>
+                  <button type="button" onClick={() => setInfoNodeId(node.id)}>
+                    <span>{node.name}</span>
+                    <small>{node.ip}</small>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {downNodes.length > 8 ? <small>+ {downNodes.length - 8} fora do ar</small> : null}
+          </aside>
+        ) : null}
+
+        {infoNode ? (
+          <aside className="topology-info-card" aria-label={`Equipamento ${infoNode.name}`}>
+            <header>
+              <strong>{infoNode.name}</strong>
+              <button className="icon-button" type="button" onClick={() => setInfoNodeId("")} aria-label="Fechar">
+                <X size={16} />
+              </button>
+            </header>
+            <StatusPill label={infoStatus?.tone === "online" ? "Online" : infoStatus?.tone === "offline" ? "Offline" : infoStatus?.label || "Sem dados"} />
+            <dl>
+              <dt>IP</dt>
+              <dd>{infoNode.ip || "—"}</dd>
+              <dt>Ping</dt>
+              <dd>{infoPing?.latencyMs !== null && infoPing?.latencyMs !== undefined ? `${infoPing.latencyMs} ms` : infoStatus?.label || "—"}</dd>
+              <dt>Fabricante</dt>
+              <dd>{infoNode.vendor || "—"}</dd>
+              <dt>Rede</dt>
+              <dd>{infoNode.network || "—"}</dd>
+            </dl>
+            <button className="secondary-action" type="button" onClick={() => {
+              setEditMode(true);
+              setInfoNodeId("");
+              openNodeEditor(infoNode);
+            }}>
+              <Settings size={14} />
+              Editar
+            </button>
+          </aside>
+        ) : null}
       </div>
 
       {activePanel ? (
@@ -3012,7 +3162,7 @@ function TopologyDashboard({
               </button>
               {activePanel === "editNode" ? (
                 <button className="danger-action" type="button" onClick={() => {
-                  removeNode(nodeForm.id);
+                  if (!removeNode(nodeForm.id)) return;
                   setActivePanel(null);
                   setNodeForm(emptyTopologyNode());
                 }}>
@@ -4272,10 +4422,22 @@ function WifiPortalDashboard() {
   const [kind, setKind] = useState<WifiKind>("associados");
   const [status, setStatus] = useState<WifiStatus>({ ok: false, configured: false, database: "wifi_portal", message: "Carregando MySQL..." });
   const [payload, setPayload] = useState<WifiListPayload | null>(null);
+  // O campo e a busca aplicada sao separados: consulta o banco so 400 ms depois de parar de digitar.
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [editingId, setEditingId] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [formSnapshot, setFormSnapshot] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearch(searchInput);
+      setPage(1);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -4335,26 +4497,41 @@ function WifiPortalDashboard() {
   function changeKind(nextKind: WifiKind) {
     setKind(nextKind);
     setPage(1);
+    setSearchInput("");
     setSearch("");
     setForm({});
     setEditingId("");
+    setDrawerOpen(false);
     setMessage("");
     setError("");
+  }
+
+  function openDrawer(nextForm: Record<string, unknown>, id: string) {
+    setForm(nextForm);
+    setFormSnapshot(JSON.stringify(nextForm));
+    setEditingId(id);
+    setMessage("");
+    setError("");
+    setDrawerOpen(true);
   }
 
   function newRecord() {
-    setForm(emptyWifiRecord(columns));
-    setEditingId("");
-    setMessage("");
-    setError("");
+    openDrawer(emptyWifiRecord(columns), "");
   }
 
   function editRecord(record: Record<string, unknown>) {
-    setForm({ ...record });
-    setEditingId(String(record[primaryKey] ?? ""));
-    setMessage("");
-    setError("");
+    openDrawer({ ...record }, String(record[primaryKey] ?? ""));
   }
+
+  // Fechar com campos alterados pergunta antes (antes, clicar em outra linha descartava o que foi digitado).
+  function closeDrawer() {
+    if (JSON.stringify(form) !== formSnapshot && !window.confirm("Descartar as alterações deste cadastro?")) return;
+    setDrawerOpen(false);
+    setEditingId("");
+  }
+
+  const recordName = (record: Record<string, unknown>) =>
+    String(record.nome ?? record.name ?? record.username ?? record.email ?? record[primaryKey] ?? "este cadastro");
 
   async function saveRecord(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4373,6 +4550,7 @@ function WifiPortalDashboard() {
       setMessage(result.message || "Registro salvo.");
       setEditingId("");
       setForm(emptyWifiRecord(columns));
+      setDrawerOpen(false);
       await loadWifi();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Nao foi possivel salvar registro WiFi.");
@@ -4383,6 +4561,7 @@ function WifiPortalDashboard() {
 
   async function removeRecord() {
     if (!editingId) return;
+    if (!window.confirm(`Remover ${recordName(form)} do Wi-Fi? A pessoa perde o acesso à rede e não dá para desfazer.`)) return;
     setSaving(true);
     setMessage("");
     setError("");
@@ -4392,6 +4571,7 @@ function WifiPortalDashboard() {
       setMessage(result.message || "Registro removido.");
       setEditingId("");
       setForm(emptyWifiRecord(columns));
+      setDrawerOpen(false);
       await loadWifi();
     } catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : "Nao foi possivel remover registro WiFi.");
@@ -4400,90 +4580,95 @@ function WifiPortalDashboard() {
     }
   }
 
+  useEscape(drawerOpen, closeDrawer);
+  const kindLabel = kind === "associados" ? "associado" : "colaborador";
+
   return (
     <>
-      <section className="kpi-grid" aria-label="Resumo WiFi">
-        <MetricCard icon={Wifi} label="MySQL" value={status.ok ? "Online" : "Offline"} detail={status.message} tone={status.ok ? "good" : "danger"} />
-        <MetricCard icon={Server} label="Base" value={status.database || "wifi_portal"} detail={status.configured ? "Configurada" : "Sem variaveis"} tone="calm" />
-        <MetricCard icon={Users} label={kind === "associados" ? "Associados" : "Colaboradores"} value={String(payload?.total || 0)} detail={payload ? `${payload.database}.${payload.table}` : "-"} tone="warn" />
-        <MetricCard icon={TableIcon} label="Campos" value={String(columns.length)} detail={primaryKey ? `Chave: ${primaryKey}` : "Schema dinamico"} tone="calm" />
-      </section>
-
       <section className="panel wifi-panel">
-        <PanelHeader
-          icon={Wifi}
-          title="Portal WiFi"
-          meta={loading ? "Carregando..." : payload?.hasMore ? `${payload.total}+ registros` : `${payload?.total || 0} registros`}
-          action={
+        <header className="ad-main-head">
+          <div className="ui-tabs" role="tablist" aria-label="Cadastros do Wi-Fi">
+            <button role="tab" aria-selected={kind === "associados"} className={kind === "associados" ? "active" : ""} type="button" onClick={() => changeKind("associados")}>
+              Associados
+            </button>
+            <button role="tab" aria-selected={kind === "colaboradores"} className={kind === "colaboradores" ? "active" : ""} type="button" onClick={() => changeKind("colaboradores")}>
+              Colaboradores
+            </button>
+          </div>
+          <div className="ad-main-actions">
+            {/* Estado do banco numa linha (no lugar de 4 KPIs tecnicos: MySQL, base, campos, chave). */}
+            <span className={`wifi-db-state ${status.ok ? "ok" : "bad"}`} title={status.message}>
+              {status.ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />} {status.ok ? "banco conectado" : "banco sem resposta"}
+              {payload ? ` · ${payload.hasMore ? `${payload.total}+` : payload.total} cadastros` : ""}
+            </span>
             <button className="secondary-action" type="button" onClick={loadWifi} disabled={loading}>
               <RefreshCw size={15} />
               Atualizar
             </button>
-          }
-        />
+            <button className="primary-action" type="button" onClick={newRecord} disabled={!columns.length}>
+              <Plus size={15} />
+              Novo {kindLabel}
+            </button>
+          </div>
+        </header>
 
-        <div className="wifi-submenu" role="tablist" aria-label="Cadastros WiFi">
-          <button className={kind === "associados" ? "active" : ""} type="button" onClick={() => changeKind("associados")}>
-            Associados
-          </button>
-          <button className={kind === "colaboradores" ? "active" : ""} type="button" onClick={() => changeKind("colaboradores")}>
-            Colaboradores
-          </button>
-        </div>
+        {error && !drawerOpen ? <div className="form-error" role="alert">{error}</div> : null}
+        {message && !drawerOpen ? <div className="form-success" role="status">{message}</div> : null}
 
-        {error ? <div className="form-error">{error}</div> : null}
-        {message ? <div className="form-success">{message}</div> : null}
+        <section className="wifi-list">
+          <DirectoryTools
+            value={searchInput}
+            onChange={setSearchInput}
+            page={page}
+            total={payload?.total || 0}
+            onPageChange={setPage}
+            placeholder="Buscar nome, e-mail, CPF, matrícula ou qualquer campo"
+            pageSizeOverride={payload?.pageSize || 20}
+          />
 
-        <div className="wifi-layout">
-          <section className="wifi-list">
-            <DirectoryTools
-              value={search}
-              onChange={(value) => {
-                setSearch(value);
-                setPage(1);
-              }}
-              page={page}
-              total={payload?.total || 0}
-              onPageChange={setPage}
-              placeholder="Pesquisar nome, e-mail, CPF, matricula ou qualquer campo"
-              pageSizeOverride={payload?.pageSize || 20}
-            />
-
-            <div className="wifi-table">
-              <div className="wifi-table-head" style={{ gridTemplateColumns: wifiGridTemplate(visibleColumns.length) }}>
-                {visibleColumns.map((column) => (
-                  <span key={column.name}>{column.name}</span>
-                ))}
-                <span>Acoes</span>
-              </div>
-              {(payload?.items || []).map((record, index) => {
-                const recordId = String(record[primaryKey] ?? index);
-                return (
-                  <button className="wifi-table-row" key={recordId} onClick={() => editRecord(record)} style={{ gridTemplateColumns: wifiGridTemplate(visibleColumns.length) }} type="button">
-                    {visibleColumns.map((column) => (
-                      <span key={column.name}>{formatWifiValue(record[column.name])}</span>
-                    ))}
-                    <strong>{editingId === String(record[primaryKey] ?? "") ? "Editando" : "Editar"}</strong>
-                  </button>
-                );
-              })}
-              {!payload?.items?.length ? (
-                <EmptyState title="Nenhum registro encontrado" detail="Use o formulario ao lado para inserir ou ajuste a pesquisa." />
-              ) : null}
+          <div className="wifi-table">
+            <div className="wifi-table-head" style={{ gridTemplateColumns: wifiGridTemplate(visibleColumns.length) }}>
+              {visibleColumns.map((column) => (
+                <span key={column.name}>{wifiFieldLabel(kind, column)}</span>
+              ))}
+              <span>Ações</span>
             </div>
-          </section>
+            {(payload?.items || []).map((record, index) => {
+              const recordId = String(record[primaryKey] ?? index);
+              return (
+                <button className="wifi-table-row" key={recordId} onClick={() => editRecord(record)} style={{ gridTemplateColumns: wifiGridTemplate(visibleColumns.length) }} type="button">
+                  {visibleColumns.map((column) => (
+                    <span key={column.name}>{formatWifiValue(record[column.name])}</span>
+                  ))}
+                  <strong>Abrir</strong>
+                </button>
+              );
+            })}
+            {!payload?.items?.length ? (
+              <EmptyState
+                title={loading ? "Carregando..." : search.trim() ? `Nada encontrado para "${search.trim()}"` : "Nenhum cadastro"}
+                detail={search.trim() ? "Confira a grafia ou limpe a busca." : `Use "Novo ${kindLabel}" para cadastrar.`}
+              />
+            ) : null}
+          </div>
+        </section>
+      </section>
 
-          <section className="wifi-editor">
-            <div className="wifi-editor-head">
+      {drawerOpen ? (
+        <>
+          <div className="side-drawer-backdrop" onClick={closeDrawer} />
+          <aside className="side-drawer" role="dialog" aria-modal="true" aria-label={editingId ? `Editar ${kindLabel}` : `Novo ${kindLabel}`}>
+            <header className="side-drawer-head">
               <div>
-                <p className="eyebrow">{editingId ? "Editar registro" : "Novo registro"}</p>
-                <h2>{kind === "associados" ? "Associado" : "Colaborador"}</h2>
+                <p className="eyebrow">{editingId ? `Editar ${kindLabel}` : `Novo ${kindLabel}`}</p>
+                <h2>{editingId ? recordName(form) : kind === "associados" ? "Associado" : "Colaborador"}</h2>
               </div>
-              <button className="secondary-action" type="button" onClick={newRecord}>
-                <Plus size={15} />
-                Novo
+              <button className="icon-button" type="button" onClick={closeDrawer} aria-label="Fechar">
+                <X size={18} />
               </button>
-            </div>
+            </header>
+
+            {error ? <div className="form-error" role="alert">{error}</div> : null}
 
             <form className="wifi-form" onSubmit={saveRecord}>
               {writableColumns.map((column) => (
@@ -4492,28 +4677,36 @@ function WifiPortalDashboard() {
                   <input
                     disabled={saving}
                     onChange={(event) => setForm((current) => ({ ...current, [column.name]: event.target.value }))}
-                    placeholder={column.type}
                     value={String(form[column.name] ?? "")}
                   />
                 </label>
               ))}
               {!writableColumns.length ? (
-                <EmptyState title="Tabela sem campos editaveis" detail="Confira permissoes e estrutura da tabela." />
+                <EmptyState title="Tabela sem campos editáveis" detail="Confira as permissões e a estrutura da tabela no banco." />
               ) : null}
               <div className="wifi-actions">
+                <button className="secondary-action" type="button" onClick={closeDrawer} disabled={saving}>
+                  Cancelar
+                </button>
                 <button className="primary-action" type="submit" disabled={saving || !writableColumns.length}>
                   <Save size={15} />
-                  Salvar
-                </button>
-                <button className="danger-action" type="button" onClick={removeRecord} disabled={saving || !editingId}>
-                  <Trash2 size={15} />
-                  Remover
+                  {saving ? "Salvando..." : "Salvar"}
                 </button>
               </div>
             </form>
-          </section>
-        </div>
-      </section>
+
+            {/* Remover separado de Salvar, no fim da gaveta. */}
+            {editingId ? (
+              <div className="side-drawer-danger">
+                <button className="danger-action" type="button" onClick={removeRecord} disabled={saving}>
+                  <Trash2 size={15} />
+                  Remover do Wi-Fi
+                </button>
+              </div>
+            ) : null}
+          </aside>
+        </>
+      ) : null}
     </>
   );
 }
@@ -4534,25 +4727,49 @@ function SnmpDashboard({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [testMetric, setTestMetric] = useState<SnmpMetric | null>(null);
+  // A lista vem primeiro; cadastrar/editar abre numa gaveta a direita (antes o formulario ocupava a tela).
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "offline" | "online" | "disabled">("all");
 
   const metricByDevice = new Map(snmpDetails.metrics.map((metric) => [metric.deviceId, metric]));
-  const filteredDevices = filterItems(snmpDetails.devices, search, (device) => {
+  const deviceState = (device: SnmpDevice) => {
     const metric = metricByDevice.get(device.id);
-    return [device.name, device.host, device.type, device.version, device.notes, metric?.sysName, metric?.sysDescr, metric?.message];
-  });
-  const pagedDevices = paginate(filteredDevices, page, 8);
+    return !device.enabled ? "disabled" : metric?.ok ? "online" : metric ? "offline" : "waiting";
+  };
+  const stateRank = { offline: 0, waiting: 1, online: 2, disabled: 3 } as const;
+  const counts = {
+    offline: snmpDetails.devices.filter((device) => deviceState(device) === "offline").length,
+    online: snmpDetails.devices.filter((device) => deviceState(device) === "online").length,
+    disabled: snmpDetails.devices.filter((device) => deviceState(device) === "disabled").length,
+  };
+  const filteredDevices = filterItems(
+    snmpDetails.devices.filter((device) => statusFilter === "all" || deviceState(device) === statusFilter),
+    search,
+    (device) => {
+      const metric = metricByDevice.get(device.id);
+      return [device.name, device.host, device.type, device.version, device.notes, metric?.sysName, metric?.sysDescr, metric?.message];
+    },
+  ).sort((a, b) => stateRank[deviceState(a)] - stateRank[deviceState(b)] || (a.name || a.host).localeCompare(b.name || b.host, "pt-BR", { numeric: true }));
+  const pagedDevices = paginate(filteredDevices, page);
 
   function editDevice(device: SnmpDevice) {
     setForm({ ...device });
     setMessage("");
     setError("");
     setTestMetric(metricByDevice.get(device.id) || null);
+    setDrawerOpen(true);
   }
 
   function newDevice() {
     setForm(emptySnmpDevice());
     setMessage("");
     setError("");
+    setTestMetric(null);
+    setDrawerOpen(true);
+  }
+
+  function closeDrawer() {
+    setDrawerOpen(false);
     setTestMetric(null);
   }
 
@@ -4569,6 +4786,7 @@ function SnmpDashboard({
       });
       setForm(payload.device);
       setMessage(payload.message || "Dispositivo SNMP salvo.");
+      setDrawerOpen(false);
       await onRefreshSnmp();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Nao foi possivel salvar o dispositivo SNMP.");
@@ -4667,14 +4885,15 @@ function SnmpDashboard({
   }
 
   async function removeDevice(device: SnmpDevice) {
+    if (!window.confirm(`Remover "${device.name || device.host}" (${device.host}) da coleta SNMP? Não dá para desfazer.`)) return;
     setSaving(true);
     setMessage("");
     setError("");
 
     try {
       await adRequest(`/api/snmp/devices/${encodeURIComponent(device.id)}`, { method: "DELETE" });
-      if (form.id === device.id) newDevice();
-      setMessage("Dispositivo removido.");
+      if (form.id === device.id) closeDrawer();
+      setMessage(`${device.name || device.host} removido da coleta.`);
       await onRefreshSnmp();
     } catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : "Nao foi possivel remover o dispositivo.");
@@ -4683,31 +4902,108 @@ function SnmpDashboard({
     }
   }
 
+  useEscape(drawerOpen, closeDrawer);
+  const stateLabel = { offline: "Offline", online: "Online", disabled: "Desativado", waiting: "Aguardando" } as const;
+  const pickStatus = (value: typeof statusFilter) => {
+    setStatusFilter(statusFilter === value ? "all" : value);
+    setPage(1);
+  };
+
   return (
     <>
-      <section className="kpi-grid" aria-label="Resumo SNMP">
-        <MetricCard icon={Signal} label="Dispositivos" value={String(snmpSummary.total)} detail={`${snmpSummary.enabled} habilitados`} tone="calm" />
-        <MetricCard icon={CheckCircle2} label="Online" value={String(snmpSummary.online)} detail="Responderam SNMP" tone="good" />
-        <MetricCard icon={XCircle} label="Offline" value={String(snmpSummary.offline)} detail="Sem resposta SNMP" tone={snmpSummary.offline ? "danger" : "calm"} />
-        <MetricCard icon={Clock3} label="Intervalo" value="60s" detail="Atualizacao da tela" tone="warn" />
+      <section className="intune-filter-board" aria-label="Filtrar equipamentos">
+        <IntuneFilterCard active={statusFilter === "all"} count={snmpSummary.total} icon={Signal} label="Todos" tone="calm" onClick={() => pickStatus("all")} />
+        <IntuneFilterCard active={statusFilter === "offline"} count={counts.offline} icon={XCircle} label="Offline" tone={counts.offline ? "danger" : "calm"} onClick={() => pickStatus("offline")} />
+        <IntuneFilterCard active={statusFilter === "online"} count={counts.online} icon={CheckCircle2} label="Online" tone="calm" onClick={() => pickStatus("online")} />
+        <IntuneFilterCard active={statusFilter === "disabled"} count={counts.disabled} icon={Clock3} label="Desativados" tone="calm" onClick={() => pickStatus("disabled")} />
       </section>
 
-      <section className="dashboard-grid snmp-dashboard-grid">
-        <section className="panel snmp-form-panel">
+      <section className="intune-main">
+        <section className="panel snmp-list-panel">
           <PanelHeader
-            icon={Signal}
-            title={form.id ? "Editar dispositivo" : "Novo dispositivo SNMP"}
-            meta={form.version === "3" ? "SNMPv3" : `SNMPv${form.version}`}
+            icon={Server}
+            title="Equipamentos coletados pelo portal"
+            meta={`${filteredDevices.length}/${snmpDetails.devices.length} · coleta a cada 60 s`}
             action={
-              <button className="secondary-action" type="button" onClick={newDevice}>
-                <Plus size={15} />
-                Novo
-              </button>
+              <div className="ad-main-actions">
+                <button className="secondary-action" type="button" onClick={collectAll} disabled={saving || !snmpDetails.devices.length}>
+                  <RefreshCw size={15} />
+                  Coletar todos
+                </button>
+                <button className="primary-action" type="button" onClick={newDevice}>
+                  <Plus size={15} />
+                  Novo equipamento
+                </button>
+              </div>
             }
           />
+          {error && !drawerOpen ? <div className="form-error" role="alert">{error}</div> : null}
+          {message && !drawerOpen ? <div className="form-success" role="status">{message}</div> : null}
+          <DirectoryTools
+            value={search}
+            onChange={(value) => {
+              setSearch(value);
+              setPage(1);
+            }}
+            page={page}
+            total={filteredDevices.length}
+            onPageChange={setPage}
+            placeholder="Buscar IP, nome, tipo ou descrição"
+          />
+          <div className="snmp-device-list">
+            {pagedDevices.map((device) => {
+              const metric = metricByDevice.get(device.id);
+              const state = deviceState(device);
+              const tone = state === "disabled" ? "idle" : state === "online" ? "online" : state === "offline" ? "offline" : "warn";
+              return (
+                <article className={`snmp-device-row ${tone}`} key={device.id}>
+                  <div>
+                    <strong>{device.name || device.host}</strong>
+                    <span>{device.host}:{device.port} · {device.type} · SNMPv{device.version}</span>
+                    <small>{metric?.sysName || metric?.message || "Ainda sem coleta"}</small>
+                  </div>
+                  <div className="snmp-device-meta">
+                    {/* Status escrito (nao so a cor da linha). */}
+                    <StatusPill label={stateLabel[state]} />
+                    <span>{metric?.latencyMs !== null && metric?.latencyMs !== undefined ? `${metric.latencyMs} ms` : ""}</span>
+                    <button className="secondary-action" type="button" onClick={() => collectDevice(device)} disabled={saving || !device.enabled} title="Coletar agora">
+                      <RefreshCw size={14} />
+                      Coletar
+                    </button>
+                    <button className="secondary-action" type="button" onClick={() => editDevice(device)}>
+                      <Settings size={14} />
+                      Editar
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            {!pagedDevices.length ? (
+              <div className="empty-state">
+                <strong>{snmpDetails.devices.length ? "Nenhum equipamento com esse filtro" : "Nenhum equipamento SNMP cadastrado"}</strong>
+                <span>{snmpDetails.devices.length ? "Limpe a busca ou o filtro." : "Cadastre o IP do Fortinet, UniFi ou switch para testar a coleta."}</span>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </section>
 
-          {error ? <div className="form-error">{error}</div> : null}
-          {message ? <div className="form-success">{message}</div> : null}
+      {drawerOpen ? (
+        <>
+          <div className="side-drawer-backdrop" onClick={closeDrawer} />
+          <aside className="side-drawer" role="dialog" aria-modal="true" aria-label={form.id ? "Editar equipamento SNMP" : "Novo equipamento SNMP"}>
+          <header className="side-drawer-head">
+            <div>
+              <p className="eyebrow">{form.version === "3" ? "SNMPv3" : `SNMPv${form.version}`}</p>
+              <h2>{form.id ? form.name || form.host : "Novo equipamento"}</h2>
+            </div>
+            <button className="icon-button" type="button" onClick={closeDrawer} aria-label="Fechar">
+              <X size={18} />
+            </button>
+          </header>
+
+          {error ? <div className="form-error" role="alert">{error}</div> : null}
+          {message ? <div className="form-success" role="status">{message}</div> : null}
 
           <form className="snmp-form" onSubmit={saveDevice}>
             <div className="snmp-form-grid">
@@ -4735,7 +5031,7 @@ function SnmpDashboard({
                 <input type="number" min={1} max={65535} value={form.port} onChange={(event) => setForm({ ...form, port: Number(event.target.value) })} />
               </label>
               <label>
-                <span>Versao</span>
+                <span>Versão</span>
                 <select value={form.version} onChange={(event) => setForm({ ...form, version: event.target.value as SnmpVersion })}>
                   <option value="2c">SNMP v2c</option>
                   <option value="1">SNMP v1</option>
@@ -4749,7 +5045,7 @@ function SnmpDashboard({
                 </label>
               ) : (
                 <label>
-                  <span>Usuario v3</span>
+                  <span>Usuário v3</span>
                   <input value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} placeholder="snmp-user" />
                 </label>
               )}
@@ -4782,7 +5078,7 @@ function SnmpDashboard({
                 </>
               ) : null}
               <label>
-                <span>Timeout ms</span>
+                <span>Tempo limite (ms)</span>
                 <input type="number" min={500} max={15000} value={form.timeoutMs} onChange={(event) => setForm({ ...form, timeoutMs: Number(event.target.value) })} />
               </label>
               <label>
@@ -4795,17 +5091,17 @@ function SnmpDashboard({
               <span>Coletar este dispositivo</span>
             </label>
             <label>
-              <span>Observacoes</span>
-              <textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Portas importantes, local fisico, link..." />
+              <span>Observações</span>
+              <textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Portas importantes, local físico, link..." />
             </label>
             <div className="snmp-actions">
               <button className="secondary-action" type="button" onClick={testDevice} disabled={saving || !form.host.trim()}>
                 <Activity size={15} />
                 Testar SNMP
               </button>
-              <button className="secondary-action" type="button" onClick={autoDetectVersion} disabled={saving || !form.host.trim() || form.version === "3"}>
+              <button className="secondary-action" type="button" onClick={autoDetectVersion} disabled={saving || !form.host.trim() || form.version === "3"} title="Testa v2c e depois v1">
                 <Signal size={15} />
-                Auto v2c/v1
+                Detectar versão
               </button>
               <button className="primary-action" type="submit" disabled={saving || !form.host.trim()}>
                 <Save size={15} />
@@ -4815,70 +5111,19 @@ function SnmpDashboard({
           </form>
 
           {testMetric ? <SnmpMetricPreview metric={testMetric} /> : null}
-        </section>
 
-        <section className="panel snmp-list-panel">
-          <PanelHeader
-            icon={Server}
-            title="Dispositivos monitorados"
-            meta={`${filteredDevices.length}/${snmpDetails.devices.length} dispositivos`}
-            action={
-              <button className="secondary-action" type="button" onClick={collectAll} disabled={saving || !snmpDetails.devices.length}>
-                <RefreshCw size={15} />
-                Coletar todos
+          {/* Remover fica separado, no fim da gaveta, longe de Salvar. */}
+          {form.id ? (
+            <div className="side-drawer-danger">
+              <button className="danger-action" type="button" onClick={() => removeDevice(form)} disabled={saving}>
+                <Trash2 size={14} />
+                Remover da coleta
               </button>
-            }
-          />
-          <DirectoryTools
-            value={search}
-            onChange={(value) => {
-              setSearch(value);
-              setPage(1);
-            }}
-            page={page}
-            total={filteredDevices.length}
-            onPageChange={setPage}
-            placeholder="Procurar IP, nome, tipo ou descricao"
-            pageSizeOverride={8}
-          />
-          <div className="snmp-device-list">
-            {pagedDevices.map((device) => {
-              const metric = metricByDevice.get(device.id);
-              const tone = !device.enabled ? "idle" : metric?.ok ? "online" : metric ? "offline" : "warn";
-              return (
-                <article className={`snmp-device-row ${tone}`} key={device.id}>
-                  <div>
-                    <strong>{device.name || device.host}</strong>
-                    <span>{device.host}:{device.port} - {device.type} - SNMPv{device.version}</span>
-                    <small>{metric?.sysName || metric?.message || "Ainda sem coleta"}</small>
-                  </div>
-                  <div className="snmp-device-meta">
-                    <span>{metric?.latencyMs !== null && metric?.latencyMs !== undefined ? `${metric.latencyMs} ms` : device.enabled ? "Aguardando" : "Desativado"}</span>
-                    <button className="secondary-action" type="button" onClick={() => collectDevice(device)} disabled={saving || !device.enabled}>
-                      <RefreshCw size={14} />
-                      Coletar
-                    </button>
-                    <button className="secondary-action" type="button" onClick={() => editDevice(device)}>
-                      <Settings size={14} />
-                      Editar
-                    </button>
-                    <button className="danger-action" type="button" onClick={() => removeDevice(device)} disabled={saving}>
-                      <Trash2 size={14} />
-                      Remover
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-            {!pagedDevices.length ? (
-              <div className="empty-state">
-                <strong>Nenhum dispositivo SNMP cadastrado</strong>
-                <span>Cadastre o IP do Fortinet, UniFi ou switch para testar a coleta.</span>
-              </div>
-            ) : null}
-          </div>
-        </section>
-      </section>
+            </div>
+          ) : null}
+          </aside>
+        </>
+      ) : null}
     </>
   );
 }
@@ -8111,15 +8356,34 @@ function formatWifiValue(value: unknown) {
   return String(value);
 }
 
+// Nomes de coluna do banco em portugues para a tela (o desconhecido vira "Nome Do Campo").
+const WIFI_FIELD_NAMES: Record<string, string> = {
+  nome: "Nome",
+  name: "Nome",
+  email: "E-mail",
+  mail: "E-mail",
+  cpf: "CPF",
+  matricula: "Matrícula",
+  telefone: "Telefone",
+  celular: "Celular",
+  status: "Status",
+  ativo: "Ativo",
+  created_at: "Criado em",
+  updated_at: "Atualizado em",
+  data_cadastro: "Cadastrado em",
+  senha: "Senha",
+  password: "Senha",
+};
+
 function wifiFieldLabel(kind: WifiKind, column: WifiColumn) {
+  const name = column.name.toLowerCase();
   if (kind === "colaboradores") {
-    const name = column.name.toLowerCase();
     if (name === "username") return "RE";
     if (name === "value") return "Senha";
     if (name === "attribute") return "Atributo";
   }
-
-  return column.name;
+  if (WIFI_FIELD_NAMES[name]) return WIFI_FIELD_NAMES[name];
+  return column.name.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function createUserFormFromDetails(details: AdUserDetails): CreateUserForm {
@@ -8218,8 +8482,9 @@ function topologyNodeStatus(node: TopologyNode, ipByAddress: Map<string, IpInven
     return { tone: "unknown" as const, label: "IP fora do inventario" };
   }
 
+  // IP "Livre" no inventario e divergencia de cadastro, nao queda: atencao, nao vermelho.
   if (inventoryItem.status === "Livre") {
-    return { tone: "offline" as const, label: "IP livre no inventario" };
+    return { tone: "warn" as const, label: "IP marcado como livre no inventário" };
   }
 
   if (inventoryItem.status === "Reservado") {
@@ -9072,8 +9337,8 @@ function ComplianceBar({
 // Cor pelo significado: verde ok/disponivel, ambar atencao, vermelho problema, azul informativo, cinza neutro.
 function statusTone(label: string) {
   const value = normalizeText(label);
-  if (/^(ativo|ativa|aprovado|executando|conforme|livre)$/.test(value)) return "good";
-  if (/bloquead|nao conforme|conflito|erro|falha/.test(value)) return "bad";
+  if (/^(ativo|ativa|aprovado|executando|conforme|livre|online)$/.test(value)) return "good";
+  if (/bloquead|nao conforme|conflito|erro|falha|offline/.test(value)) return "bad";
   if (/pendente|reservado|atencao|faltando/.test(value)) return "warn";
   if (/^usado$/.test(value)) return "info";
   return "neutral";
