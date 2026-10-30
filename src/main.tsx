@@ -44,6 +44,7 @@ import {
   HardDrive,
   Home,
   Mail,
+  MonitorSmartphone,
   Smartphone,
   Stethoscope,
   ChevronRight,
@@ -64,6 +65,7 @@ import { LinksDashboard } from "./links";
 import { NocWall } from "./noc";
 import { ContractsDashboard } from "./contracts";
 import { DefenderDashboard } from "./defender";
+import { InventoryDashboard } from "./inventory";
 
 // O 3D (three.js) so e baixado quando alguem abre a tela.
 const InfraView = React.lazy(() => import("./infra/InfraView"));
@@ -781,7 +783,7 @@ function getStoredView(): View {
   try {
     const value = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
     if (value === "tickets") return "milvusPortal";
-    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" || value === "noc" || value === "contracts" || value === "infra3d" || value === "defender" ? value : "tv";
+    return value === "ad" || value === "tv" || value === "topology" || value === "intune" || value === "office365" || value === "milvusPortal" || value === "ips" || value === "snmp" || value === "wifi" || value === "pop" || value === "projects" || value === "access" || value === "diagnostics" || value === "links" || value === "noc" || value === "contracts" || value === "infra3d" || value === "defender" || value === "inventory" ? value : "tv";
   } catch {
     return "tv";
   }
@@ -1153,6 +1155,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
   {
     title: "Usuários e dispositivos",
     items: [
+      { label: "Inventário de máquinas", icon: MonitorSmartphone, view: "inventory" },
       { label: "Active Directory", icon: Users, view: "ad" },
       { label: "Office 365", icon: Mail, view: "office365" },
       { label: "Intune", icon: Smartphone, view: "intune" },
@@ -1176,7 +1179,7 @@ const navSections: { title: string; items: { label: string; icon: LucideIcon; vi
   },
 ];
 
-type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links" | "noc" | "contracts" | "infra3d" | "defender";
+type View = "tv" | "topology" | "ad" | "intune" | "office365" | "tickets" | "milvusPortal" | "ips" | "snmp" | "wifi" | "pop" | "projects" | "access" | "diagnostics" | "links" | "noc" | "contracts" | "infra3d" | "defender" | "inventory";
 
 function statusLabel(status: Status) {
   return {
@@ -1200,6 +1203,7 @@ function viewEyebrow(view: View) {
   if (view === "contracts") return "Gestão de fornecedores";
   if (view === "infra3d") return "Digital Twin · dados ao vivo";
   if (view === "defender") return "Incidentes, máquinas e quarentena de e-mail";
+  if (view === "inventory") return "AD × Entra × Intune × Defender × Milvus";
   if (view === "links") return "Monitoramento via Zabbix";
   if (view === "noc") return "Central de monitoramento";
   if (view === "access") return "Administração do portal";
@@ -1223,6 +1227,7 @@ function viewTitle(view: View) {
   if (view === "contracts") return "Contratos";
   if (view === "infra3d") return "Infraestrutura 3D";
   if (view === "defender") return "Microsoft Defender";
+  if (view === "inventory") return "Inventário de máquinas";
   if (view === "links") return "Links de internet";
   if (view === "noc") return "Painel NOC (TV)";
   if (view === "access") return "Acessos";
@@ -1247,6 +1252,17 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   // Muda a cada busca: remonta a tela de destino para ela ler o filtro pedido.
   const [searchNonce, setSearchNonce] = useState(0);
+
+  // Abre outra tela ja filtrada (busca global, inventario -> ficha no AD/Intune).
+  function openFiltered(target: { view: View; tab?: string; term: string }) {
+    try {
+      if (target.term) window.sessionStorage.setItem(PENDING_SEARCH_KEY, JSON.stringify(target));
+    } catch {
+      /* abre a tela sem filtro */
+    }
+    setSearchNonce((value) => value + 1);
+    setActiveView(target.view);
+  }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -2035,6 +2051,8 @@ function App() {
           <ContractsDashboard />
         ) : activeView === "defender" ? (
           <DefenderDashboard />
+        ) : activeView === "inventory" ? (
+          <InventoryDashboard onOpen={(view, term, tab) => openFiltered({ view, tab, term })} />
         ) : activeView === "infra3d" ? (
           <React.Suspense fallback={<div className="view-loading">Carregando a infraestrutura 3D...</div>}>
             <InfraView />
@@ -2085,14 +2103,8 @@ function App() {
           ipDetails={ipDetails}
           onClose={() => setSearchOpen(false)}
           onGo={(hit) => {
-            try {
-              if (hit.term) window.sessionStorage.setItem(PENDING_SEARCH_KEY, JSON.stringify({ view: hit.view, tab: hit.tab, term: hit.term }));
-            } catch {
-              /* abre a tela sem filtro */
-            }
             setSearchOpen(false);
-            setSearchNonce((value) => value + 1);
-            setActiveView(hit.view);
+            openFiltered({ view: hit.view, tab: hit.tab, term: hit.term || "" });
           }}
         />
       ) : null}

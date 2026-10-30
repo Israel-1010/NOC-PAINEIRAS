@@ -15224,3 +15224,404 @@ thead .ac-person-col {
 p.win10-effects {
   padding-left: 14px;
 }
+
+/* ---------- Inventario de maquinas ---------- */
+.inv-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.inv-source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inv-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.inv-source b {
+  color: var(--heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-source i {
+  width: 8px;
+  height: 8px;
+  background: var(--success);
+  border-radius: 50%;
+}
+
+.inv-source.down {
+  color: var(--danger-ink);
+  border-color: var(--danger-border);
+}
+
+.inv-source.down i {
+  background: var(--danger);
+}
+
+.inv-source.off {
+  color: var(--muted-2);
+}
+
+.inv-source.off i,
+.inv-source.partial i {
+  background: var(--muted-3);
+}
+
+.inv-source.partial i {
+  background: var(--warning);
+}
+
+.inv-sources-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.inv-sources-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.inv-policy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  color: var(--warning-ink);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.inv-policy svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.inv-table td {
+  vertical-align: top;
+}
+
+.inv-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.inv-pills .status-pill {
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+/* Presenca por fonte: texto sempre; a cor so reforca. */
+.inv-cell {
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-cell.stale {
+  color: var(--warning-ink);
+  font-weight: 700;
+}
+
+.inv-cell.missing,
+.inv-cell.na,
+.inv-cell.unknown,
+.inv-cell.off {
+  color: var(--muted-3);
+}
+
+.inv-cell.missing.issue {
+  display: inline-block;
+  min-width: 28px;
+  padding: 1px 8px;
+  color: var(--danger-ink);
+  font-weight: 700;
+  text-align: center;
+  background: var(--danger-soft);
+  border-radius: 6px;
+}
+
+.inv-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Gaveta mais larga: rotulo + ate 5 colunas de fonte. */
+.side-drawer.wide {
+  width: min(780px, 100vw);
+}
+
+.inv-drawer-sub {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.inv-drawer-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.inv-block {
+  display: grid;
+  gap: 8px;
+}
+
+.inv-block h3 {
+  margin: 0;
+  color: var(--heading);
+  font-size: 14px;
+}
+
+.inv-todo,
+.inv-ignored {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inv-todo li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+
+.inv-todo small {
+  color: var(--muted);
+}
+
+.inv-todo p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.inv-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inv-links a {
+  text-decoration: none;
+}
+
+.inv-compare {
+  width: 100%;
+  min-width: 580px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.inv-compare th,
+.inv-compare td {
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-soft);
+  overflow-wrap: anywhere;
+}
+
+.inv-compare thead th {
+  color: var(--muted);
+  font-weight: 700;
+  overflow-wrap: normal;
+}
+
+.inv-compare tbody th {
+  width: 120px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.inv-compare td.inv-diff {
+  color: var(--warning-ink);
+  background: var(--warning-soft);
+}
+
+.inv-diff-note,
+.inv-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inv-ignored li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.inv-ignored small {
+  display: block;
+  color: var(--muted-2);
+}
+
+.inv-ignore-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 130px;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+
+.inv-ignore-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.inv-ignore-form label.wide {
+  grid-column: 1 / -1;
+}
+
+.inv-ignore-form select,
+.inv-ignore-form input {
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+
+.inv-ignore-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Relatorio do gestor */
+.inv-report {
+  display: grid;
+  gap: 12px;
+}
+
+.inv-report-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inv-report-head h2 {
+  margin: 0;
+  color: var(--heading);
+  font-size: 18px;
+}
+
+.inv-report-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.inv-report-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.inv-bars li {
+  grid-template-columns: minmax(120px, 22%) minmax(0, 1fr) auto;
+}
+
+.inv-report-table tbody tr {
+  cursor: default;
+}
+
+.inv-up {
+  color: var(--danger-ink);
+  font-weight: 700;
+}
+
+.inv-down {
+  color: var(--success-ink);
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .inv-sources-actions {
+    margin-left: 0;
+  }
+
+  .inv-ignore-form {
+    grid-template-columns: 1fr;
+  }
+
+  .inv-ignore-form label.wide {
+    grid-column: auto;
+  }
+
+  .inv-ignored li {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Impressao (relatorio do inventario): so o conteudo, sem menu nem botoes. */
+@media print {
+  .sidebar,
+  .topbar,
+  .ui-tabs,
+  .inv-sources,
+  .inv-report-actions,
+  .open-mode-banner {
+    display: none !important;
+  }
+
+  .app-shell {
+    display: block;
+  }
+
+  .workspace {
+    padding: 0;
+  }
+
+  .ct-card,
+  .ct-kpi,
+  .ct-table tr {
+    break-inside: avoid;
+  }
+}

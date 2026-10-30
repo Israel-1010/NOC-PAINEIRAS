@@ -84,7 +84,8 @@ export function windowsInfo(osVersion: string) {
   const [, , buildText = "0", ubr = ""] = String(osVersion || "").split(".");
   const build = Number(buildText) || 0;
   // Abaixo de 19041 sao Windows Server 2016/2019 (ou LTSC antigo): ficam fora desta atualizacao.
-  const family = !build ? "unknown" : build >= 22000 ? "win11" : build >= 19041 ? "win10" : "server";
+  // 20348 e o Windows Server 2022 (o build fica entre o 10 e o 11).
+  const family = !build ? "unknown" : build === 20348 ? "server" : build >= 22000 ? "win11" : build >= 19041 ? "win10" : "server";
   const release = RELEASES[build] || "";
   const label =
     family === "win11"
@@ -96,7 +97,9 @@ export function windowsInfo(osVersion: string) {
             ? "Windows Server 2016"
             : build === 17763
               ? "Windows Server 2019 / LTSC 2019"
-              : `Windows antigo (build ${build})`
+              : build === 20348
+                ? "Windows Server 2022"
+                : `Windows antigo (build ${build})`
           : "Windows";
   return { family, build, ubr, release, label };
 }

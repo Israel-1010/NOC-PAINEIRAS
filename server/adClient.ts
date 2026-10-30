@@ -1174,6 +1174,28 @@ export async function listAdComputers(query = "", limit?: string | number) {
   }));
 }
 
+// Inventario: todos os computadores (sem o teto de 1000 da lista acima) com o que o cruzamento usa.
+// null quando o AD esta em modo mock ou sem configuracao.
+export async function listAdComputersForInventory() {
+  if (adConfig.useMock || !isAdConfigured()) return null;
+  const attributes = [...computerAttributes, "operatingSystemVersion", "userAccountControl", "whenCreated", "pwdLastSet"];
+  return cached("computers:inventory", 60000, () => withClient(async (client) => {
+    const entries = await search(client, adConfig.computersBaseDn || adConfig.baseDn!, "(objectCategory=computer)", attributes, 0);
+    const text = (entry: (typeof entries)[number], name: string) => String(firstAttr(entry, name) || "");
+    return entries.map((entry) => ({
+      cn: text(entry, "cn"),
+      dNSHostName: text(entry, "dNSHostName"),
+      operatingSystem: text(entry, "operatingSystem"),
+      operatingSystemVersion: text(entry, "operatingSystemVersion"),
+      lastLogonTimestamp: text(entry, "lastLogonTimestamp"),
+      pwdLastSet: text(entry, "pwdLastSet"),
+      whenCreated: text(entry, "whenCreated"),
+      userAccountControl: text(entry, "userAccountControl"),
+      distinguishedName: text(entry, "distinguishedName"),
+    }));
+  }));
+}
+
 export async function getAdComputerDetails(identity: string) {
   if (adConfig.useMock || !isAdConfigured()) {
     const computer = mockComputers.find((item) => item.cn.toLowerCase() === identity.toLowerCase()) || mockComputers[0];

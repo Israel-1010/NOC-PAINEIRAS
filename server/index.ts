@@ -131,6 +131,7 @@ import { getUnifiSettings, saveUnifiSettings, testUnifi } from "./unifiClient";
 import { createDevice, deleteDevice, listDevices, updateDevice } from "./devices";
 import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
 import { addAttachment, createContract, deleteContract, listContracts, readAttachment, removeAttachment, updateContract } from "./contractStore";
+import { addInventoryException, getInventory, removeInventoryException } from "./inventory";
 import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
 import {
   addItemNote,
@@ -650,6 +651,12 @@ app.get("/api/defender/quarantine", asyncRoute((req) => listQuarantine(req.query
 app.get("/api/defender/quarantine/header", asyncRoute((req) => quarantineHeader(String(req.query.identity || ""))));
 app.get("/api/defender/quarantine/detail", asyncRoute((req) => quarantineDetail(String(req.query.identity || ""))));
 app.post("/api/defender/quarantine/action", asyncRoute((req) => quarantineAction(req.body || {}, req.res?.locals.user)));
+
+// Inventario de maquinas (AD x Intune x Defender x Milvus x Entra): leitura; so grava as excecoes.
+app.use("/api/inventory", requireAuth, requireViews(["inventory"]));
+app.get("/api/inventory", asyncRoute((req) => getInventory(req.query.refresh === "1")));
+app.post("/api/inventory/exceptions", asyncRoute((req) => addInventoryException(req.body || {}, req.res?.locals.user)));
+app.delete("/api/inventory/exceptions", asyncRoute((req) => removeInventoryException(String(req.query.machine || ""), String(req.query.code || ""))));
 
 app.use("/api/contracts", requireAuth, requireViews(["contracts"]));
 app.get("/api/contracts", asyncRoute(async () => listContracts()));

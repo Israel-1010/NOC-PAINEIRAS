@@ -351,6 +351,29 @@ async function listRemoteAssets() {
   return { payload, items };
 }
 
+// Inventario: dispositivos com o agente do Milvus. null quando o Milvus esta em mock ou sem caminho de ativos.
+export async function listMilvusDevices() {
+  if (isMockMode() || !milvusConfig.assetsPath) return null;
+  return cached("milvus-devices", 60000, async () => {
+    const { payload, items } = await listRemoteAssets();
+    const total = payloadTotal(payload);
+    return {
+      partial: total !== null && total > items.length,
+      items: items.map((item) => ({
+        hostname: pick(item, ["hostname"]),
+        serial: pick(item, ["numero_serial", "placa_mae_serial"]),
+        kind: pick(item, ["tipo_dispositivo_text"]),
+        os: pick(item, ["sistema_operacional"]),
+        user: pick(item, ["usuario_logado"]),
+        ip: pick(item, ["ip_interno"]),
+        model: pick(item, ["modelo_notebook", "placa_mae_modelo"]),
+        brand: pick(item, ["fabricante", "marca"]),
+        updatedAt: pick(item, ["data_ultima_atualizacao"]),
+      })),
+    };
+  });
+}
+
 export async function getMilvusStatus() {
   if (isMockMode()) {
     return {
