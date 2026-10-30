@@ -15332,6 +15332,13 @@ p.win10-effects {
   font-size: 10.5px;
 }
 
+/* Online em verde (o gateway de fora da UniFi fica na cor da marca). */
+.ut-node.state-online:not(.external) .ut-icon {
+  color: var(--success-ink);
+  background: var(--success-soft);
+  border-color: var(--success-border);
+}
+
 .ut-node.state-offline strong,
 .ut-node.state-offline small {
   color: var(--danger-ink);
@@ -15419,6 +15426,115 @@ p.win10-effects {
 
 .ut-ports tr.off td {
   color: var(--muted-3);
+}
+
+/* Topologia no Painel NOC (TV): arvore inteira encaixada na tela, fundo escuro */
+.ut-tv {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.ut-tv-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 22px;
+  margin: 0;
+  color: var(--noc-ink-2);
+  font-size: 1.05em;
+}
+
+.ut-tv-head b {
+  color: var(--tone);
+}
+
+.ut-tv-legend {
+  margin-left: auto;
+  color: var(--noc-muted);
+  font-size: 0.85em;
+}
+
+.ut-tv-box {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.noc-root .ut-line {
+  stroke: #4f8df5;
+}
+
+.noc-root .ut-line.slow {
+  stroke: var(--noc-warning);
+}
+
+.noc-root .ut-line.down {
+  stroke: var(--noc-critical);
+}
+
+.noc-root .ut-dot {
+  fill: #4f8df5;
+  stroke: var(--noc-page);
+}
+
+.noc-root .ut-chip {
+  color: #bcd3ff;
+  background: var(--noc-panel);
+  border-color: rgba(79, 141, 245, 0.55);
+}
+
+.noc-root .ut-chip.slow {
+  color: var(--noc-warning);
+  background: rgba(245, 176, 20, 0.12);
+  border-color: var(--noc-warning);
+}
+
+.noc-root .ut-chip.down {
+  color: #ffb4ae;
+  background: rgba(240, 68, 56, 0.16);
+  border-color: var(--noc-critical);
+}
+
+.noc-root .ut-node {
+  cursor: default;
+}
+
+.noc-root .ut-node strong {
+  color: var(--noc-ink);
+}
+
+.noc-root .ut-node small {
+  color: var(--noc-muted);
+}
+
+.noc-root .ut-icon {
+  color: var(--noc-ink-2);
+  background: var(--noc-panel-2);
+  border-color: var(--noc-line);
+}
+
+.noc-root .ut-node.state-online:not(.external) .ut-icon {
+  color: #fff;
+  background: rgba(18, 183, 106, 0.28);
+  border-color: var(--noc-good);
+}
+
+.noc-root .ut-node.gateway.external .ut-icon {
+  color: #fff;
+  background: #2b5bd7;
+  border-color: #2b5bd7;
+}
+
+.noc-root .ut-node.state-offline .ut-icon {
+  color: #fff;
+  background: rgba(240, 68, 56, 0.3);
+  border-color: var(--noc-critical);
+}
+
+.noc-root .ut-node.state-offline strong,
+.noc-root .ut-node.state-offline small {
+  color: #ffb4ae;
 }
 
 /* Impressao (relatorio do inventario): so o conteudo, sem menu nem botoes. */

@@ -168,6 +168,150 @@ function buildLayout(roots: string[], children: Map<string, TopoEdge[]>, nodes: 
 
 const ICON: Record<TopoNode["type"], typeof Network> = { switch: Network, ap: Wifi, gateway: Shield, other: Router };
 
+type Graph = { nodes: Map<string, TopoNode>; children: Map<string, TopoEdge[]>; parentEdge: Map<string, TopoEdge>; roots: string[]; loose: TopoNode[] };
+
+function buildGraph(data: Topology | null): Graph {
+  const nodes = new Map((data?.nodes || []).map((node) => [node.id, node]));
+  const children = new Map<string, TopoEdge[]>();
+  const parentEdge = new Map<string, TopoEdge>();
+  for (const edge of data?.edges || []) {
+    if (!nodes.has(edge.to) || !nodes.has(edge.from) || parentEdge.has(edge.to)) continue;
+    parentEdge.set(edge.to, edge);
+    children.set(edge.from, [...(children.get(edge.from) || []), edge]);
+  }
+  // Filhos na ordem das portas do pai (ordem fisica), depois pelo nome.
+  for (const list of children.values()) list.sort((a, b) => (a.parentPort ?? 999) - (b.parentPort ?? 999) || (nodes.get(a.to)?.name || "").localeCompare(nodes.get(b.to)?.name || "", "pt-BR", { numeric: true }));
+  const roots = Array.from(nodes.keys()).filter((id) => !parentEdge.has(id) && children.has(id));
+  const loose = Array.from(nodes.values()).filter((node) => !parentEdge.has(node.id) && !children.has(node.id));
+  return { nodes, children, parentEdge, roots, loose };
+}
+
+type Layout = ReturnType<typeof buildLayout>;
+
+// O desenho (linhas, caixinhas de porta e aparelhos), igual na tela do portal e na TV.
+function TreeStage({ layout, graph, selected, dim, match, onSelect }: { layout: Layout; graph: Graph; selected?: string | null; dim?: (id: string) => boolean; match?: (id: string) => boolean; onSelect?: (id: string) => void }) {
+  return (
+    <>
+      <svg className="ut-lines" width={layout.width} height={layout.height} aria-hidden="true">
+        {layout.lines.map((line, index) => (
+          <line key={index} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} className={`ut-line ${line.kind}`} />
+        ))}
+        {layout.dots.map((dot, index) => <circle key={index} cx={dot.x} cy={dot.y} r={5} className="ut-dot" />)}
+      </svg>
+      {layout.chips.map((chip, index) => (
+        <span key={index} className={`ut-chip ${chip.kind}`} style={{ left: chip.cx, top: chip.y }}>{chip.text}</span>
+      ))}
+      {layout.nodes.map((placed) => {
+        const item = graph.nodes.get(placed.id)!;
+        const Icon = ICON[item.type];
+        const offline = item.state === "offline";
+        const className = `ut-node ${item.type} state-${item.state}${item.external ? " external" : ""}${dim?.(item.id) ? " dim" : ""}${match?.(item.id) ? " match" : ""}${selected === item.id ? " selected" : ""}`;
+        const label = `${item.name}, ${STATE_LABEL[item.state]}${offline && item.lastSeen ? ` há ${sinceLabel(item.lastSeen)}` : ""}`;
+        const content = (
+          <>
+            <span className="ut-icon">{offline ? <X size={20} /> : <Icon size={20} />}</span>
+            <strong>{item.name}</strong>
+            <small>
+              {offline ? `fora há ${sinceLabel(item.lastSeen) || "?"}` : item.state !== "online" ? STATE_LABEL[item.state] : item.external ? item.id : item.type === "ap" ? `${item.clients} clientes` : `${item.portsUp}/${item.portsTotal} portas`}
+            </small>
+          </>
+        );
+        return onSelect ? (
+          <button key={placed.id} type="button" className={className} style={{ left: placed.cx, top: placed.y }} onClick={() => onSelect(item.id)} aria-label={label}>{content}</button>
+        ) : (
+          <div key={placed.id} className={className} style={{ left: placed.cx, top: placed.y }} title={label}>{content}</div>
+        );
+      })}
+    </>
+  );
+}
+
+// Painel NOC (TV): a arvore inteira encaixada na tela, sem rolagem. Escolhe a largura das linhas
+// que deixa o desenho no formato da tela (maior escala possivel).
+export function TopologyFit({ headers }: { headers: Record<string, string> }) {
+  const [data, setData] = useState<Topology | null>(null);
+  const [error, setError] = useState("");
+  const [size, setSize] = useState({ width: 1600, height: 800 });
+  const boxRef = useRef<HTMLDivElement>(null);
+  const headerKey = JSON.stringify(headers);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/noc/unifi-topology`, { headers: JSON.parse(headerKey) as Record<string, string> });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error((payload as { message?: string }).message || `erro ${response.status}`);
+        if (!cancelled) {
+          setData(payload as Topology);
+          setError("");
+        }
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : String(loadError));
+      }
+    };
+    void load();
+    const timer = window.setInterval(load, REFRESH_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [headerKey]);
+
+  useLayoutEffect(() => {
+    const element = boxRef.current;
+    if (!element) return;
+    const measure = () => setSize({ width: element.clientWidth, height: element.clientHeight });
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+
+  const graph = useMemo(() => buildGraph(data), [data]);
+  const fit = useMemo(() => {
+    let best: { layout: Layout; scale: number } | null = null;
+    for (const factor of [1, 1.25, 1.5, 1.8, 2.2, 2.7, 3.3, 4]) {
+      const layout = buildLayout(graph.roots, graph.children, graph.nodes, size.width * factor);
+      const scale = Math.min(size.width / layout.width, size.height / layout.height, 1.8);
+      if (!best || scale > best.scale) best = { layout, scale };
+    }
+    return best!;
+  }, [graph, size]);
+
+  const problems = Array.from(graph.nodes.values()).filter((node) => isProblem(node, graph.parentEdge.get(node.id)));
+  const devices = Array.from(graph.nodes.values()).filter((node) => !node.external);
+
+  return (
+    <div className="noc-page ut-tv">
+      <p className="ut-tv-head">
+        <span>{devices.filter((node) => node.type === "switch").length} switches · {devices.filter((node) => node.type === "ap").length} APs</span>
+        {problems.length ? <b className="tone-critical">{problems.length} com problema: {problems.slice(0, 4).map((node) => node.name).join(", ")}{problems.length > 4 ? "…" : ""}</b> : <b className="tone-good">tudo online</b>}
+        {error ? <span className="tone-warning">sem atualização: {error}</span> : null}
+        <span className="ut-tv-legend">porta de cima ⇄ porta de baixo · velocidade</span>
+      </p>
+      <div className="ut-tv-box" ref={boxRef}>
+        {!data ? (
+          <p className="noc-empty">{error ? `Topologia indisponível: ${error}` : "Lendo as controladoras UniFi..."}</p>
+        ) : !graph.roots.length ? (
+          <p className="noc-empty">Nenhuma controladora com leitura direta (cadastre a controladora dos switches no Painel NOC → Wi-Fi).</p>
+        ) : (
+          <div
+            className="ut-stage"
+            style={{
+              width: fit.layout.width,
+              height: fit.layout.height,
+              transform: `translate(${Math.max(0, (size.width - fit.layout.width * fit.scale) / 2)}px, 0) scale(${fit.scale})`,
+            }}
+          >
+            <TreeStage layout={fit.layout} graph={graph} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function UnifiTopology() {
   const [data, setData] = useState<Topology | null>(null);
   const [error, setError] = useState("");
@@ -209,21 +353,7 @@ export function UnifiTopology() {
     return () => observer.disconnect();
   }, [data !== null]);
 
-  const graph = useMemo(() => {
-    const nodes = new Map((data?.nodes || []).map((node) => [node.id, node]));
-    const children = new Map<string, TopoEdge[]>();
-    const parentEdge = new Map<string, TopoEdge>();
-    for (const edge of data?.edges || []) {
-      if (!nodes.has(edge.to) || !nodes.has(edge.from) || parentEdge.has(edge.to)) continue;
-      parentEdge.set(edge.to, edge);
-      children.set(edge.from, [...(children.get(edge.from) || []), edge]);
-    }
-    // Filhos na ordem das portas do pai (ordem fisica), depois pelo nome.
-    for (const list of children.values()) list.sort((a, b) => (a.parentPort ?? 999) - (b.parentPort ?? 999) || (nodes.get(a.to)?.name || "").localeCompare(nodes.get(b.to)?.name || "", "pt-BR", { numeric: true }));
-    const roots = Array.from(nodes.keys()).filter((id) => !parentEdge.has(id) && children.has(id));
-    const loose = Array.from(nodes.values()).filter((node) => !parentEdge.has(node.id) && !children.has(node.id));
-    return { nodes, children, parentEdge, roots, loose };
-  }, [data]);
+  const graph = useMemo(() => buildGraph(data), [data]);
 
   const layout = useMemo(() => buildLayout(graph.roots, graph.children, graph.nodes, Math.max(COL * 3, viewport / zoom - 24)), [graph, viewport, zoom]);
 
@@ -317,37 +447,14 @@ export function UnifiTopology() {
       <div className="ut-canvas-wrap" ref={scrollRef}>
         <div className="ut-canvas" style={{ width: layout.width * zoom + 32, height: layout.height * zoom + 32 }}>
           <div className="ut-stage" style={{ width: layout.width, height: layout.height, transform: `scale(${zoom})` }}>
-            <svg className="ut-lines" width={layout.width} height={layout.height} aria-hidden="true">
-              {layout.lines.map((line, index) => (
-                <line key={index} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} className={`ut-line ${line.kind}`} />
-              ))}
-              {layout.dots.map((dot, index) => <circle key={index} cx={dot.x} cy={dot.y} r={5} className="ut-dot" />)}
-            </svg>
-            {layout.chips.map((chip, index) => (
-              <span key={index} className={`ut-chip ${chip.kind}`} style={{ left: chip.cx, top: chip.y }}>{chip.text}</span>
-            ))}
-            {layout.nodes.map((placed) => {
-              const item = graph.nodes.get(placed.id)!;
-              const Icon = ICON[item.type];
-              const dim = (onlyProblems && !problemSet.has(item.id)) || (needle && !matches.has(item.id));
-              const offline = item.state === "offline";
-              return (
-                <button
-                  key={placed.id}
-                  type="button"
-                  className={`ut-node ${item.type} state-${item.state}${dim ? " dim" : ""}${matches.has(item.id) ? " match" : ""}${selected === item.id ? " selected" : ""}`}
-                  style={{ left: placed.cx, top: placed.y }}
-                  onClick={() => setSelected(item.id)}
-                  aria-label={`${item.name}, ${STATE_LABEL[item.state]}${offline && item.lastSeen ? ` há ${sinceLabel(item.lastSeen)}` : ""}`}
-                >
-                  <span className="ut-icon">{offline ? <X size={20} /> : <Icon size={20} />}</span>
-                  <strong>{item.name}</strong>
-                  <small>
-                    {offline ? `fora há ${sinceLabel(item.lastSeen) || "?"}` : item.state !== "online" ? STATE_LABEL[item.state] : item.external ? item.id : item.type === "ap" ? `${item.clients} clientes` : `${item.portsUp}/${item.portsTotal} portas`}
-                  </small>
-                </button>
-              );
-            })}
+            <TreeStage
+              layout={layout}
+              graph={graph}
+              selected={selected}
+              dim={(id) => (onlyProblems && !problemSet.has(id)) || Boolean(needle && !matches.has(id))}
+              match={(id) => matches.has(id)}
+              onSelect={setSelected}
+            />
           </div>
         </div>
       </div>

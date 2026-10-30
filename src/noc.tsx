@@ -30,11 +30,13 @@ import {
   Thermometer,
   Wifi,
   WifiOff,
+  Workflow,
   X,
   XCircle,
   Zap,
 } from "lucide-react";
 import { defenderName } from "./defenderNames";
+import { TopologyFit } from "./unifiTopology";
 
 /* ---------- Tipos (espelham server/nocData.ts) ---------- */
 
@@ -258,6 +260,7 @@ const PAGE = {
   servidores: { id: "servidores", title: "Servidores e Datacenter", short: "Servidores", icon: Server, seconds: 20 },
   acesso: { id: "acesso", title: "Acesso e atendimento", short: "Acesso", icon: ScanFace, seconds: 15 },
   trafego: { id: "trafego", title: "Tráfego da internet · 24 h", short: "Tráfego", icon: Network, seconds: 15 },
+  topologia: { id: "topologia", title: "Topologia da rede · switches UniFi", short: "Topologia", icon: Workflow, seconds: 20 },
 } satisfies Record<string, NocPage>;
 
 // Grupos da pagina "Acesso e atendimento" (o videowall entrou aqui; antes tinha pagina propria).
@@ -282,6 +285,8 @@ function buildPages(data: NocData | null): NocPage[] {
   // Paginas de grupo so aparecem se o grupo existir e tiver hosts (ex.: grupo de ping das antenas foi esvaziado).
   const hasHosts = (key: string) => Boolean(data?.groups.find((group) => group.key === key)?.total);
   const pages: NocPage[] = [PAGE.overview, PAGE.internet, ...unifiPages];
+  // A arvore so existe com switches UniFi lidos direto pelo portal.
+  if (controllers.some((controller) => controller.ok && controller.via === "direto" && controller.switches.length)) pages.push(PAGE.topologia);
   if (!hasUnifiAps && hasHosts("antenas")) pages.push(PAGE.antenas);
   pages.push({ ...PAGE.overview, id: "overview-2", seconds: 15 });
   if (data?.analyzer || data?.defender) pages.push(PAGE.seguranca);
@@ -958,6 +963,10 @@ function pageTone(page: NocPage, data: NocData): Tone {
       return groupTone(data.groups.find((group) => group.key === "antenas"));
     case "unifi-down":
       return "critical";
+    case "topologia": {
+      const switches = (data.unifi?.controllers || []).flatMap((controller) => controller.switches);
+      return switches.length ? onlineTone(switches.filter((sw) => sw.online).length, switches.length) : "unknown";
+    }
     default:
       return "unknown";
   }
@@ -2401,6 +2410,8 @@ export function NocWall({ tvKey, kiosk = false, isAdmin = false }: { tvKey?: str
           <AccessPage data={data} />
         ) : current.id === "trafego" && data.analyzer ? (
           <TrafficPage analyzer={data.analyzer} />
+        ) : current.id === "topologia" ? (
+          <TopologyFit headers={headersFor(tvKey)} />
         ) : (
           <p className="noc-empty">Página indisponível.</p>
         )}

@@ -605,6 +605,8 @@ function nocAuth(req: express.Request, res: express.Response, next: express.Next
 }
 
 app.get("/api/noc", nocAuth, asyncRoute(() => getNocOverview()));
+// Arvore UniFi para a pagina "Topologia" da TV (mesma leitura e cache da tela Topologia).
+app.get("/api/noc/unifi-topology", nocAuth, asyncRoute(() => getUnifiTopology()));
 app.get("/api/tv-keys", requireAuth, requireAdmin, asyncRoute(async () => ({ keys: listTvKeys() })));
 app.post("/api/tv-keys", requireAuth, requireAdmin, asyncRoute((req) => createTvKey(String(req.body?.name || ""), req.res?.locals.user)));
 app.delete("/api/tv-keys/:id", requireAuth, requireAdmin, asyncRoute((req) => revokeTvKey(String(req.params.id))));
