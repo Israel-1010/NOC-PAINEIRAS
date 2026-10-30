@@ -2055,7 +2055,7 @@ function App() {
         ) : activeView === "topology" ? (
           <TopologyDashboard topology={topology} onChange={setTopology} ipDetails={ipDetails} onRefreshIps={loadIps} saveStatus={topologySaveStatus} />
         ) : activeView === "intune" ? (
-          <IntuneDashboard key={`intune-${searchNonce}`} intuneStatus={intuneStatus} intuneSummary={intuneSummary} intuneDetails={intuneDetails} onRefreshIntune={loadIntune} />
+          <IntuneDashboard key={`intune-${searchNonce}`} intuneStatus={intuneStatus} intuneSummary={intuneSummary} intuneDetails={intuneDetails} onRefreshIntune={loadIntune} isAdmin={Boolean(access?.isAdmin)} />
         ) : activeView === "office365" ? (
           <Office365Dashboard office365Status={office365Status} office365Summary={office365Summary} office365Details={office365Details} onRefreshOffice365={loadOffice365} />
         ) : activeView === "snmp" ? (
@@ -3660,12 +3660,28 @@ function IntuneDashboard({
   intuneSummary,
   intuneDetails,
   onRefreshIntune,
+  isAdmin,
 }: {
   intuneStatus: IntuneStatus;
   intuneSummary: IntuneSummary;
   intuneDetails: IntuneDetails;
   onRefreshIntune: () => Promise<void>;
+  isAdmin: boolean;
 }) {
+  // Windows 10 -> 11 (servidor: /api/intune/windows); carrega junto com a tela para o contador do filtro.
+  const [windows, setWindows] = useState<WindowsOverview | null>(null);
+  const [windowsError, setWindowsError] = useState("");
+  const loadWindows = useCallback(async (refresh = false) => {
+    setWindowsError("");
+    try {
+      setWindows(await adRequest<WindowsOverview>(`/api/intune/windows${refresh ? "?refresh=1" : ""}`, { method: "GET" }));
+    } catch (error) {
+      setWindowsError(error instanceof Error ? error.message : "Não foi possível ler as máquinas Windows 10.");
+    }
+  }, []);
+  useEffect(() => {
+    void loadWindows();
+  }, [loadWindows]);
   const [deviceSearch, setDeviceSearch] = useState(() => takePendingSearch("intune")?.term || "");
   const [devicePage, setDevicePage] = useState(1);
   const [deviceFilter, setDeviceFilter] = useState<IntuneFilter>("all");
@@ -3749,9 +3765,13 @@ function IntuneDashboard({
         <IntuneFilterCard active={deviceFilter === "stale"} count={staleDevices.length} icon={Clock3} label="Sem sync há 7 dias" tone={staleDevices.length ? "warn" : "calm"} onClick={() => pickFilter("stale")} />
         <IntuneFilterCard active={deviceFilter === "storage"} count={storageAlerts.length} icon={HardDrive} label="Pouco disco" tone={storageAlerts.length ? "warn" : "calm"} onClick={() => pickFilter("storage")} />
         <IntuneFilterCard active={deviceFilter === "windows"} count={windowsDevices.length} icon={Monitor} label="Windows" tone="calm" onClick={() => pickFilter("windows")} />
+        <IntuneFilterCard active={deviceFilter === "win10"} count={windows?.totals.win10 ?? 0} icon={Monitor} label="Windows 10 (sem suporte)" tone={windows?.totals.win10 ? "warn" : "calm"} onClick={() => pickFilter("win10")} />
         <IntuneFilterCard active={deviceFilter === "mobile"} count={mobileDevices.length} icon={Wifi} label="Celulares" tone="calm" onClick={() => pickFilter("mobile")} />
       </section>
 
+      {deviceFilter === "win10" ? (
+        <Windows10Panel overview={windows} error={windowsError} isAdmin={isAdmin} onReload={loadWindows} />
+      ) : (
       <section className="intune-main">
         <article className="panel intune-devices-panel">
           <PanelHeader
@@ -3783,6 +3803,7 @@ function IntuneDashboard({
           )}
         </article>
       </section>
+      )}
 
       {selectedDevice ? (
         <IntuneDeviceModal
@@ -3793,6 +3814,249 @@ function IntuneDashboard({
         />
       ) : null}
     </>
+  );
+}
+
+type WindowsItem = {
+  id: string;
+  deviceName: string;
+  user: string;
+  model: string;
+  label: string;
+  family: string;
+  build: number;
+  lastSync: string;
+  readiness: { status: "capable" | "notCapable" | "unknown"; failed: string[] };
+  inGroup: boolean | null;
+  blocked: string;
+};
+type WindowsOverview = {
+  checkedAt: string;
+  target: { profileName: string; version: string; groupName: string; groupId: string; dynamic: boolean } | null;
+  totals: { win10: number; win11: number; server: number; capable: number; notCapable: number; unknown: number; inGroup: number };
+  items: WindowsItem[];
+  warnings: string[];
+  capabilities: { groupWrite: boolean; sync: boolean; missing: string[] };
+};
+type Win10Filter = "all" | "ready" | "blocked" | "scheduled" | "server";
+
+// Windows 10 sem suporte: quem ainda esta no 10, se da para ir ao 11 e o agendamento pela politica do Intune.
+// O NOC poe a maquina no grupo da politica "Feature updates"; o Windows Update instala e reinicia depois.
+function Windows10Panel({ overview, error, isAdmin, onReload }: { overview: WindowsOverview | null; error: string; isAdmin: boolean; onReload: (refresh?: boolean) => Promise<void> }) {
+  const [filter, setFilter] = useState<Win10Filter>("all");
+  const [search, setSearch] = useState("");
+  const [action, setAction] = useState<{ kind: "schedule" | "cancel"; item: WindowsItem } | null>(null);
+  const [comment, setComment] = useState("");
+  const [confirmName, setConfirmName] = useState("");
+  const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const closeAction = useCallback(() => setAction(null), []);
+  useEscape(Boolean(action), closeAction);
+
+  if (!overview) {
+    return (
+      <section className="panel">
+        {error ? <EmptyState title="Não foi possível ler as máquinas Windows 10" detail={error} /> : <EmptyState title="Consultando o Intune..." detail="Lendo máquinas, compatibilidade com o Windows 11 e a política de atualização." />}
+      </section>
+    );
+  }
+
+  const desktops = overview.items.filter((item) => item.family === "win10");
+  const counts = {
+    ready: desktops.filter((item) => !item.blocked && !item.inGroup).length,
+    blocked: desktops.filter((item) => item.blocked).length,
+    scheduled: desktops.filter((item) => item.inGroup).length,
+    server: overview.totals.server,
+  };
+  const rows = filterItems(
+    overview.items.filter((item) =>
+      filter === "server" ? item.family === "server" : item.family === "win10" && (filter === "all" || (filter === "ready" ? !item.blocked && !item.inGroup : filter === "blocked" ? Boolean(item.blocked) : Boolean(item.inGroup))),
+    ),
+    search,
+    (item) => [item.deviceName, item.user, item.model, item.label],
+  );
+  const canAct = isAdmin && overview.capabilities.groupWrite && Boolean(overview.target?.groupId) && !overview.target?.dynamic;
+  const relative = (iso: string) => {
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
+    return days <= 0 ? "hoje" : days === 1 ? "ontem" : `há ${days} dias`;
+  };
+
+  function openAction(kind: "schedule" | "cancel", item: WindowsItem) {
+    setAction({ kind, item });
+    setComment("");
+    setConfirmName("");
+    setNotice(null);
+  }
+
+  async function runAction() {
+    if (!action) return;
+    setBusy(action.item.id);
+    try {
+      const result = await adRequest<{ message: string }>(`/api/intune/devices/${encodeURIComponent(action.item.id)}/windows11`, {
+        method: action.kind === "schedule" ? "POST" : "DELETE",
+        body: { comment, confirmName },
+      });
+      setNotice({ ok: true, text: result.message });
+      setAction(null);
+      await onReload(true);
+    } catch (actionError) {
+      setNotice({ ok: false, text: actionError instanceof Error ? actionError.message : "Falha ao falar com o Intune." });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function syncDevice(item: WindowsItem) {
+    setBusy(item.id);
+    setNotice(null);
+    try {
+      const result = await adRequest<{ message: string }>(`/api/intune/devices/${encodeURIComponent(item.id)}/sync`, { method: "POST" });
+      setNotice({ ok: true, text: `${item.deviceName}: ${result.message}` });
+    } catch (syncError) {
+      setNotice({ ok: false, text: syncError instanceof Error ? syncError.message : "Falha ao pedir a sincronização." });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <section className="panel win10-panel">
+      <header className="ad-main-head">
+        <div>
+          <h2 className="win10-title">Windows 10 · sem suporte da Microsoft desde 14/10/2025</h2>
+          <p className="win10-target">
+            {overview.target
+              ? <>Política do Intune: <b>{overview.target.profileName}</b> → {overview.target.version.replace("Windows 11, version", "Windows 11")} · grupo <b>{overview.target.groupName || overview.target.groupId}</b></>
+              : "Sem política de atualização para o Windows 11 no Intune."}
+          </p>
+        </div>
+        <div className="ad-main-actions">
+          <button className="secondary-action" type="button" onClick={() => onReload(true)}>
+            <RefreshCw size={15} />
+            Atualizar
+          </button>
+        </div>
+      </header>
+
+      {overview.warnings.map((warning) => <div key={warning} className="action-feedback error" role="alert">{warning}</div>)}
+      {!overview.capabilities.groupWrite ? (
+        <div className="action-feedback warn-note">
+          Para agendar pelo NOC falta a permissão <b>GroupMember.ReadWrite.All</b> no app do portal (Entra ID → Registros de aplicativo → Rede Clube POP → Permissões de API → consentimento do administrador). Até lá, a tela só mostra.
+        </div>
+      ) : !isAdmin ? (
+        <div className="action-feedback warn-note">Só o gestor do portal pode colocar máquinas na atualização.</div>
+      ) : null}
+      {notice ? <div className={`action-feedback ${notice.ok ? "success" : "error"}`} role={notice.ok ? "status" : "alert"}>{notice.text}</div> : null}
+
+      <div className="ct-filters" role="group" aria-label="Filtrar máquinas Windows 10">
+        {([
+          ["all", `Windows 10 (${desktops.length})`],
+          ["ready", `Prontas para o 11 (${counts.ready})`],
+          ["scheduled", `Na atualização (${counts.scheduled})`],
+          ["blocked", `Não podem ir (${counts.blocked})`],
+          ["server", `Servidores (${counts.server})`],
+        ] as [Win10Filter, string][]).map(([key, label]) => (
+          <button key={key} type="button" aria-pressed={filter === key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>{label}</button>
+        ))}
+      </div>
+      <label className="directory-search">
+        <Search size={15} />
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar máquina, usuário ou modelo" aria-label="Buscar máquina Windows 10" />
+      </label>
+
+      <div className="ct-table-wrap">
+        <table className="ct-table win10-table">
+          <thead>
+            <tr>
+              <th>Máquina</th>
+              <th>Sistema</th>
+              <th>Windows 11</th>
+              <th>Situação</th>
+              <th className="num">Último sync</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((item) => (
+              <tr key={item.id} className="win10-row">
+                <td>
+                  <strong className="ct-title">{item.deviceName}</strong>
+                  <small className="ct-cat">{[item.user, item.model].filter(Boolean).join(" · ") || "—"}</small>
+                </td>
+                <td>{item.label}</td>
+                <td>
+                  <StatusPill label={item.family === "server" ? "Fora" : item.readiness.status === "capable" ? "Compatível" : item.readiness.status === "notCapable" ? "Incompatível" : "Sem relatório"} />
+                  {item.readiness.failed.length ? <small className="ct-cat">falta {item.readiness.failed.join(", ")}</small> : null}
+                </td>
+                <td>{item.inGroup ? <StatusPill label="Na atualização" /> : item.blocked ? <small className="win10-blocked">{item.blocked}</small> : <span className="ct-muted">pronta para agendar</span>}</td>
+                <td className="num">{item.lastSync ? relative(item.lastSync) : "—"}</td>
+                <td>
+                  <div className="win10-actions">
+                    {item.inGroup ? (
+                      <button className="secondary-action compact-action" type="button" disabled={!canAct || Boolean(busy)} onClick={() => openAction("cancel", item)}>Tirar da atualização</button>
+                    ) : !item.blocked ? (
+                      <button className="primary-action compact-action" type="button" disabled={!canAct || Boolean(busy)} onClick={() => openAction("schedule", item)}>Atualizar para o 11</button>
+                    ) : null}
+                    {item.family === "win10" && overview.capabilities.sync && isAdmin ? (
+                      <button className="secondary-action compact-action" type="button" disabled={Boolean(busy)} onClick={() => syncDevice(item)} title="Pede para a máquina buscar políticas e atualizações agora">
+                        <RefreshCw size={13} />
+                        {busy === item.id ? "Pedindo..." : "Sincronizar"}
+                      </button>
+                    ) : null}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {!rows.length ? <tr><td colSpan={6} className="ct-empty-row">{search.trim() ? `Nada encontrado para "${search.trim()}".` : "Nenhuma máquina neste filtro."}</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
+
+      {action ? (
+        <div className="modal-backdrop" role="presentation" onClick={closeAction}>
+          <section className="user-modal win10-confirm" role="dialog" aria-modal="true" aria-label="Confirmar atualização do Windows" onClick={(event) => event.stopPropagation()}>
+            <header className="modal-header">
+              <div>
+                <p className="eyebrow">{action.kind === "schedule" ? "Atualizar para o Windows 11" : "Tirar da atualização"}</p>
+                <h2>{action.item.deviceName}</h2>
+                <span>{[action.item.user, action.item.model, action.item.label].filter(Boolean).join(" · ")}</span>
+              </div>
+              <button className="icon-button" type="button" onClick={closeAction} aria-label="Fechar">
+                <X size={18} />
+              </button>
+            </header>
+            {action.kind === "schedule" ? (
+              <ul className="win10-effects">
+                <li>A máquina entra no grupo <b>{overview.target?.groupName}</b> da política <b>{overview.target?.profileName}</b>.</li>
+                <li>O Windows Update oferece o {overview.target?.version.replace("Windows 11, version", "Windows 11")} nas próximas horas (cerca de 4 GB de download).</li>
+                <li>A instalação leva de 30 a 90 min e <b>reinicia a máquina</b>, conforme o anel de atualização do Intune. Avise o usuário.</li>
+              </ul>
+            ) : (
+              <p className="win10-effects">A máquina sai do grupo da política. Se a instalação já começou, ela pode terminar mesmo assim.</p>
+            )}
+            <label className="field-control">
+              <span>Motivo (obrigatório, mínimo 5 caracteres; fica na auditoria do portal)</span>
+              <textarea rows={2} maxLength={500} value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Ex.: combinado com o usuário, atualizar no fim do expediente" autoFocus />
+            </label>
+            <label className="field-control">
+              <span>Para confirmar, digite o nome da máquina: <b>{action.item.deviceName}</b></span>
+              <input value={confirmName} onChange={(event) => setConfirmName(event.target.value)} autoComplete="off" />
+            </label>
+            <div className="modal-footer-actions">
+              <button className="secondary-action" type="button" onClick={closeAction}>Cancelar</button>
+              <button
+                className={action.kind === "schedule" ? "primary-action" : "danger-action"}
+                type="button"
+                disabled={Boolean(busy) || comment.trim().length < 5 || confirmName.trim().toLowerCase() !== action.item.deviceName.toLowerCase()}
+                onClick={runAction}
+              >
+                {busy ? "Enviando..." : action.kind === "schedule" ? "Colocar na atualização" : "Tirar da atualização"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -9116,8 +9380,20 @@ function isPopChildOfFolder(item: PopDocument, folder: PopDocument) {
   return parentPath.endsWith(`/${folderName}`) || parentPath.endsWith(`:${folderName}`);
 }
 
+// O Graph devolve "10.0.<build>" tambem para o Windows 11: o nome sai do build.
+const WINDOWS_RELEASES: Record<number, string> = { 19041: "2004", 19042: "20H2", 19043: "21H1", 19044: "21H2", 19045: "22H2", 22000: "21H2", 22621: "22H2", 22631: "23H2", 26100: "24H2", 26200: "25H2" };
+function windowsLabel(osVersion: string) {
+  const build = Number(String(osVersion || "").split(".")[2] || 0);
+  if (!build) return "";
+  const release = WINDOWS_RELEASES[build] || `build ${build}`;
+  if (build >= 22000) return `Windows 11 ${release}`;
+  if (build >= 19041) return `Windows 10 ${release}`;
+  return build === 14393 ? "Windows Server 2016" : build === 17763 ? "Windows Server 2019 / LTSC 2019" : `Windows (build ${build})`;
+}
+
 function formatIntuneOs(device: IntuneDevice) {
-  return [device.operatingSystem, device.osVersion].filter(Boolean).join(" ") || "SO nao informado";
+  if (intuneDeviceIsWindows(device)) return windowsLabel(device.osVersion) || "Windows";
+  return [device.operatingSystem, device.osVersion].filter(Boolean).join(" ") || "Sistema não informado";
 }
 
 function intuneDeviceIsWindows(device: IntuneDevice) {
@@ -9152,7 +9428,7 @@ function intuneDeviceRiskReasons(device: IntuneDevice) {
   return reasons;
 }
 
-type IntuneFilter = "all" | "risk" | "noncompliant" | "stale" | "storage" | "windows" | "mobile";
+type IntuneFilter = "all" | "risk" | "noncompliant" | "stale" | "storage" | "windows" | "win10" | "mobile";
 
 function intuneDeviceMatchesFilter(device: IntuneDevice, filter: IntuneFilter) {
   if (filter === "risk") return intuneDeviceRiskReasons(device).length > 0;
@@ -9337,10 +9613,10 @@ function ComplianceBar({
 // Cor pelo significado: verde ok/disponivel, ambar atencao, vermelho problema, azul informativo, cinza neutro.
 function statusTone(label: string) {
   const value = normalizeText(label);
-  if (/^(ativo|ativa|aprovado|executando|conforme|livre|online)$/.test(value)) return "good";
-  if (/bloquead|nao conforme|conflito|erro|falha|offline/.test(value)) return "bad";
+  if (/^(ativo|ativa|aprovado|executando|conforme|livre|online|compativel)$/.test(value)) return "good";
+  if (/bloquead|nao conforme|conflito|erro|falha|offline|incompativel/.test(value)) return "bad";
   if (/pendente|reservado|atencao|faltando/.test(value)) return "warn";
-  if (/^usado$/.test(value)) return "info";
+  if (/^(usado|na atualizacao)$/.test(value)) return "info";
   return "neutral";
 }
 

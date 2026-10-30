@@ -15168,3 +15168,59 @@ thead .ac-person-col {
   color: var(--heading);
   font-weight: 600;
 }
+
+/* ---------- Intune: Windows 10 -> 11 ---------- */
+.win10-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.win10-title {
+  margin: 0;
+  color: var(--heading);
+  font-size: 18px;
+}
+
+.win10-target {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.action-feedback.warn-note {
+  color: var(--warning-ink);
+  background: var(--warning-soft);
+}
+
+.win10-blocked {
+  color: var(--muted);
+}
+
+.win10-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.win10-table td {
+  vertical-align: middle;
+}
+
+.win10-confirm {
+  width: min(560px, calc(100vw - 32px));
+  display: grid;
+  gap: 12px;
+}
+
+.win10-effects {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 12px 14px 12px 30px;
+  color: var(--heading);
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+
+p.win10-effects {
+  padding-left: 14px;
+}

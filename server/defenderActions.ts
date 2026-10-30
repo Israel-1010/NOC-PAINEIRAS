@@ -64,7 +64,7 @@ const INCIDENT_STATUS = ["active", "inProgress", "resolved", "redirected"];
 const CLASSIFICATION = ["unknown", "falsePositive", "truePositive", "informationalExpectedActivity"];
 const DETERMINATION = [
   "unknown", "apt", "malware", "securityPersonnel", "securityTesting", "unwantedSoftware", "other", "multiStagedAttack",
-  "compromisedAccount", "phishing", "maliciousUserActivity", "notMalicious", "notEnoughDataToValidate", "confirmedActivity", "lineOfBusinessApplication",
+  "compromisedAccount", "phishing", "maliciousUserActivity", "notMalicious", "notEnoughDataToValidate", "confirmedUserActivity", "lineOfBusinessApplication",
 ];
 
 type Incident = {

@@ -59,6 +59,7 @@ import {
   getIntuneSummary,
   listIntuneDevices,
 } from "./intuneClient";
+import { cancelWindows11, getWindowsOverview, scheduleWindows11, syncWindowsDevice } from "./intuneWindows";
 import {
   closeMilvusTicket,
   createMilvusTicket,
@@ -489,6 +490,11 @@ app.get("/api/intune/devices/:id/laps", requireViews(["intune"]), (req, res, nex
   next();
 }, asyncRoute((req) => getIntuneDeviceLapsCredential(String(req.params.id))));
 app.get("/api/intune/devices/:id", asyncRoute((req) => getIntuneDeviceDetails(String(req.params.id))));
+// Windows 10 -> 11: leitura para quem ve o Intune; agendar/cancelar/sincronizar so o gestor (conferido no modulo).
+app.get("/api/intune/windows", asyncRoute((req) => getWindowsOverview(req.query.refresh === "1")));
+app.post("/api/intune/devices/:id/windows11", asyncRoute((req) => scheduleWindows11(String(req.params.id), req.body || {}, req.res?.locals.user)));
+app.delete("/api/intune/devices/:id/windows11", asyncRoute((req) => cancelWindows11(String(req.params.id), req.body || {}, req.res?.locals.user)));
+app.post("/api/intune/devices/:id/sync", asyncRoute((req) => syncWindowsDevice(String(req.params.id), req.res?.locals.user)));
 
 app.use("/api/office365", requireAuth, requireViews(["office365", "tv"], ["office365"]));
 
