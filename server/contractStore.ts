@@ -9,6 +9,8 @@ import type { AuthUser } from "./auth";
 // Na primeira vez o arquivo nasce com os contratos da lista do SharePoint "Contratos de Fornecedores".
 
 export type ContractAttachment = { id: string; name: string; mimeType: string; size: number; at: string; by: string };
+// Despesa paga de um mes (competencia AAAA-MM). Mes sem registro = ainda nao pago.
+export type ContractPayment = { month: string; paidAt: string; amount: number; reference: string; note: string; fileId: string; at: string; by: string };
 export type Contract = {
   id: string;
   title: string;
@@ -22,6 +24,7 @@ export type Contract = {
   totalValue: number | null;
   notes: string;
   attachments: ContractAttachment[];
+  payments?: ContractPayment[];
   updatedAt: string;
   updatedBy: string;
 };
@@ -208,6 +211,37 @@ export async function addAttachment(id: string, input: unknown, by: AuthUser) {
     const contract = find(contracts, id);
     contract.attachments.push(file);
     return contract;
+  });
+}
+
+/* ---------- Despesas mensais (o que ja foi pago, mes a mes) ---------- */
+
+const monthOk = (value: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+
+export function savePayment(id: string, month: string, input: Record<string, unknown>, by: AuthUser) {
+  if (!monthOk(month)) throw new ContractError("Mês inválido.");
+  const paidAt = date(input.paidAt, "Data do pagamento");
+  if (!paidAt) throw new ContractError("Informe a data do pagamento.");
+  const amount = money(input.amount);
+  if (amount === null || amount <= 0) throw new ContractError("Informe o valor pago.");
+  const contract = find(cache, id);
+  const fileId = text(input.fileId, 20);
+  if (fileId && !contract.attachments.some((file) => file.id === fileId)) throw new ContractError("Comprovante não encontrado nos anexos do contrato.");
+  const payment: ContractPayment = { month, paidAt, amount, reference: text(input.reference, 60), note: text(input.note, 300), fileId, at: new Date().toISOString(), by: by.login };
+  return mutate((contracts) => {
+    const target = find(contracts, id);
+    target.payments = [...(target.payments || []).filter((entry) => entry.month !== month), payment].sort((a, b) => a.month.localeCompare(b.month));
+    return target;
+  });
+}
+
+export function removePayment(id: string, month: string) {
+  if (!monthOk(month)) throw new ContractError("Mês inválido.");
+  return mutate((contracts) => {
+    const target = find(contracts, id);
+    if (!(target.payments || []).some((entry) => entry.month === month)) throw new ContractError("Este mês não está marcado como pago.", 404);
+    target.payments = (target.payments || []).filter((entry) => entry.month !== month);
+    return target;
   });
 }
 

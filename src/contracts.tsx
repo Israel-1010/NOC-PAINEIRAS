@@ -4,18 +4,26 @@ import {
   ArrowDown,
   ArrowUp,
   CalendarClock,
+  CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Download,
   FileText,
+  ListChecks,
   Paperclip,
   Plus,
   RefreshCw,
   Search,
   Trash2,
+  Undo2,
   Wallet,
   X,
 } from "lucide-react";
 
 type Attachment = { id: string; name: string; mimeType: string; size: number; at: string; by: string };
+// Despesa paga de um mes (AAAA-MM). Mes sem registro = ainda nao pago.
+type Payment = { month: string; paidAt: string; amount: number; reference: string; note: string; fileId: string; at: string; by: string };
 type Contract = {
   id: string;
   title: string;
@@ -29,6 +37,7 @@ type Contract = {
   totalValue: number | null;
   notes: string;
   attachments: Attachment[];
+  payments?: Payment[];
   updatedAt: string;
   updatedBy: string;
 };
@@ -96,6 +105,103 @@ function nextPayment(dueDay: number) {
   return thisMonth >= base ? thisMonth : at(base.getFullYear(), base.getMonth() + 1);
 }
 
+/* ---------- Despesas mensais ---------- */
+const pad2 = (value: number) => String(value).padStart(2, "0");
+const monthKey = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+const shiftMonth = (month: string, delta: number) => {
+  const [year, index] = month.split("-").map(Number);
+  return monthKey(new Date(year, index - 1 + delta, 1));
+};
+const lastDayOf = (month: string) => {
+  const [year, index] = month.split("-").map(Number);
+  return new Date(year, index, 0).getDate();
+};
+const monthTitle = (month: string) => {
+  const [year, index] = month.split("-").map(Number);
+  const label = new Date(year, index - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+};
+const MONTH_SHORT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+// Antes disso o controle era a planilha: mes sem registro nao conta como atrasado. Se lancarem
+// meses mais antigos (historico), o controle passa a comecar no mais antigo lancado.
+const PAYMENTS_FROM = "2026-11";
+function trackingStart(contracts: Contract[]) {
+  let start = PAYMENTS_FROM;
+  for (const contract of contracts) for (const payment of contract.payments || []) if (payment.month < start) start = payment.month;
+  return start;
+}
+
+const paymentOf = (contract: Contract, month: string) => contract.payments?.find((payment) => payment.month === month) || null;
+
+// O mes gera despesa quando o contrato esta ativo e o mes cai na vigencia (ou quando ja foi pago).
+function expectedIn(contract: Contract, month: string) {
+  if (paymentOf(contract, month)) return true;
+  if (!contract.active) return false;
+  if (contract.startDate && contract.startDate > `${month}-${pad2(lastDayOf(month))}`) return false;
+  if (contract.endDate && contract.endDate < `${month}-01`) return false;
+  return true;
+}
+
+const dueDateOf = (contract: Contract, month: string) => (contract.dueDay ? `${month}-${pad2(Math.min(contract.dueDay, lastDayOf(month)))}` : "");
+
+type BillKey = "paid" | "late" | "today" | "soon" | "open" | "future" | "before";
+type Bill = { key: BillKey; label: string; tone: Tone; days: number | null };
+
+function billOf(contract: Contract, month: string, start = PAYMENTS_FROM): Bill {
+  const payment = paymentOf(contract, month);
+  if (payment) return { key: "paid", label: `Pago em ${fmtDate(payment.paidAt)}`, tone: "good", days: null };
+  if (month < start) return { key: "before", label: "Antes do controle no portal", tone: "muted", days: null };
+  const current = monthKey(today());
+  const due = dueDateOf(contract, month);
+  if (!due) {
+    if (month < current) return { key: "late", label: "Não pago", tone: "critical", days: null };
+    return { key: month > current ? "future" : "open", label: "A pagar (sem dia)", tone: "neutral", days: null };
+  }
+  const days = daysUntil(due);
+  if (days < 0) return { key: "late", label: `Atrasado ${-days} ${-days === 1 ? "dia" : "dias"}`, tone: "critical", days };
+  if (days === 0) return { key: "today", label: "Vence hoje", tone: "critical", days };
+  if (days <= 5) return { key: "soon", label: `Vence em ${days} ${days === 1 ? "dia" : "dias"}`, tone: "warning", days };
+  return { key: month > current ? "future" : "open", label: "A pagar", tone: "neutral", days };
+}
+
+// Valor sugerido ao pagar: o mensal do contrato; sem ele (valor variavel), o ultimo pago.
+const suggestedAmount = (contract: Contract) => contract.monthlyValue ?? contract.payments?.[contract.payments.length - 1]?.amount ?? null;
+
+// Para o Inicio: despesas do mes que ainda nao foram pagas, atrasadas ou vencendo em ate 5 dias.
+export function pendingBills(contracts: Contract[]) {
+  const month = monthKey(today());
+  const previous = shiftMonth(month, -1);
+  const start = trackingStart(contracts);
+  const late: { title: string; days: number }[] = [];
+  const soon: { title: string; days: number }[] = [];
+  for (const contract of contracts) {
+    for (const entry of [previous, month]) {
+      if (!expectedIn(contract, entry)) continue;
+      const bill = billOf(contract, entry, start);
+      if (bill.key === "late") late.push({ title: contract.title, days: -(bill.days ?? 0) });
+      else if ((bill.key === "today" || bill.key === "soon") && entry === month) soon.push({ title: contract.title, days: bill.days ?? 0 });
+    }
+  }
+  return { late: late.sort((a, b) => b.days - a.days), soon: soon.sort((a, b) => a.days - b.days) };
+}
+
+// O download precisa do token: busca o arquivo e abre numa aba nova.
+async function openAttachment(contractId: string, fileId: string) {
+  const tab = window.open("", "_blank");
+  try {
+    const response = await fetch(`${API_BASE}/api/contracts/${contractId}/files/${fileId}`, { headers: { Authorization: `Bearer ${authToken()}` } });
+    if (!response.ok) throw new Error("Não foi possível abrir o anexo.");
+    const url = URL.createObjectURL(await response.blob());
+    if (tab) tab.location.href = url;
+    else window.location.href = url;
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (openError) {
+    tab?.close();
+    throw openError;
+  }
+}
+
 // Meses entre inicio e termino (para sugerir o valor total).
 function monthsBetween(start: string, end: string) {
   const a = parseDate(start);
@@ -107,9 +213,13 @@ function monthsBetween(start: string, end: string) {
 type Filter = "all" | "running" | "ending" | "expired" | "inactive";
 type SortKey = "title" | "supplier" | "monthlyValue" | "dueDay" | "endDate" | "totalValue";
 
+type Tab = "month" | "year" | "contracts";
+
 export function ContractsDashboard() {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState<Tab>("month");
+  const [paying, setPaying] = useState<{ contract: Contract; month: string } | null>(null);
   const [filter, setFilter] = useState<Filter>("running");
   const [term, setTerm] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "endDate", dir: 1 });
@@ -200,6 +310,16 @@ export function ContractsDashboard() {
   }
 
   const maxSupplier = bySupplier[0]?.value || 1;
+  const replaceContract = (saved: Contract) =>
+    setData((current) => current && {
+      ...current,
+      contracts: current.contracts.some((entry) => entry.id === saved.id)
+        ? current.contracts.map((entry) => (entry.id === saved.id ? saved : entry))
+        : [...current.contracts, saved],
+    });
+  const thisMonth = monthKey(today());
+  const toPay = contracts.filter((contract) => expectedIn(contract, thisMonth) && !paymentOf(contract, thisMonth));
+  const lateNow = pendingBills(contracts).late.length;
 
   return (
     <div className="ct-page">
@@ -207,6 +327,24 @@ export function ContractsDashboard() {
         <div className="pm-error" role="alert"><AlertTriangle size={16} /><span>{error}</span></div>
       ) : null}
 
+      <div className="ui-tabs" role="tablist" aria-label="Áreas de contratos">
+        {([
+          ["month", "Despesas do mês", Wallet, toPay.length, lateNow ? "atrasadas ou a pagar" : "a pagar neste mês"],
+          ["year", "Controle do ano", CalendarDays, null, ""],
+          ["contracts", "Contratos", FileText, running.length, "em vigor"],
+        ] as [Tab, string, typeof Wallet, number | null, string][]).map(([key, label, Icon, count, hint]) => (
+          <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>
+            <Icon size={16} /> {label}
+            {count !== null ? <b className={key === "month" && lateNow ? "ui-tab-count" : "ui-tab-count zero"} title={`${count} ${hint}`}>{count}</b> : null}
+          </button>
+        ))}
+      </div>
+
+      {tab === "month" ? <MonthTab contracts={contracts} onPay={(contract, month) => setPaying({ contract, month })} onSaved={replaceContract} onOpen={setEditing} /> : null}
+      {tab === "year" ? <YearTab contracts={contracts} onPay={(contract, month) => setPaying({ contract, month })} /> : null}
+
+      {tab === "contracts" ? (
+      <>
       <section className="ct-kpis">
         <div className="ct-kpi">
           <span>Gasto mensal</span>
@@ -372,6 +510,20 @@ export function ContractsDashboard() {
           </table>
         </div>
       </section>
+      </>
+      ) : null}
+
+      {paying ? (
+        <PayModal
+          contract={contracts.find((entry) => entry.id === paying.contract.id) || paying.contract}
+          month={paying.month}
+          onClose={() => setPaying(null)}
+          onSaved={(saved) => {
+            replaceContract(saved);
+            setPaying(null);
+          }}
+        />
+      ) : null}
 
       {editing ? (
         <ContractModal
@@ -380,12 +532,7 @@ export function ContractsDashboard() {
           suppliers={Array.from(new Set(contracts.map((contract) => contract.supplier).filter(Boolean))).sort()}
           onClose={() => setEditing(null)}
           onSaved={(saved) => {
-            setData((current) => current && {
-              ...current,
-              contracts: current.contracts.some((entry) => entry.id === saved.id)
-                ? current.contracts.map((entry) => (entry.id === saved.id ? saved : entry))
-                : [...current.contracts, saved],
-            });
+            replaceContract(saved);
             setEditing((current) => (current && current !== "new" ? saved : current));
           }}
           onDeleted={(id) => {
@@ -529,17 +676,9 @@ function ContractModal({
 
   async function openFile(file: Attachment) {
     if (!contract) return;
-    // O download precisa do token: busca o arquivo e abre numa aba nova.
-    const tab = window.open("", "_blank");
     try {
-      const response = await fetch(`${API_BASE}/api/contracts/${contract.id}/files/${file.id}`, { headers: { Authorization: `Bearer ${authToken()}` } });
-      if (!response.ok) throw new Error("Não foi possível abrir o anexo.");
-      const url = URL.createObjectURL(await response.blob());
-      if (tab) tab.location.href = url;
-      else window.location.href = url;
-      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      await openAttachment(contract.id, file.id);
     } catch (openError) {
-      tab?.close();
       setMessage(openError instanceof Error ? openError.message : "Não foi possível abrir o anexo.");
     }
   }
@@ -615,6 +754,403 @@ function ContractModal({
             {contract ? <button type="button" className="ct-danger" disabled={Boolean(busy)} onClick={remove}><Trash2 size={14} /> Excluir</button> : <span />}
             {contract ? <small className="ct-muted">Alterado em {new Date(contract.updatedAt).toLocaleString("pt-BR")} por {contract.updatedBy}</small> : null}
             <button type="submit" className="ct-primary" disabled={Boolean(busy)}>{busy === "save" ? "Salvando..." : "Salvar"}</button>
+          </footer>
+        </form>
+      </div>
+    </>
+  );
+}
+
+/* ---------- Despesas do mes ---------- */
+type MonthFilter = "all" | "open" | "late" | "paid";
+
+function MonthTab({ contracts, onPay, onSaved, onOpen }: { contracts: Contract[]; onPay: (contract: Contract, month: string) => void; onSaved: (contract: Contract) => void; onOpen: (contract: Contract) => void }) {
+  const [month, setMonth] = useState(() => monthKey(today()));
+  const [filter, setFilter] = useState<MonthFilter>("all");
+  const [term, setTerm] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    setSelected(new Set());
+    setMessage(null);
+  }, [month]);
+
+  const items = useMemo(
+    () =>
+      contracts
+        .filter((contract) => expectedIn(contract, month))
+        .map((contract) => ({ contract, bill: billOf(contract, month, trackingStart(contracts)), payment: paymentOf(contract, month), due: dueDateOf(contract, month) }))
+        .sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.contract.title.localeCompare(b.contract.title, "pt-BR")),
+    [contracts, month],
+  );
+  type Item = (typeof items)[number];
+  const paid = items.filter((item) => item.payment);
+  const unpaid = items.filter((item) => !item.payment);
+  const late = unpaid.filter((item) => item.bill.key === "late" || item.bill.key === "today");
+  const expectedTotal = items.reduce((sum, item) => sum + (item.contract.monthlyValue ?? item.payment?.amount ?? 0), 0);
+  const paidTotal = paid.reduce((sum, item) => sum + (item.payment?.amount || 0), 0);
+  const openTotal = unpaid.reduce((sum, item) => sum + (item.contract.monthlyValue ?? 0), 0);
+  const variable = unpaid.filter((item) => item.contract.monthlyValue === null).length;
+  // Em lote so vai quem tem valor conhecido (o variavel pede o valor na janela).
+  const selectable = (item: Item) => !item.payment && suggestedAmount(item.contract) !== null;
+
+  const search = term.trim().toLowerCase();
+  const rows = items
+    .filter((item) => filter === "all" || (filter === "paid" ? item.payment : filter === "late" ? !item.payment && (item.bill.key === "late" || item.bill.key === "today") : !item.payment))
+    .filter((item) => !search || `${item.contract.title} ${item.contract.supplier} ${item.payment?.reference || ""}`.toLowerCase().includes(search));
+  const chosen = rows.filter((item) => selected.has(item.contract.id) && selectable(item));
+
+  async function payMany() {
+    const day = today();
+    const paidAt = `${day.getFullYear()}-${pad2(day.getMonth() + 1)}-${pad2(day.getDate())}`;
+    setBusy(true);
+    setMessage(null);
+    let done = 0;
+    try {
+      for (const item of chosen) {
+        onSaved(await api<Contract>(`/api/contracts/${item.contract.id}/payments/${month}`, "PUT", { paidAt, amount: suggestedAmount(item.contract) }));
+        done += 1;
+      }
+      setMessage({ ok: true, text: `${done} ${done === 1 ? "despesa marcada como paga" : "despesas marcadas como pagas"} em ${fmtDate(paidAt)}, com o valor do contrato.` });
+      setSelected(new Set());
+    } catch (payError) {
+      setMessage({ ok: false, text: `${done} marcada(s); parou com erro: ${payError instanceof Error ? payError.message : "falha ao salvar"}` });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const toggle = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allChosen = rows.filter(selectable).length > 0 && rows.filter(selectable).every((item) => selected.has(item.contract.id));
+
+  return (
+    <>
+      <section className="ct-month-bar">
+        <button type="button" className="pm-icon-btn" aria-label="Mês anterior" onClick={() => setMonth(shiftMonth(month, -1))}><ChevronLeft size={18} /></button>
+        <h2>{monthTitle(month)}</h2>
+        <button type="button" className="pm-icon-btn" aria-label="Próximo mês" onClick={() => setMonth(shiftMonth(month, 1))}><ChevronRight size={18} /></button>
+        {month !== monthKey(today()) ? <button type="button" className="ct-secondary" onClick={() => setMonth(monthKey(today()))}>Mês atual</button> : null}
+      </section>
+
+      <section className="ct-kpis">
+        <div className="ct-kpi">
+          <span>Previsto no mês</span>
+          <strong>{brl.format(expectedTotal)}</strong>
+          <small>{items.length} {items.length === 1 ? "despesa" : "despesas"}{variable ? ` · ${variable} de valor variável` : ""}</small>
+        </div>
+        <div className={`ct-kpi${items.length && paid.length === items.length ? " tone-good" : ""}`}>
+          <span>Pago</span>
+          <strong>{brl.format(paidTotal)}</strong>
+          <small>{paid.length} de {items.length} despesas</small>
+        </div>
+        <div className={`ct-kpi${unpaid.length ? " tone-warning" : ""}`}>
+          <span>Falta pagar</span>
+          <strong>{brl.format(openTotal)}</strong>
+          <small>{unpaid.length} {unpaid.length === 1 ? "despesa" : "despesas"}{variable ? " (sem contar as de valor variável)" : ""}</small>
+        </div>
+        <div className={`ct-kpi${late.length ? " tone-critical" : ""}`}>
+          <span>Atrasadas</span>
+          <strong>{late.length}</strong>
+          <small>{late.length ? late.slice(0, 2).map((item) => item.contract.supplier || item.contract.title).join(", ") : "nenhuma vencida sem pagamento"}</small>
+        </div>
+      </section>
+
+      <section className="ct-table-card">
+        <div className="ct-toolbar">
+          <div className="ct-filters" role="group" aria-label="Filtrar despesas">
+            {([
+              ["all", "Todas", items.length],
+              ["open", "A pagar", unpaid.length],
+              ["late", "Atrasadas", late.length],
+              ["paid", "Pagas", paid.length],
+            ] as [MonthFilter, string, number][]).map(([key, label, count]) => (
+              <button key={key} type="button" aria-pressed={filter === key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>
+                {label} <small>{count}</small>
+              </button>
+            ))}
+          </div>
+          <label className="pm-search">
+            <Search size={16} />
+            <input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Buscar contrato, fornecedor ou nº da NF" />
+          </label>
+          {chosen.length ? (
+            <button type="button" className="ct-primary" disabled={busy} onClick={payMany}>
+              <ListChecks size={16} /> {busy ? "Salvando..." : `Marcar ${chosen.length} como ${chosen.length === 1 ? "paga" : "pagas"} hoje`}
+            </button>
+          ) : null}
+        </div>
+        {message ? <p className={`ct-message${message.ok ? " ok" : ""}`} role={message.ok ? "status" : "alert"}>{message.text}</p> : null}
+
+        <div className="ct-table-wrap">
+          <table className="ct-table ct-bills">
+            <thead>
+              <tr>
+                <th className="ct-select">
+                  <input
+                    type="checkbox"
+                    aria-label="Selecionar todas as despesas a pagar"
+                    checked={allChosen}
+                    onChange={(event) => setSelected(event.target.checked ? new Set(rows.filter(selectable).map((item) => item.contract.id)) : new Set())}
+                  />
+                </th>
+                <th>Contrato</th>
+                <th>Vencimento</th>
+                <th className="num">Valor</th>
+                <th>Situação</th>
+                <th>Pagamento</th>
+                <th aria-label="Ação" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((item) => {
+                const { contract, bill, payment, due } = item;
+                return (
+                  <tr key={contract.id} className={payment ? "ct-bill-paid" : ""}>
+                    <td className="ct-select">
+                      {selectable(item) ? <input type="checkbox" aria-label={`Selecionar ${contract.title}`} checked={selected.has(contract.id)} onChange={() => toggle(contract.id)} /> : null}
+                    </td>
+                    <td>
+                      <button type="button" className="ct-title ct-link-title" onClick={() => onOpen(contract)}>{contract.title}</button>
+                      <small className="ct-cat">{[contract.supplier, contract.category].filter(Boolean).join(" · ")}</small>
+                    </td>
+                    <td className="ct-dates">{due ? fmtDate(due) : "sem dia"}</td>
+                    <td className="num">{contract.monthlyValue === null ? <span className="ct-muted">variável</span> : money(contract.monthlyValue)}</td>
+                    <td><span className={`ct-pill tone-${bill.tone}`}>{bill.key === "paid" ? <><CheckCircle2 size={12} /> Paga</> : bill.label}</span></td>
+                    <td className="ct-paid-cell">
+                      {payment ? (
+                        <>
+                          <strong>{fmtDate(payment.paidAt)} · {money(payment.amount)}</strong>
+                          <small>
+                            {[payment.reference ? `NF/lanç. ${payment.reference}` : "", payment.by].filter(Boolean).join(" · ")}
+                            {payment.fileId ? (
+                              <button type="button" className="ct-link" onClick={() => openAttachment(contract.id, payment.fileId).catch(() => setMessage({ ok: false, text: "Não foi possível abrir o comprovante." }))}>
+                                <Paperclip size={12} /> comprovante
+                              </button>
+                            ) : null}
+                          </small>
+                        </>
+                      ) : (
+                        <span className="ct-muted">—</span>
+                      )}
+                    </td>
+                    <td className="ct-actions">
+                      {payment ? (
+                        <button type="button" className="ct-link" onClick={() => onPay(contract, month)}>Ver / editar</button>
+                      ) : (
+                        <button type="button" className="ct-secondary ct-small" onClick={() => onPay(contract, month)}><CheckCircle2 size={14} /> Marcar como pago</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!rows.length ? <tr><td colSpan={7} className="ct-empty-row">{items.length ? "Nenhuma despesa neste filtro." : "Nenhum contrato gera despesa neste mês."}</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
+/* ---------- Controle do ano (no lugar da planilha) ---------- */
+const BILL_MARK: Record<BillKey, string> = { paid: "✓", late: "!", today: "!", soon: "•", open: "○", future: "○", before: "·" };
+
+function YearTab({ contracts, onPay }: { contracts: Contract[]; onPay: (contract: Contract, month: string) => void }) {
+  const [year, setYear] = useState(() => today().getFullYear());
+  const start = trackingStart(contracts);
+  const months = Array.from({ length: 12 }, (_, index) => `${year}-${pad2(index + 1)}`);
+  const rows = contracts.filter((contract) => months.some((month) => expectedIn(contract, month))).sort((a, b) => a.title.localeCompare(b.title, "pt-BR", { numeric: true }));
+  const paidIn = (contract: Contract, month: string) => paymentOf(contract, month)?.amount || 0;
+  const monthTotals = months.map((month) => rows.reduce((sum, contract) => sum + paidIn(contract, month), 0));
+  const lateCount = rows.reduce((sum, contract) => sum + months.filter((month) => expectedIn(contract, month) && billOf(contract, month, start).key === "late").length, 0);
+
+  async function exportExcel() {
+    const XLSX = await import("xlsx");
+    const head = ["Contrato", "Fornecedor", "Valor mensal", ...months.map((month) => `${MONTH_SHORT[Number(month.slice(5)) - 1]}/${year}`), `Total pago ${year}`];
+    const body = rows.map((contract) => [
+      contract.title,
+      contract.supplier,
+      contract.monthlyValue ?? "variável",
+      ...months.map((month) => {
+        if (!expectedIn(contract, month)) return "";
+        const payment = paymentOf(contract, month);
+        if (payment) return `pago ${fmtDate(payment.paidAt)} · ${brl.format(payment.amount)}${payment.reference ? ` · NF ${payment.reference}` : ""}`;
+        const key = billOf(contract, month, start).key;
+        return key === "late" ? "ATRASADO" : key === "before" ? "antes do controle" : "a pagar";
+      }),
+      months.reduce((sum, month) => sum + paidIn(contract, month), 0),
+    ]);
+    const sheet = XLSX.utils.aoa_to_sheet([head, ...body, ["Total pago no mês", "", "", ...monthTotals, monthTotals.reduce((sum, value) => sum + value, 0)]]);
+    sheet["!cols"] = [{ wch: 40 }, { wch: 22 }, { wch: 12 }, ...months.map(() => ({ wch: 30 })), { wch: 16 }];
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, `Despesas ${year}`);
+    XLSX.writeFile(book, `despesas-contratos-${year}.xlsx`);
+  }
+
+  return (
+    <section className="ct-table-card">
+      <div className="ct-toolbar">
+        <div className="ct-month-bar compact">
+          <button type="button" className="pm-icon-btn" aria-label="Ano anterior" onClick={() => setYear(year - 1)}><ChevronLeft size={18} /></button>
+          <h2>{year}</h2>
+          <button type="button" className="pm-icon-btn" aria-label="Próximo ano" onClick={() => setYear(year + 1)}><ChevronRight size={18} /></button>
+        </div>
+        <p className="ct-year-legend">
+          <span className="ct-y paid">✓</span> paga <span className="ct-y late">!</span> atrasada <span className="ct-y soon">•</span> vence em até 5 dias <span className="ct-y open">○</span> a pagar <span className="ct-y before">·</span> antes do controle ({monthTitle(start).toLowerCase()}) <span className="ct-y none">–</span> fora da vigência
+          {lateCount ? <b className="ct-year-late"> · {lateCount} {lateCount === 1 ? "atrasada" : "atrasadas"}</b> : null}
+        </p>
+        <button type="button" className="ct-secondary" onClick={exportExcel} disabled={!rows.length}><Download size={15} /> Exportar Excel</button>
+      </div>
+      <div className="ct-table-wrap">
+        <table className="ct-table ct-year">
+          <thead>
+            <tr>
+              <th>Contrato</th>
+              {months.map((month, index) => <th key={month} className={month === monthKey(today()) ? "current" : undefined}>{MONTH_SHORT[index]}</th>)}
+              <th className="num">Pago no ano</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((contract) => (
+              <tr key={contract.id}>
+                <td>
+                  <strong className="ct-title">{contract.title}</strong>
+                  <small className="ct-cat">{contract.supplier} · {contract.monthlyValue === null ? "valor variável" : `${money(contract.monthlyValue)}/mês`}</small>
+                </td>
+                {months.map((month) => {
+                  if (!expectedIn(contract, month)) return <td key={month} className="ct-y-cell"><span className="ct-y none" title="Fora da vigência">–</span></td>;
+                  const bill = billOf(contract, month, start);
+                  const payment = paymentOf(contract, month);
+                  const title = payment ? `Pago em ${fmtDate(payment.paidAt)} · ${brl.format(payment.amount)}${payment.reference ? ` · NF ${payment.reference}` : ""}` : bill.label;
+                  return (
+                    <td key={month} className={`ct-y-cell${month === monthKey(today()) ? " current" : ""}`}>
+                      <button type="button" className={`ct-y ${bill.key === "today" ? "late" : bill.key === "future" ? "open" : bill.key}`} title={`${monthTitle(month)}: ${title}`} aria-label={`${contract.title}, ${monthTitle(month)}: ${title}`} onClick={() => onPay(contract, month)}>
+                        {BILL_MARK[bill.key]}
+                      </button>
+                    </td>
+                  );
+                })}
+                <td className="num">{brl.format(months.reduce((sum, month) => sum + paidIn(contract, month), 0))}</td>
+              </tr>
+            ))}
+            {!rows.length ? <tr><td colSpan={14} className="ct-empty-row">Nenhum contrato com despesa em {year}.</td></tr> : null}
+          </tbody>
+          {rows.length ? (
+            <tfoot>
+              <tr>
+                <td>Total pago</td>
+                {monthTotals.map((total, index) => <td key={months[index]} className="num ct-y-total">{total ? brlShort.format(total) : "—"}</td>)}
+                <td className="num">{brl.format(monthTotals.reduce((sum, value) => sum + value, 0))}</td>
+              </tr>
+            </tfoot>
+          ) : null}
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/* ---------- Janela: marcar a despesa do mes como paga ---------- */
+function PayModal({ contract, month, onClose, onSaved }: { contract: Contract; month: string; onClose: () => void; onSaved: (contract: Contract) => void }) {
+  const existing = paymentOf(contract, month);
+  const due = dueDateOf(contract, month);
+  const day = today();
+  const [form, setForm] = useState(() => ({
+    paidAt: existing?.paidAt || `${day.getFullYear()}-${pad2(day.getMonth() + 1)}-${pad2(day.getDate())}`,
+    amount: toInput(existing?.amount ?? suggestedAmount(contract)),
+    reference: existing?.reference || "",
+    note: existing?.note || "",
+  }));
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const set = (patch: Partial<typeof form>) => setForm((current) => ({ ...current, ...patch }));
+  const receipt = existing?.fileId ? contract.attachments.find((entry) => entry.id === existing.fileId) : null;
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    const amount = fromInput(form.amount);
+    if (amount === null || Number.isNaN(amount) || amount <= 0) {
+      setMessage("Informe o valor pago (ex.: 3.800,00).");
+      return;
+    }
+    setBusy("save");
+    setMessage("");
+    try {
+      let fileId = existing?.fileId || "";
+      if (file) {
+        if (file.size > 8 * 1024 * 1024) throw new Error(`${file.name}: máximo 8 MB.`);
+        const before = new Set(contract.attachments.map((entry) => entry.id));
+        // O comprovante vira anexo do contrato (fica junto do PDF do contrato e dos aditivos).
+        const withFile = await api<Contract>(`/api/contracts/${contract.id}/files`, "POST", { name: `${month} - ${file.name}`, mimeType: file.type, data: await readFile(file) });
+        fileId = withFile.attachments.find((entry) => !before.has(entry.id))?.id || "";
+      }
+      onSaved(await api<Contract>(`/api/contracts/${contract.id}/payments/${month}`, "PUT", { ...form, amount, fileId }));
+    } catch (saveError) {
+      setMessage(saveError instanceof Error ? saveError.message : "Não foi possível salvar.");
+      setBusy("");
+    }
+  }
+
+  async function undo() {
+    if (!window.confirm(`Desfazer o pagamento de ${monthTitle(month).toLowerCase()} de "${contract.title}"? A despesa volta para "a pagar".`)) return;
+    setBusy("undo");
+    try {
+      onSaved(await api<Contract>(`/api/contracts/${contract.id}/payments/${month}`, "DELETE"));
+    } catch (undoError) {
+      setMessage(undoError instanceof Error ? undoError.message : "Não foi possível desfazer.");
+      setBusy("");
+    }
+  }
+
+  return (
+    <>
+      <div className="ct-backdrop" onClick={onClose} />
+      <div className="ct-modal ct-pay-modal" role="dialog" aria-modal="true" aria-label={`Despesa de ${monthTitle(month)}`}>
+        <header>
+          <div>
+            <p className="eyebrow">Despesa de {monthTitle(month).toLowerCase()}</p>
+            <h3>{contract.title}</h3>
+            <small className="ct-muted">
+              {[contract.supplier, due ? `vence ${fmtDate(due)}` : "sem dia de vencimento", contract.monthlyValue === null ? "valor variável" : `previsto ${money(contract.monthlyValue)}`].filter(Boolean).join(" · ")}
+            </small>
+          </div>
+          <button type="button" className="pm-icon-btn" aria-label="Fechar" onClick={onClose}><X size={18} /></button>
+        </header>
+        <form onSubmit={save} className="ct-form">
+          <label><span>Data do pagamento</span><input type="date" value={form.paidAt} required onChange={(event) => set({ paidAt: event.target.value })} /></label>
+          <label><span>Valor pago (R$)</span><input value={form.amount} inputMode="decimal" placeholder="3.800,00" required autoFocus onChange={(event) => set({ amount: event.target.value })} /></label>
+          <label className="wide"><span>Nº da NF ou do lançamento (opcional)</span><input value={form.reference} maxLength={60} placeholder="Ex.: NF 12345 · lançamento 48213" onChange={(event) => set({ reference: event.target.value })} /></label>
+          <label className="wide"><span>Observação (opcional)</span><input value={form.note} maxLength={300} placeholder="Ex.: reajuste de 5% a partir deste mês" onChange={(event) => set({ note: event.target.value })} /></label>
+          <div className="wide ct-files">
+            <span className="ct-files-head"><Paperclip size={15} /> Comprovante ou NF (opcional)</span>
+            {receipt ? (
+              <button type="button" className="ct-link" onClick={() => openAttachment(contract.id, receipt.id).catch(() => setMessage("Não foi possível abrir o comprovante."))}>
+                <FileText size={14} /> {receipt.name}
+              </button>
+            ) : null}
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+            <small className="ct-muted">{receipt ? "Envie outro arquivo para trocar. " : ""}PDF, JPG ou PNG até 8 MB; fica também nos anexos do contrato.</small>
+          </div>
+          {existing ? <small className="wide ct-muted">Marcado como pago por {existing.by} em {new Date(existing.at).toLocaleString("pt-BR")}.</small> : null}
+          {message ? <p className="wide ct-message">{message}</p> : null}
+          <footer className="wide">
+            {existing ? <button type="button" className="ct-danger" disabled={Boolean(busy)} onClick={undo}><Undo2 size={14} /> Desfazer pagamento</button> : <span />}
+            <button type="submit" className="ct-primary" disabled={Boolean(busy)}><CheckCircle2 size={15} /> {busy === "save" ? "Salvando..." : existing ? "Salvar" : "Marcar como pago"}</button>
           </footer>
         </form>
       </div>

@@ -15569,6 +15569,193 @@ p.win10-effects {
   color: #ffb4ae;
 }
 
+/* ---------- Contratos: despesas do mes e controle do ano ---------- */
+.ct-kpi.tone-good {
+  border-left-color: var(--success);
+}
+
+.ct-month-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ct-month-bar h2 {
+  min-width: 200px;
+  margin: 0;
+  color: var(--heading);
+  font-size: 20px;
+  text-align: center;
+}
+
+.ct-month-bar.compact h2 {
+  min-width: 70px;
+  font-size: 17px;
+}
+
+.ct-small {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ct-bills tbody tr {
+  cursor: default;
+}
+
+.ct-bills .ct-select {
+  width: 32px;
+}
+
+.ct-bills tr.ct-bill-paid td {
+  background: color-mix(in srgb, var(--success-soft) 45%, transparent);
+}
+
+.ct-link-title {
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.ct-link-title:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.ct-bills .ct-pill {
+  gap: 4px;
+}
+
+.ct-paid-cell strong {
+  display: block;
+  color: var(--heading);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.ct-paid-cell small {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--muted-2);
+  font-size: 11.5px;
+}
+
+.ct-actions {
+  text-align: right;
+}
+
+.ct-pay-modal header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.ct-pay-modal header h3 {
+  margin: 0;
+}
+
+.ct-pay-modal .eyebrow {
+  margin: 0;
+}
+
+.ct-year-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin: 0 auto 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ct-year-late {
+  color: var(--danger-ink);
+}
+
+.ct-year th,
+.ct-year td {
+  padding: 8px 6px;
+}
+
+.ct-year tbody tr {
+  cursor: default;
+}
+
+.ct-year th.current,
+.ct-year td.current {
+  background: var(--info-soft);
+}
+
+.ct-y-cell {
+  text-align: center;
+}
+
+.ct-y {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+button.ct-y {
+  cursor: pointer;
+}
+
+button.ct-y:hover {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ct-y.paid {
+  color: var(--success-ink);
+  background: var(--success-soft);
+  border-color: var(--success-border);
+}
+
+.ct-y.late {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+.ct-y.soon {
+  color: var(--warning-ink);
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+}
+
+.ct-y.open {
+  color: var(--muted);
+  background: var(--surface);
+  border-color: var(--border-strong);
+}
+
+.ct-y.none {
+  color: var(--muted-3);
+}
+
+.ct-y.before {
+  color: var(--muted-3);
+  background: var(--surface-2);
+  border-color: var(--border-soft);
+}
+
+.ct-y-total {
+  font-size: 11.5px;
+}
+
 /* Impressao (relatorio do inventario): so o conteudo, sem menu nem botoes. */
 @media print {
   .sidebar,

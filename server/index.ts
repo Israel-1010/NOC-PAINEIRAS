@@ -130,7 +130,7 @@ import { allowTvKey, createTvKey, listTvKeys, revokeTvKey } from "./tvKeys";
 import { getUnifiSettings, getUnifiTopology, saveUnifiSettings, testUnifi } from "./unifiClient";
 import { createDevice, deleteDevice, listDevices, updateDevice } from "./devices";
 import { readItemImage, removeItemImage, uploadItemImage } from "./projectImages";
-import { addAttachment, createContract, deleteContract, listContracts, readAttachment, removeAttachment, updateContract } from "./contractStore";
+import { addAttachment, createContract, deleteContract, listContracts, readAttachment, removeAttachment, removePayment, savePayment, updateContract } from "./contractStore";
 import { addInventoryException, getInventory, removeInventoryException } from "./inventory";
 import { getSurvey, importSurveySheet } from "./inventorySurvey";
 import { installCrashGuards, recordError, runtimeInfo, startedAt } from "./runtimeHealth";
@@ -674,6 +674,9 @@ app.patch("/api/contracts/:id", asyncRoute((req) => updateContract(String(req.pa
 app.delete("/api/contracts/:id", asyncRoute((req) => deleteContract(String(req.params.id))));
 app.post("/api/contracts/:id/files", asyncRoute((req) => addAttachment(String(req.params.id), req.body, req.res?.locals.user)));
 app.delete("/api/contracts/:id/files/:fileId", asyncRoute((req) => removeAttachment(String(req.params.id), String(req.params.fileId))));
+// Despesa do mes: marcar como paga (data, valor, NF/lancamento, comprovante) e desfazer.
+app.put("/api/contracts/:id/payments/:month", asyncRoute((req) => savePayment(String(req.params.id), String(req.params.month), req.body || {}, req.res?.locals.user)));
+app.delete("/api/contracts/:id/payments/:month", asyncRoute((req) => removePayment(String(req.params.id), String(req.params.month))));
 app.get("/api/contracts/:id/files/:fileId", async (req, res) => {
   try {
     const { file, content } = await readAttachment(String(req.params.id), String(req.params.fileId));

@@ -60,7 +60,7 @@ import { AccessDashboard } from "./access";
 import { DiagnosticsDashboard } from "./diagnostics";
 import { LinksDashboard } from "./links";
 import { NocWall } from "./noc";
-import { ContractsDashboard } from "./contracts";
+import { ContractsDashboard, pendingBills } from "./contracts";
 import { DefenderDashboard } from "./defender";
 import { InventoryDashboard } from "./inventory";
 import { UnifiTopology } from "./unifiTopology";
@@ -2241,6 +2241,7 @@ function HomeDashboard({
   const [links, setLinks] = useState<TvZabbixLink[] | null>(null);
   const [defender, setDefender] = useState<{ unassigned: number; high: number } | null>(null);
   const [contracts, setContracts] = useState<{ title: string; days: number }[] | null>(null);
+  const [bills, setBills] = useState<ReturnType<typeof pendingBills> | null>(null);
   const [checkedAt, setCheckedAt] = useState(() => new Date());
   const canLinks = canView("links") || canView("tv");
   const canDefender = canView("defender");
@@ -2283,9 +2284,10 @@ function HomeDashboard({
     }
     if (canContracts) {
       authFetch("/api/contracts")
-        .then((response) => (response.ok ? parseApiPayload<{ contracts?: { title: string; endDate: string; active: boolean }[] }>(response, {}) : null))
+        .then((response) => (response.ok ? parseApiPayload<{ contracts?: Parameters<typeof pendingBills>[0] }>(response, {}) : null))
         .then((payload) => {
           const today = new Date(new Date().toDateString()).getTime();
+          setBills(pendingBills(payload?.contracts || []));
           setContracts(
             (payload?.contracts || [])
               .filter((contract) => contract.active && contract.endDate)
@@ -2332,6 +2334,27 @@ function HomeDashboard({
   }
   if (canView("snmp") && snmpSummary.offline) {
     items.push({ key: "snmp", tone: "warn", title: `${snmpSummary.offline} ${snmpSummary.offline === 1 ? "equipamento SNMP sem resposta" : "equipamentos SNMP sem resposta"}`, detail: "coleta do portal", action: "Ver", view: "snmp" });
+  }
+  // Despesas dos contratos: atrasadas e vencendo em ate 5 dias sem pagamento marcado.
+  if (bills?.late.length) {
+    items.push({
+      key: "bills-late",
+      tone: "danger",
+      title: `${bills.late.length} ${bills.late.length === 1 ? "despesa de contrato atrasada" : "despesas de contrato atrasadas"}`,
+      detail: bills.late.slice(0, 2).map((bill) => `${bill.title} (${bill.days ? `${bill.days} dias` : "mês passado"})`).join(", "),
+      action: "Marcar pagamento",
+      view: "contracts",
+    });
+  }
+  if (bills?.soon.length) {
+    items.push({
+      key: "bills-soon",
+      tone: "warn",
+      title: `${bills.soon.length} ${bills.soon.length === 1 ? "despesa vence" : "despesas vencem"} em até 5 dias`,
+      detail: bills.soon.slice(0, 2).map((bill) => `${bill.title} (${bill.days === 0 ? "hoje" : `${bill.days} dias`})`).join(", "),
+      action: "Ver despesas",
+      view: "contracts",
+    });
   }
   const overdue = (contracts || []).filter((contract) => contract.days < 0);
   const dueSoon = (contracts || []).filter((contract) => contract.days >= 0);
